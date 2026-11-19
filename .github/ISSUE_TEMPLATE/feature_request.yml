@@ -1,0 +1,16 @@
+name: Feature request
+description: Suggest an improvement
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+    validations: { required: true }
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed behaviour
+  - type: markdown
+    attributes:
+      value: Admin features are out of scope; Dispatcharr's web UI is the admin console.

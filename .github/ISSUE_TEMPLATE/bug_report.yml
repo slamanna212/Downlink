@@ -1,0 +1,36 @@
+name: Bug report
+description: Something is broken
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Downlink version
+      description: Settings -> About, including channel (stable or dev)
+    validations: { required: true }
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, macOS, "Linux (X11)", "Linux (Wayland)"]
+    validations: { required: true }
+  - type: dropdown
+    id: source
+    attributes:
+      label: Source type
+      options: [Dispatcharr, Xtream, M3U/XMLTV, Not source related]
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: textarea
+    id: logs
+    attributes:
+      label: Diagnostics
+      description: Paste from the debug panel. Logs are redacted, but check for anything private before posting.
+      render: text
