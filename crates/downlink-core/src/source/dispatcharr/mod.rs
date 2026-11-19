@@ -918,6 +918,23 @@ impl DispatcharrClient {
         Ok(())
     }
 
+    /// `DELETE /api/proxy/hls/sessions/{token}/`. Idempotent (404 means already gone).
+    pub async fn delete_hls_session(&self, token: &str) -> Result<()> {
+        let r = self
+            .call(
+                Method::DELETE,
+                &format!("api/proxy/hls/sessions/{token}/"),
+                &[],
+                None,
+            )
+            .await?;
+        if r.status == StatusCode::NOT_FOUND {
+            return Ok(());
+        }
+        r.ok("that HLS session")?;
+        Ok(())
+    }
+
     // ---- app data ---------------------------------------------------------------------------
 
     pub async fn app_data_get(&self, key: &str) -> Result<Option<Value>> {
@@ -1036,6 +1053,19 @@ pub fn build_live_plan(
         needs_redirect_resolve: ch.stream_mode != StreamMode::Proxy,
         unknown_profile: ch.stream_mode == StreamMode::Unknown,
     })
+}
+
+#[async_trait]
+impl crate::sessions::SessionStopper for DispatcharrClient {
+    async fn stop(&self, _source_id: i64, kind: &str, session_id: &str) -> Result<()> {
+        match kind {
+            crate::sessions::KIND_CATCHUP => {
+                self.delete_catchup(&SessionId(session_id.to_owned())).await
+            }
+            crate::sessions::KIND_HLS => self.delete_hls_session(session_id).await,
+            _ => Ok(()),
+        }
+    }
 }
 
 #[async_trait]

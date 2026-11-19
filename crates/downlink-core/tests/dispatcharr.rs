@@ -803,3 +803,56 @@ async fn endpoint_programme_search() {
         (Some(1), Some(6), downlink_core::source::flags::NEW)
     );
 }
+
+#[tokio::test]
+async fn endpoint_hls_session_delete_and_crash_cleanup_end_to_end() {
+    use downlink_core::sessions::{self, KIND_CATCHUP, KIND_HLS};
+    let server = MockServer::start().await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/proxy/hls/sessions/tok1/"))
+        .and(header("X-API-Key", KEY))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/catchup/sessions/sessA/"))
+        .and(header("X-API-Key", KEY))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/proxy/hls/sessions/gone/"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let store = downlink_core::store::Store::open_memory().await.unwrap();
+    let src = store
+        .insert_source(&downlink_core::store::NewSource {
+            kind: "dispatcharr".into(),
+            name: "T".into(),
+            base_url: None,
+            secret_ref: None,
+            username: None,
+            tls_insecure: false,
+            created_at: 1,
+        })
+        .await
+        .unwrap();
+    for (k, id) in [
+        (KIND_HLS, "tok1"),
+        (KIND_CATCHUP, "sessA"),
+        (KIND_HLS, "gone"),
+    ] {
+        sessions::track(&store, src.id, k, id).await.unwrap();
+    }
+    // "next start": everything persisted is deleted; an already-gone session counts as stopped.
+    let r = sessions::cleanup_on_startup(&store, &client(&server))
+        .await
+        .unwrap();
+    assert_eq!((r.stopped, r.failed), (3, 0));
+    assert!(store.list_open_sessions().await.unwrap().is_empty());
+}

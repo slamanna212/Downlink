@@ -7,6 +7,7 @@ pub mod error;
 pub mod images;
 pub mod normalise;
 pub mod redact;
+pub mod sessions;
 pub mod source;
 pub mod store;
 pub mod sync;
