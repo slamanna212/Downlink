@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/downlink-core",
+  "crates/downlink-player",
+  "crates/downlink-platform",
+  "crates/downlink-cli",
+  "apps/desktop",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/slamanna212/Downlink"
+rust-version = "1.88"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
