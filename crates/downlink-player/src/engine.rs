@@ -75,6 +75,7 @@ impl Engine {
     /// Create, configure (`options` before init) and initialise an mpv instance.
     pub fn new(loaded: &LoadedMpv, options: &[(String, String)]) -> Result<Self, PlayerError> {
         let api = loaded.api.clone();
+        force_c_numeric_locale();
         // SAFETY: `mpv_create` has no preconditions; a null return is handled.
         let handle = unsafe { (api.create)() };
         if handle.is_null() {
@@ -431,5 +432,19 @@ impl Drop for RenderContext {
             (self.engine.api.render_context_free)(self.ctx);
         }
         self.callback = None;
+    }
+}
+
+/// libmpv refuses to run unless `LC_NUMERIC` is "C"; GTK and friends reset it from the environment.
+fn force_c_numeric_locale() {
+    #[cfg(unix)]
+    {
+        unsafe extern "C" {
+            fn setlocale(category: c_int, locale: *const c_char) -> *mut c_char;
+        }
+        const LC_NUMERIC: c_int = if cfg!(target_os = "macos") { 4 } else { 1 };
+        // SAFETY: setlocale with a valid category and a NUL-terminated string; called during
+        // setup on the main thread before other threads read locale state.
+        unsafe { setlocale(LC_NUMERIC, c"C".as_ptr()) };
     }
 }

@@ -8,3 +8,4 @@ storybook-static/
 .DS_Store
 /tools/mpv/out/
 /tools/fixtures/media/
+apps/desktop/gen/

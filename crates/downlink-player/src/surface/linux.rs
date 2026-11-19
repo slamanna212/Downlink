@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::ffi::{c_char, c_void};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use gtk::glib;
 use gtk::glib::translate::ToGlibPtr;
@@ -92,11 +93,21 @@ thread_local! {
 pub struct LinuxSurface {
     engine: Arc<Engine>,
     dispatch: MainThreadDispatch,
+    frames: Arc<AtomicU64>,
 }
 
 impl LinuxSurface {
     pub fn new(engine: Arc<Engine>, dispatch: MainThreadDispatch) -> Self {
-        Self { engine, dispatch }
+        Self {
+            engine,
+            dispatch,
+            frames: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// Number of frames rendered into the GLArea so far (for FPS measurement).
+    pub fn render_count(&self) -> u64 {
+        self.frames.load(Ordering::Relaxed)
     }
 }
 
@@ -223,6 +234,7 @@ impl VideoSurface for LinuxSurface {
             let render = render.clone();
             let loader_keepalive = loader.clone();
             let gl_get = gl_get_integerv.clone();
+            let frames = self.frames.clone();
             glarea.connect_render(move |area, _ctx| {
                 let _keep = &loader_keepalive;
                 if let Some(rc) = render.borrow().as_ref() {
@@ -242,6 +254,7 @@ impl VideoSurface for LinuxSurface {
                         tracing::warn!("mpv render failed: {e}");
                     }
                     rc.report_swap();
+                    frames.fetch_add(1, Ordering::Relaxed);
                 }
                 glib::Propagation::Stop
             });

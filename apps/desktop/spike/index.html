@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Downlink M0 spike</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; font: 13px system-ui, sans-serif; color: #f2f2f7; }
+  #shell { display: flex; flex-direction: column; height: 100%; }
+  header { background: #15151d; padding: 8px 12px; display: flex; gap: 12px; align-items: center; }
+  header b { color: #b6a6ff; }
+  #stage { position: relative; flex: 1; min-height: 0; }
+  /* The video rect: MUST stay transparent so the native surface underneath shows through. */
+  #video { position: absolute; inset: 0; background: transparent; outline: 2px dashed rgba(124,92,255,.6); outline-offset: -2px; }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+         background: rgba(21, 21, 29, 0.55); }
+  button { background: rgba(255,255,255,.16); color: #fff; border: 1px solid rgba(255,255,255,.25); border-radius: 8px; padding: 6px 12px; cursor: pointer; font: inherit; }
+  button:hover { background: rgba(124,92,255,.55); }
+  button:active { transform: translateY(1px); }
+  #hud { position: absolute; top: 8px; left: 8px; padding: 6px 10px; border-radius: 8px; background: rgba(0,0,0,.45); font: 12px ui-monospace, monospace; white-space: pre; }
+  #log { position: absolute; top: 8px; right: 8px; width: 38%; max-height: 55%; overflow: auto; padding: 6px 10px; border-radius: 8px; background: rgba(0,0,0,.45); font: 11px ui-monospace, monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="shell">
+  <header><b>Downlink M0 spike</b><span id="rect">rect: -</span><span id="clicks">clicks: 0</span></header>
+  <div id="stage">
+    <div id="video"></div>
+    <div id="hud">starting...</div>
+    <div id="log"></div>
+    <div id="bar">
+      <button data-url="A">Chan A (H.264)</button>
+      <button data-url="B">Chan B (H.264)</button>
+      <button data-url="HEVC">HEVC</button>
+      <button id="stop">Stop</button>
+      <button id="pause">Pause/Play</button>
+      <button id="fs">Fullscreen</button>
+      <button id="bench">Zap x20</button>
+      <button id="diag">Diagnostics</button>
+      <input id="base" size="26" value="http://127.0.0.1:8099/">
+    </div>
+  </div>
+</div>
+<script>
+  const T = window.__TAURI__;
+  const invoke = (c, a) => T.core.invoke(c, a);
+  const $ = (id) => document.getElementById(id);
+  const log = (m) => { const l = $('log'); l.textContent += m + '\n'; l.scrollTop = l.scrollHeight; };
+  const names = { A: 'a.ts', B: 'b.ts', HEVC: 'hevc.ts' };
+  const url = (k) => $('base').value + names[k];
+
+  let clicks = 0;
+  document.addEventListener('click', () => { $('clicks').textContent = 'clicks: ' + (++clicks); });
+
+  // --- video rect -> Rust, physical pixels, one rAF debounce -----------------------------------
+  let pending = false;
+  function report() {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      const r = $('video').getBoundingClientRect();
+      const s = window.devicePixelRatio || 1;
+      const b = { x: Math.round(r.left * s), y: Math.round(r.top * s), w: Math.round(r.width * s), h: Math.round(r.height * s), scale: s, visible: true };
+      $('rect').textContent = `rect: ${b.x},${b.y} ${b.w}x${b.h} @${s}x`;
+      invoke('set_video_bounds', b).catch((e) => log('bounds: ' + JSON.stringify(e)));
+    });
+  }
+  new ResizeObserver(report).observe($('video'));
+  window.addEventListener('resize', report);
+  report();
+
+  // --- FPS meter of the webview itself ---------------------------------------------------------
+  let frames = 0, last = performance.now(), webFps = 0;
+  (function loop(now) {
+    frames++;
+    if (now - last >= 1000) { webFps = frames * 1000 / (now - last); frames = 0; last = now; }
+    requestAnimationFrame(loop);
+  })(performance.now());
+
+  let snap = {};
+  T.event.listen('player://state', (e) => { snap = e.payload; });
+  T.event.listen('player://failover', (e) => log('failover: ' + JSON.stringify(e.payload)));
+  setInterval(() => {
+    $('hud').textContent =
+      `state   ${snap.state}  (attempt ${snap.attempt ?? '-'})\n` +
+      `video   ${snap.videoCodec ?? '-'} ${snap.width ?? '-'}x${snap.height ?? '-'} @ ${snap.fps ? snap.fps.toFixed(1) : '-'} fps\n` +
+      `hwdec   ${snap.hwdecCurrent ?? '-'}\n` +
+      `pos     ${snap.positionSecs ? snap.positionSecs.toFixed(1) : '-'}s  dropped ${snap.droppedFrames ?? '-'}\n` +
+      `1st frm ${snap.firstFrameMs ?? '-'} ms\n` +
+      `webview ${webFps.toFixed(0)} fps (rAF)\n` +
+      (snap.error ? `error   ${snap.error}\n` : '');
+  }, 250);
+
+  document.querySelectorAll('button[data-url]').forEach((b) => b.addEventListener('click', () => {
+    invoke('play_url', { url: url(b.dataset.url) }).catch((e) => log('play: ' + JSON.stringify(e)));
+  }));
+  $('stop').onclick = () => invoke('stop').catch((e) => log(JSON.stringify(e)));
+  $('pause').onclick = () => invoke('player_command', { command: { kind: 'togglePause' } }).catch((e) => log(JSON.stringify(e)));
+  $('fs').onclick = async () => {
+    const w = T.window.getCurrentWindow();
+    await w.setFullscreen(!(await w.isFullscreen()));
+  };
+  $('diag').onclick = async () => log(JSON.stringify(Object.fromEntries(await invoke('player_diagnostics')), null, 1));
+  $('bench').onclick = async () => {
+    log('zap bench running...');
+    const r = await invoke('zap_bench', { urls: [url('A'), url('B')], count: 20 });
+    log(`zap p50 ${r.p50Ms} ms, p95 ${r.p95Ms} ms, render fps ${r.renderFps}`);
+  };
+</script>
+</body>
+</html>

@@ -4,8 +4,27 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+description = "Downlink desktop shell (Tauri 2)"
 
 [lints]
 workspace = true
 
+[features]
+# Embed the frontend (release behaviour). The spike build uses it with TAURI_CONFIG pointing
+# `frontendDist` at ./spike; see spike/run.sh.
+custom-protocol = ["tauri/custom-protocol"]
+spike = ["custom-protocol"]
+
 [dependencies]
+downlink-player = { path = "../../crates/downlink-player" }
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
