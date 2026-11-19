@@ -1,0 +1,75 @@
+// All user-facing copy goes through t(). English only in 1.0 (PLAN §8.6). Sentence case; caps only in
+// badges and 12 px labels. Errors: one sentence, cause if known, one action.
+export const en = {
+  'app.name': 'Downlink',
+  'nav.search': 'Search',
+  'nav.home': 'Home',
+  'nav.channels': 'Channels',
+  'nav.guide': 'Guide',
+  'nav.movies': 'Movies',
+  'nav.series': 'Series',
+  'nav.recordings': 'Recordings',
+  'nav.settings': 'Settings',
+  'nav.primary': 'Primary',
+  'nav.collapse': 'Collapse sidebar',
+  'nav.expand': 'Expand sidebar',
+  'source.status.connected': 'Connected',
+  'source.status.syncing': 'Syncing',
+  'source.status.offline': 'Offline',
+  'source.status.stale': 'Guide is out of date',
+  'source.status.auth_error': 'Sign-in needed',
+  'source.status.none': 'No source',
+  'empty.title': 'Add a source',
+  'empty.body': 'Connect a Dispatcharr server, an Xtream account or an M3U playlist to start watching.',
+  'empty.action': 'Add source',
+  'empty.hint': 'Dispatcharr API keys live under your user menu in the web UI.',
+  'page.home': 'Home',
+  'page.channels': 'Channels',
+  'page.guide': 'Guide',
+  'page.movies': 'Movies',
+  'page.series': 'Series',
+  'page.recordings': 'Recordings',
+  'page.settings': 'Settings',
+  'page.search': 'Search',
+  'page.player': 'Player',
+  'page.addSource': 'Add source',
+  'page.notFound': 'Nothing here',
+  'badge.live': 'Live',
+  'badge.rec': 'Rec',
+  'badge.catchup': 'Catch-up',
+  'badge.new': 'New',
+  'badge.hd': 'HD',
+  'badge.4k': '4K',
+  'badge.radio': 'Radio',
+  'badge.drm': 'DRM',
+  'banner.dismiss': 'Dismiss',
+  'banner.offline': 'Offline. Last updated {time}.',
+  'banner.retry': 'Retry',
+  'loading.generic': 'Loading…',
+  'loading.channels': 'Fetching channels…',
+  'loading.guide': 'Fetching guide…',
+  'button.loading': 'Loading',
+  'player.idle': 'Nothing playing',
+  'player.state.Resolving': 'Resolving stream…',
+  'player.state.Connecting': 'Connecting…',
+  'player.state.Buffering': 'Buffering…',
+  'player.state.Failed': 'Playback failed',
+  'player.back': 'Back',
+  'channel.logoAlt': '{name} logo',
+  'common.close': 'Close',
+  'common.back': 'Back',
+  'common.cancel': 'Cancel',
+  'error.generic': 'Something went wrong. Try again.',
+  'error.retry': 'Try again',
+  'a11y.skipToContent': 'Skip to content',
+} as const;
+
+export type MessageKey = keyof typeof en;
+
+export function t(key: MessageKey, params?: Record<string, string | number>): string {
+  let out: string = en[key];
+  if (params) {
+    for (const [k, v] of Object.entries(params)) out = out.replaceAll(`{${k}}`, String(v));
+  }
+  return out;
+}
