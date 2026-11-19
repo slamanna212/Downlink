@@ -4,6 +4,7 @@ pub mod auth;
 pub mod catalog;
 pub mod epg;
 pub mod error;
+pub mod images;
 pub mod normalise;
 pub mod redact;
 pub mod source;

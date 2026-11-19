@@ -777,6 +777,33 @@ impl DispatcharrClient {
         })
     }
 
+    /// Absolute URL of a logo (what gets hashed into its `dlimg://` URL; carries no credentials).
+    pub fn logo_url(&self, logo_id: &str) -> Result<String> {
+        Ok(self
+            .url(&format!("api/channels/logos/{logo_id}/cache"))?
+            .to_string())
+    }
+
+    /// Authenticated fetch of an image URL. Refuses anything outside this server's own origin so
+    /// the key can never be sent elsewhere.
+    pub async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {
+        let u = Url::parse(url)?;
+        if u.origin() != self.base.origin() || !u.path().starts_with(self.base.path()) {
+            return Err(AppError::local(
+                "Refusing to fetch an image from another server.",
+            ));
+        }
+        let rel = u.path().strip_prefix(self.base.path()).unwrap_or_default();
+        let r = self
+            .call(Method::GET, rel, &[], None)
+            .await?
+            .ok("that image")?;
+        Ok(crate::images::RawImage {
+            bytes: r.body,
+            content_type: r.content_type,
+        })
+    }
+
     // ---- catch-up ---------------------------------------------------------------------------
 
     /// `POST /api/catchup/sessions/`. `start` and duration come from the EPG programme row.

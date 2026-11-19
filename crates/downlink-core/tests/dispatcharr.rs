@@ -737,3 +737,28 @@ fn unknown_is_never_defaulted_to_proxy() {
     let info = downlink_core::source::ProfileInfo::default();
     assert_eq!(info.mode(None), StreamMode::Unknown);
 }
+
+#[tokio::test]
+async fn fetch_image_is_same_origin_only() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/channels/logos/100/cache"))
+        .and(header("X-API-Key", KEY))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![1u8, 2, 3]))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = client(&server);
+    let url = c.logo_url("100").unwrap();
+    assert_eq!(c.fetch_image(&url).await.unwrap().bytes, [1, 2, 3]);
+    let e = c
+        .fetch_image("http://provider.test/logo.png")
+        .await
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::Local);
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        1,
+        "nothing else was requested"
+    );
+}
