@@ -39,10 +39,10 @@ mod failover {
         let events: Arc<Mutex<Vec<String>>> = Arc::default();
         let ev = events.clone();
         let sink: downlink_player::EventSink = Arc::new(move |e| {
-            if let PlayerEvent::FailoverNeeded { last_error, .. } = e {
-                if let Ok(mut v) = ev.lock() {
-                    v.push(last_error);
-                }
+            if let PlayerEvent::FailoverNeeded { last_error, .. } = e
+                && let Ok(mut v) = ev.lock()
+            {
+                v.push(last_error);
             }
         });
         let p = Player::new(
