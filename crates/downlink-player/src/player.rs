@@ -263,6 +263,7 @@ struct Shared {
     state_since: Instant,
     file_loaded: bool,
     last_stats: Option<Instant>,
+    audio_fell_back: bool,
 }
 
 struct Inner {
@@ -296,6 +297,31 @@ pub fn scrub_urls(text: &str) -> String {
         .map(|w| if w.contains("://") { "<url>" } else { w })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Expected hardware-decode probe failures: mpv tries several hwdec backends and logs an error for
+/// each one the machine lacks. They are noise unless every backend fails (`hwdec-current=no`).
+pub fn is_expected_probe_noise(text: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "hwdec",
+        "hwaccel",
+        "libcuda",
+        "CUDA",
+        "libva",
+        "vaapi",
+        "VK_KHR_video_decode",
+        "vdpau",
+        "VDPAU",
+        "Unable to set hw-parameters",
+        "Suspected software renderer",
+    ];
+    MARKERS.iter().any(|m| text.contains(m))
+}
+
+/// mpv's message when no audio output could be opened; playback continues silently.
+pub fn is_audio_open_failure(text: &str) -> bool {
+    text.contains("Could not open/initialize audio device")
+        || text.contains("Failed to initialize audio driver")
 }
 
 const OBSERVED: &[(&str, i32)] = &[
@@ -356,6 +382,7 @@ impl Player {
                 state_since: Instant::now(),
                 file_loaded: false,
                 last_stats: None,
+                audio_fell_back: false,
             }),
             cv: Condvar::new(),
             stop: AtomicBool::new(false),
@@ -767,6 +794,23 @@ fn handle_event(inner: &Inner, ev: EngineEvent) {
         EngineEvent::Property { name, value } => handle_property(inner, &mut s, &name, value),
         EngineEvent::Log { level, text, .. } => {
             let text = scrub_urls(text.trim_end());
+            if is_audio_open_failure(&text) && !s.audio_fell_back {
+                // No usable audio device (VM, headless): stop retrying it on every loadfile.
+                s.audio_fell_back = true;
+                match inner.engine.set_property("ao", "null") {
+                    Ok(()) => tracing::warn!(
+                        "no audio device available; continuing without sound (ao=null)"
+                    ),
+                    Err(e) => tracing::warn!("could not switch to ao=null: {e}"),
+                }
+            }
+            let level = if is_expected_probe_noise(&text)
+                || (s.audio_fell_back && level == "error") && is_audio_open_failure(&text)
+            {
+                "debug".to_owned()
+            } else {
+                level
+            };
             s.outbox.push(PlayerEvent::Log { level, text });
         }
         _ => {}
@@ -1003,6 +1047,21 @@ mod tests {
     fn log_scrubbing_removes_urls() {
         let s = scrub_urls("Opening http://h/live/u/p/1.ts failed: 403");
         assert_eq!(s, "Opening <url> failed: 403");
+    }
+
+    #[test]
+    fn classifies_log_noise() {
+        assert!(is_expected_probe_noise(
+            "AVHWDeviceContext: Cannot load libcuda.so.1"
+        ));
+        assert!(is_expected_probe_noise(
+            "h264: Device does not support the VK_KHR_video_decode_queue extension!"
+        ));
+        assert!(!is_expected_probe_noise("http: HTTP error 403 Forbidden"));
+        assert!(is_audio_open_failure(
+            "Could not open/initialize audio device -> no sound."
+        ));
+        assert!(!is_audio_open_failure("Opening audio decoder"));
     }
 
     #[test]

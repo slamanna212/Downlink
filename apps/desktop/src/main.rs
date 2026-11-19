@@ -414,9 +414,11 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                         serde_json::json!({ "session": session, "lastError": last_error }),
                     );
                 }
-                PlayerEvent::Log { level, text } => {
-                    tracing::info!(target: "mpv", "[{level}] {text}")
-                }
+                PlayerEvent::Log { level, text } => match level.as_str() {
+                    "debug" | "v" | "trace" => tracing::debug!(target: "mpv", "[{level}] {text}"),
+                    "error" | "fatal" => tracing::warn!(target: "mpv", "[{level}] {text}"),
+                    _ => tracing::info!(target: "mpv", "[{level}] {text}"),
+                },
             });
             match Player::new(
                 &loaded,

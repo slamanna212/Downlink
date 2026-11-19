@@ -8,6 +8,15 @@ renderer"), no GPU, no audio device, and no physical monitor attached** (GDK log
 failures; the session was idle, and `document.visibilityState` in the webview was `hidden`, so the compositor withheld
 frame callbacks and `requestAnimationFrame` never fired). That limits what could be proven; see "Not verified".
 
+## Update: run on the user's real GNOME Wayland display
+
+The user ran the spike on a real display (a VM: llvmpipe, no audio device): **video renders in the window, first time**. That
+settles "video renders under a native GtkGLArea in a real GNOME Wayland session". Still pending the user's check: translucent
+bar visible over the video, controls clickable, fullscreen, 60 fps. The repeated hwdec/CUDA/VAAPI/Vulkan/ALSA errors in that log
+were the autorun zap loop on a machine with no GPU and no audio. Follow-up fixes: the first audio-open failure now switches mpv to
+`ao=null` instead of retrying on every `loadfile`, and expected hwdec probe failures are logged at debug. Library-level stderr lines
+(`Failed to open VDPAU backend ...`, `ALSA lib ...`) come from the libraries themselves and cannot be filtered from the player.
+
 ## Linux verdict (GNOME Wayland, this machine): CONDITIONAL GO
 
 The playback path is proven end to end: runtime-loaded libmpv, one pre-warmed instance, render API into a `GtkGLArea` in a
