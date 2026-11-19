@@ -150,7 +150,7 @@ def main():
     for name, c in existing.items():
         tvg = stream_by_name.get(name, {}).get("tvg_id")
         patch = {}
-        if tvg: patch["tvg_id"] = tvg
+        if tvg and c.get("tvg_id") != tvg: patch["tvg_id"] = tvg
         if tvg in by_tvg and c.get("epg_data_id") != by_tvg[tvg]["id"]: patch["epg_data_id"] = by_tvg[tvg]["id"]
         if name.startswith("Redirect") and c.get("stream_profile_id") != redirect["id"]:
             patch["stream_profile_id"] = redirect["id"]
