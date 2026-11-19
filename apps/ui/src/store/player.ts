@@ -5,7 +5,7 @@ import type { PlayerState } from '../api/types';
 const IDLE: PlayerState = {
   state: 'Idle', mode: null, channelId: null, position: null, duration: null, buffered: null, seekable: false,
   volume: 100, muted: false, hwdecCurrent: null, videoCodec: null, width: null, height: null, waitingOn: null,
-  error: null, transitionedAt: 0,
+  error: null, transitionedAt: 0, programme: null, resumeAt: null,
 };
 
 interface PlayerStore {

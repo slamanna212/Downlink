@@ -66,26 +66,63 @@ export function mockChannels(count = 240): Channel[] {
   });
 }
 
-export function mockNowNext(channelId: number, now = nowSec()): NowNext {
-  const slot = (30 + (channelId % 4) * 15) * 60;
-  const offset = (channelId * 977) % slot;
-  const start = now - offset;
-  const mk = (s: number, title: string): Programme => ({
-    channelId, startUtc: s, endUtc: s + slot, title, subtitle: null, description: 'Synthetic programme.',
-    season: null, episode: null, isNew: false, isLive: false, isPremiere: false, isFinale: false, isScheduled: false,
-  });
-  return {
-    channelId,
-    now: mk(start, TITLES[channelId % TITLES.length] ?? 'Programme'),
-    next: mk(start + slot, TITLES[(channelId + 3) % TITLES.length] ?? 'Programme'),
-  };
+const DURS = [30, 60, 30, 90, 45, 60, 120, 60];
+const GUIDE_ANCHOR_DAYS = 5;
+
+const scheduleCache = new Map<number, Programme[]>();
+
+/** Full synthetic schedule for a channel (anchor .. anchor+14d), built once per channel. */
+function fullSchedule(channelId: number): Programme[] {
+  const hit = scheduleCache.get(channelId);
+  if (hit) return hit;
+  const out: Programme[] = [];
+  if (channelId % 13 !== 0) {
+    const anchor = Math.floor(nowSec() / 86400) * 86400 - GUIDE_ANCHOR_DAYS * 86400;
+    const end = anchor + 14 * 86400;
+    let t = anchor + ((channelId * 7) % 4) * 900;
+    for (let i = 0; t < end; i++) {
+      const dur = (DURS[(channelId * 7 + i * 3) % DURS.length] ?? 60) * 60;
+      out.push({
+        id: `${channelId}:${t}`, channelId, startUtc: t, endUtc: t + dur, title: TITLES[(channelId + i) % TITLES.length] ?? 'Programme',
+        subtitle: null, description: 'Synthetic programme description. Headlines, features and a closing segment, generated for the mock backend.',
+        season: null, episode: null, isNew: i % 7 === 0, isLive: false, isPremiere: false, isFinale: false, isScheduled: false,
+      });
+      t += dur;
+    }
+  }
+  scheduleCache.set(channelId, out);
+  return out;
+}
+
+/** Deterministic synthetic schedule for a channel over [start, end). Some channels have no guide. */
+export function genProgrammes(channelId: number, start: number, end: number, scheduled: ReadonlySet<string> = new Set()): Programme[] {
+  const all = fullSchedule(channelId);
+  let lo = 0;
+  let hi = all.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((all[mid]?.endUtc ?? 0) <= start) lo = mid + 1;
+    else hi = mid;
+  }
+  const out: Programme[] = [];
+  for (let i = lo; i < all.length && (all[i]?.startUtc ?? 0) < end; i++) {
+    const p = all[i]!;
+    out.push(scheduled.has(p.id) ? { ...p, isScheduled: true } : p);
+  }
+  return out;
+}
+
+export function mockNowNext(channelId: number, now = nowSec(), scheduled?: ReadonlySet<string>): NowNext {
+  const list = genProgrammes(channelId, now - 4 * 3600, now + 4 * 3600, scheduled);
+  const idx = list.findIndex((p) => p.startUtc <= now && p.endUtc > now);
+  return { channelId, now: idx >= 0 ? (list[idx] ?? null) : null, next: idx >= 0 ? (list[idx + 1] ?? null) : null };
 }
 
 export function idleState(): PlayerState {
   return {
     state: 'Idle', mode: null, channelId: null, position: null, duration: null, buffered: null, seekable: false,
     volume: 100, muted: false, hwdecCurrent: null, videoCodec: null, width: null, height: null, waitingOn: null,
-    error: null, transitionedAt: Date.now(),
+    error: null, transitionedAt: Date.now(), programme: null, resumeAt: null,
   };
 }
 
@@ -96,7 +133,9 @@ export function createMockBackend(): Backend {
   const failParam = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('fail') : null;
   const failId = failParam ? Number(failParam) : null;
   const sources = mockSources(mode === 'empty', mode === 'offline' ? 'offline' : 'connected');
-  const channels = mode === 'empty' ? [] : mockChannels();
+  const channels = mode === 'empty' ? [] : mockChannels(mode === 'big' ? 5000 : 240);
+  const scheduled = new Set<string>();
+  let tick: ReturnType<typeof setInterval> | null = null;
   const groups = mockGroups();
   let settings: AppSettings = {
     liveBufferSecs: 2, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
@@ -145,10 +184,68 @@ export function createMockBackend(): Backend {
           (!favouritesOnly || c.isFavourite) &&
           (!query || c.name.toLowerCase().includes(query.toLowerCase()) || String(c.number ?? '').startsWith(query)),
       ),
-    get_now_next: ({ channelIds }) => channelIds.map((id) => mockNowNext(id)),
+    get_now_next: ({ channelIds }) => channelIds.map((id) => mockNowNext(id, nowSec(), scheduled)),
+    get_guide: ({ start, end, channelOffset, channelLimit, groupId }) => {
+      const list = channels.filter((c) => groupId == null || c.groupId === groupId).slice(channelOffset, channelOffset + channelLimit);
+      return { channels: list, programmes: list.flatMap((c) => genProgrammes(c.id, start, end, scheduled)) };
+    },
+    get_programmes: ({ channelId, start, end }) => genProgrammes(channelId, start, end, scheduled),
+    play_catchup: ({ programmeId }) => {
+      const [cid, st] = programmeId.split(':').map(Number);
+      const p = genProgrammes(cid ?? 0, st ?? 0, (st ?? 0) + 1, scheduled).find((x) => x.id === programmeId);
+      if (!p) throw appError('stream', 'That programme is not available to play.');
+      const dur = p.endUtc - p.startUtc;
+      setPlayer({ state: 'Resolving', mode: 'catchup', channelId: p.channelId, programme: p, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: p.channelId % 2 === 0 ? Math.floor(dur / 3) : null, error: null });
+      setTimeout(() => setPlayer({ state: 'Connecting' }), 150);
+      setTimeout(() => {
+        setPlayer({ state: 'Playing', hwdecCurrent: 'vaapi', videoCodec: 'h264', width: 1920, height: 1080, buffered: 30 });
+        if (tick) clearInterval(tick);
+        tick = setInterval(() => {
+          if (player.mode === 'catchup' && player.state === 'Playing') setPlayer({ position: Math.min((player.position ?? 0) + 1, player.duration ?? 0), buffered: Math.min((player.position ?? 0) + 40, player.duration ?? 0) });
+        }, 1000);
+      }, 400);
+      return null;
+    },
+    restart_programme: ({ channelId }) => {
+      const nn = mockNowNext(channelId, nowSec(), scheduled).now;
+      if (!nn) throw appError('stream', 'There is no programme to restart on this channel.');
+      return impl.play_catchup({ programmeId: nn.id });
+    },
+    schedule_recording: ({ programmeId }) => {
+      scheduled.add(programmeId);
+      emit('catalog://updated', { sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
+      return null;
+    },
+    get_home: () => {
+      const favs = channels.filter((c) => c.isFavourite).slice(0, 4);
+      const live = channels[1];
+      const cu = channels[6];
+      const nnOf = (c: Channel) => mockNowNext(c.id, nowSec(), scheduled);
+      return {
+        continueWatching: [
+          ...(live ? [{ kind: 'live' as const, id: `live:${live.id}`, channel: live, programme: nnOf(live).now, title: nnOf(live).now?.title ?? live.name, subtitle: live.name, art: null, progress: null, remainingSecs: null }] : []),
+          { kind: 'movie' as const, id: 'movie:1', channel: null, programme: null, title: 'Night Train', subtitle: 'Movie · 1 h 12 min left', art: null, progress: 0.35, remainingSecs: 4320 },
+          ...(cu ? [{ kind: 'catchup' as const, id: `catchup:${cu.id}`, channel: cu, programme: null, title: 'Fieldwork S2 E3', subtitle: `${cu.name} · Yesterday 21:00`, art: null, progress: 0.5, remainingSecs: 1800 }] : []),
+        ],
+        favourites: favs,
+        onNow: favs.map((c) => ({ channel: c, now: nnOf(c).now })),
+        recents: channels.slice(1, 6),
+      };
+    },
+    search: ({ query, limit }) => {
+      const q = query.trim().toLowerCase();
+      if (!q) return { channels: [], programmes: [] };
+      const hits = channels.filter((c) => c.name.toLowerCase().includes(q) || String(c.number ?? '').startsWith(q));
+      const now = nowSec();
+      const progs = channels.slice(0, 300).flatMap((c) => {
+        const nn = mockNowNext(c.id, now, scheduled);
+        return [nn.now, nn.next].filter((p): p is Programme => !!p && (p.title ?? '').toLowerCase().includes(q)).map((p) => ({ programme: p, channel: c }));
+      });
+      return { channels: hits.slice(0, limit), programmes: progs.slice(0, limit) };
+    },
     get_player_state: () => player,
     play_channel: ({ channelId }) => {
-      setPlayer({ state: 'Resolving', mode: 'live', channelId, error: null });
+      setPlayer({ state: 'Resolving', mode: 'live', channelId, error: null, programme: mockNowNext(channelId, nowSec(), scheduled).now, position: null, duration: null, buffered: null, seekable: false, resumeAt: null });
       setTimeout(() => setPlayer({ state: 'Connecting' }), 150);
       setTimeout(() => {
         // `?fail=<id>` in the URL makes that channel fail, to exercise the error overlay.
@@ -164,7 +261,12 @@ export function createMockBackend(): Backend {
       else if (command.kind === 'stop') setPlayer({ ...idleState(), state: 'Stopped' });
       else if (command.kind === 'setVolume') setPlayer({ volume: command.volume });
       else if (command.kind === 'setMuted') setPlayer({ muted: command.muted });
-      else if (command.kind === 'retry' && player.channelId != null) impl.play_channel({ channelId: player.channelId });
+      else if (command.kind === 'seek') setPlayer({ position: Math.max(0, Math.min(command.seconds, player.duration ?? command.seconds)) });
+      else if (command.kind === 'goLive' && player.channelId != null) impl.play_channel({ channelId: player.channelId });
+      else if (command.kind === 'retry' && player.channelId != null) {
+        if (player.mode === 'catchup' && player.programme) impl.play_catchup({ programmeId: player.programme.id });
+        else impl.play_channel({ channelId: player.channelId });
+      }
       return null;
     },
     set_favourite: ({ channelId, favourite }) => {

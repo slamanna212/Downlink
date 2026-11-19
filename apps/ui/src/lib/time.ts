@@ -89,3 +89,15 @@ export function formatUpdated(epoch: Epoch, now: Epoch = nowEpoch()): string {
 
 /** 14:05:09 (for session logs) */
 export const formatClockSeconds = (epoch: Epoch): string => at(epoch).format('HH:mm:ss');
+
+/** `n` calendar days from the display-zone midnight containing `epoch` (DST-safe). */
+export const addDays = (epoch: Epoch, n: number): Epoch => at(epoch).add(n, 'day').unix();
+
+/** "Today", "Tomorrow", "Yesterday" or "Thu 20 Nov". */
+export function dayLabel(epoch: Epoch, now: Epoch = nowEpoch()): string {
+  const diff = Math.round((startOfDay(epoch) - startOfDay(now)) / 86400);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  return formatDay(epoch);
+}

@@ -71,6 +71,8 @@ export interface Channel {
 }
 
 export interface Programme {
+  /** Opaque string id (dummy EPG ids are synthetic). Used by play_catchup / schedule_recording. */
+  id: string;
   channelId: number;
   startUtc: number;
   endUtc: number;
@@ -109,6 +111,10 @@ export interface PlayerState {
   state: PlayerPhase;
   mode: PlayerMode | null;
   channelId: number | null;
+  /** Programme being played (live: the current one; catch-up: the archived one). */
+  programme: Programme | null;
+  /** A saved resume point (seconds) the UI may offer; null when none. */
+  resumeAt: number | null;
   /** Seconds. Null while not seekable. */
   position: number | null;
   duration: number | null;
@@ -148,7 +154,9 @@ export type PlayerCommand =
   | { kind: 'pause' }
   | { kind: 'resume' }
   | { kind: 'stop' }
+  /** Absolute position in seconds (catch-up / VOD). */
   | { kind: 'seek'; seconds: number }
+  | { kind: 'goLive' }
   | { kind: 'setVolume'; volume: number }
   | { kind: 'setMuted'; muted: boolean }
   | { kind: 'retry' };
@@ -269,4 +277,61 @@ export interface VideoBounds {
   h: number;
   /** devicePixelRatio. */
   scale: number;
+}
+
+// ---- Guide (PLAN §8.2) ----
+export interface GuideArgs {
+  /** UTC seconds. */
+  start: number;
+  end: number;
+  channelOffset: number;
+  channelLimit: number;
+  groupId?: number | null;
+}
+
+export interface GuideResult {
+  /** The channels in [channelOffset, channelOffset + channelLimit) of the (group-filtered) list. */
+  channels: Channel[];
+  /** Programmes overlapping [start, end) for those channels. */
+  programmes: Programme[];
+}
+
+export type RecordKind = 'once' | 'series';
+
+// ---- Home / search ----
+export interface ContinueItem {
+  kind: 'live' | 'catchup' | 'movie' | 'episode' | 'recording';
+  id: string;
+  channel: Channel | null;
+  programme: Programme | null;
+  title: string;
+  subtitle: string | null;
+  /** Artwork URL (`dlimg://`) or null. */
+  art: string | null;
+  /** 0..1, null for live. */
+  progress: number | null;
+  remainingSecs: number | null;
+}
+
+export interface OnNowItem {
+  channel: Channel;
+  now: Programme | null;
+}
+
+export interface HomeData {
+  continueWatching: ContinueItem[];
+  favourites: Channel[];
+  /** Current programme per favourite. */
+  onNow: OnNowItem[];
+  recents: Channel[];
+}
+
+export interface ProgrammeHit {
+  programme: Programme;
+  channel: Channel;
+}
+
+export interface SearchResult {
+  channels: Channel[];
+  programmes: ProgrammeHit[];
 }

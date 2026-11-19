@@ -27,6 +27,7 @@ export default meta;
 type Story = StoryObj<typeof Screen>;
 
 export const Channels: Story = { args: { path: '/channels' } };
+export const Guide: Story = { args: { path: '/guide' } };
 export const Player: Story = { args: { path: '/player' } };
 export const AddSource: Story = { args: { path: '/sources/add' } };
 export const SettingsPlayback: Story = { args: { path: '/settings/playback' } };

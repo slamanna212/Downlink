@@ -91,7 +91,8 @@
     {
       "files": [
         "src/styles/global.css",
-        "src/styles/Button.module.css"
+        "src/styles/Button.module.css",
+        "src/features/guide/Guide.module.css"
       ],
       "rules": {
         "declaration-property-value-disallowed-list": null

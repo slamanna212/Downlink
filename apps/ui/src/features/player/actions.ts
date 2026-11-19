@@ -11,3 +11,21 @@ export async function playChannel(channelId: number): Promise<AppError | null> {
     return toAppError(e);
   }
 }
+
+export async function playCatchup(programmeId: string): Promise<AppError | null> {
+  try {
+    await invoke('play_catchup', { programmeId });
+    return null;
+  } catch (e) {
+    return toAppError(e);
+  }
+}
+
+export async function restartProgramme(channelId: number): Promise<AppError | null> {
+  try {
+    await invoke('restart_programme', { channelId });
+    return null;
+  } catch (e) {
+    return toAppError(e);
+  }
+}

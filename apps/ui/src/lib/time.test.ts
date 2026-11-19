@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  addDays,
+  dayLabel,
   floorToTick,
   formatClock,
   formatDay,
@@ -68,5 +70,13 @@ describe('time', () => {
     expect(formatClock(floorToTick(T))).toBe('14:00');
     expect(formatClock(floorToTick(T + 1500))).toBe('14:30');
     expect(formatClock(startOfDay(T))).toBe('00:00');
+  });
+
+  it('adds calendar days and labels days relative to now', () => {
+    expect(formatClock(addDays(startOfDay(T), 1))).toBe('00:00');
+    expect(dayLabel(T, T)).toBe('Today');
+    expect(dayLabel(T + 86400, T)).toBe('Tomorrow');
+    expect(dayLabel(T - 86400, T)).toBe('Yesterday');
+    expect(dayLabel(T + 3 * 86400, T)).toBe('Sun 22 Nov');
   });
 });

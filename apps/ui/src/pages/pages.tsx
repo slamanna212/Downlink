@@ -3,7 +3,6 @@ import { PageHeader } from './PageHeader';
 import { Section } from './Section';
 
 export const HomePage = () => <Section title="page.home" />;
-export const GuidePage = () => <Section title="page.guide" />;
 export const MoviesPage = () => <Section title="page.movies" />;
 export const SeriesPage = () => <Section title="page.series" />;
 export const RecordingsPage = () => <Section title="page.recordings" />;

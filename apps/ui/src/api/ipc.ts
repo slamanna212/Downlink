@@ -7,6 +7,12 @@ import type {
   AppError,
   AppSettings,
   AudioDevice,
+  GuideArgs,
+  GuideResult,
+  HomeData,
+  Programme,
+  RecordKind,
+  SearchResult,
   Counts,
   SessionStats,
   UpdateChannel,
@@ -47,6 +53,13 @@ export interface Commands {
   set_settings: { args: { patch: Partial<AppSettings> }; result: AppSettings };
   set_video_bounds: { args: VideoBounds; result: null };
   set_fullscreen: { args: { enabled: boolean }; result: null };
+  get_guide: { args: GuideArgs; result: GuideResult };
+  get_programmes: { args: { channelId: number; start: number; end: number }; result: Programme[] };
+  play_catchup: { args: { programmeId: string }; result: null };
+  restart_programme: { args: { channelId: number }; result: null };
+  schedule_recording: { args: { programmeId: string; kind: RecordKind }; result: null };
+  get_home: { args: Record<string, never>; result: HomeData };
+  search: { args: { query: string; limit: number }; result: SearchResult };
   set_stats_enabled: { args: { enabled: boolean }; result: null };
   get_counts: { args: Record<string, never>; result: Counts };
   list_audio_devices: { args: Record<string, never>; result: AudioDevice[] };

@@ -2,10 +2,10 @@ import { createBrowserRouter, createMemoryRouter, type RouteObject } from 'react
 import { Shell } from './Shell';
 import { SettingsPage } from '../features/settings/SettingsPage';
 import { AddSourcePage } from '../features/sources/AddSourcePage';
+import { GuidePage } from '../features/guide/GuidePage';
 import { PlayerPage } from '../features/player/PlayerPage';
 import { ChannelsPage } from '../features/channels/ChannelsPage';
 import {
-  GuidePage,
   HomePage,
   MoviesPage,
   NotFoundPage,
