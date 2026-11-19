@@ -304,3 +304,78 @@ async fn m3u_play_plan_uses_stored_url_and_headers() {
         "{shown}"
     );
 }
+
+#[tokio::test]
+async fn programme_search_is_visibility_aware_and_tracks_updates() {
+    let (store, sid) = fill().await;
+    let one = store.channel_by_ext(sid, "1").await.unwrap().unwrap().id;
+    let adult = store.channel_by_ext(sid, "3").await.unwrap().unwrap().id;
+    let mk = |c: i64, s: i64, t: &str| crate::store::ProgrammeRow {
+        channel_id: c,
+        start_utc: s,
+        end_utc: s + 100,
+        ext_id: None,
+        title: Some(t.into()),
+        subtitle: None,
+        description: Some("a synthetic documentary".into()),
+        season: None,
+        episode: None,
+        flags: 0,
+    };
+    store
+        .upsert_programmes(&[
+            mk(one, 1000, "Colour Bars Live"),
+            mk(one, 100, "Colour Old"),
+            mk(adult, 1000, "Colour Hidden"),
+        ])
+        .await
+        .unwrap();
+    let f = ChannelFilter::default();
+    let r = search_programmes(&store, &f, "colo", 500, 10)
+        .await
+        .unwrap();
+    assert_eq!(r.len(), 1, "adult channel and ended programme excluded");
+    assert_eq!(r[0].title.as_deref(), Some("Colour Bars Live"));
+    assert_eq!(
+        search_programmes(&store, &f, "documentary", 0, 10)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    // update via upsert keeps FTS in step
+    store
+        .upsert_programmes(&[mk(one, 1000, "Renamed Show")])
+        .await
+        .unwrap();
+    assert!(
+        search_programmes(&store, &f, "bars", 500, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        search_programmes(&store, &f, "renamed", 500, 10)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    // channel removal cascades out of the index
+    store
+        .sync_channels(sid, &[], &Default::default())
+        .await
+        .unwrap();
+    assert!(
+        search_programmes(&store, &f, "renamed", 0, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        search_programmes(&store, &f, "  ", 0, 10)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

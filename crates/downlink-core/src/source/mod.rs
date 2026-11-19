@@ -197,6 +197,27 @@ pub struct Programme {
     pub flags: i64,
 }
 
+/// A guide-search result from the server, with the channels (by ext id) it airs on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramHit {
+    pub programme: Programme,
+    pub channel_ext_ids: Vec<String>,
+}
+
+/// Server-side programme search filters (`/api/epg/programs/search/`).
+#[derive(Debug, Clone, Default)]
+pub struct ProgramSearch {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub channel_id: Option<String>,
+    /// UTC seconds.
+    pub start_after: Option<i64>,
+    pub airing_at: Option<i64>,
+    pub page: u32,
+    /// Capped at 500 by the server.
+    pub page_size: u32,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct VodQuery {
     pub search: Option<String>,

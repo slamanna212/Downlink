@@ -350,3 +350,39 @@ pub struct TokenDto {
     #[serde(default)]
     pub refresh: Option<String>,
 }
+
+/// A `/api/epg/programs/search/` row. Carries the channels it airs on.
+#[derive(Debug, Deserialize, Default)]
+pub struct ProgramSearchDto {
+    #[serde(flatten)]
+    pub program: ProgramDto,
+    #[serde(default)]
+    pub custom_properties: Value,
+    #[serde(default)]
+    pub channels: Vec<Value>,
+}
+
+impl ProgramSearchDto {
+    pub fn into_hit(self) -> Option<crate::source::ProgramHit> {
+        let channel_ext_ids: Vec<String> = self
+            .channels
+            .iter()
+            .filter_map(|c| c.get("id").and_then(flex_string))
+            .collect();
+        let cp = &self.custom_properties;
+        let mut dto = self.program;
+        if dto.season.is_none() {
+            dto.season = cp.get("season").and_then(flex_i64);
+        }
+        if dto.episode.is_none() {
+            dto.episode = cp.get("episode").and_then(flex_i64);
+        }
+        if cp.get("new").is_some_and(flex_bool) {
+            dto.is_new = true;
+        }
+        Some(crate::source::ProgramHit {
+            programme: dto.into_programme()?,
+            channel_ext_ids,
+        })
+    }
+}

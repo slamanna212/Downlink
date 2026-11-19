@@ -23,8 +23,8 @@ use tokio::sync::Semaphore;
 use self::dto::*;
 use super::{
     AccountInfo, Caps, ChannelKey, ChannelPage, Page, PlayPlan, PlayProfile, ProfileInfo,
-    Programme, SessionId, Source, SourceChannel, SourceGroup, SourceId, SourceKind, StreamMode,
-    Surface, TimeWindow,
+    ProgramSearch, Programme, SessionId, Source, SourceChannel, SourceGroup, SourceId, SourceKind,
+    StreamMode, Surface, TimeWindow,
 };
 use crate::auth::SecretString;
 use crate::error::{AppError, Result};
@@ -757,6 +757,49 @@ impl DispatcharrClient {
             }
         }
         Ok(out)
+    }
+
+    /// `GET /api/epg/programs/search/`. Returns one page; `has_next` tells whether more exist.
+    pub async fn search_programs(
+        &self,
+        q: &ProgramSearch,
+    ) -> Result<(Vec<crate::source::ProgramHit>, bool)> {
+        let mut extra: Vec<(&str, String)> = Vec::new();
+        if let Some(t) = &q.title {
+            extra.push(("title", t.clone()));
+        }
+        if let Some(d) = &q.description {
+            extra.push(("description", d.clone()));
+        }
+        if let Some(c) = &q.channel_id {
+            extra.push(("channel_id", c.clone()));
+        }
+        if let Some(t) = q.start_after {
+            extra.push(("start_after", fmt_time(t)?));
+        }
+        if let Some(t) = q.airing_at {
+            extra.push(("airing_at", fmt_time(t)?));
+        }
+        let page = q.page.max(1);
+        let size = if q.page_size == 0 {
+            50
+        } else {
+            q.page_size.min(500)
+        };
+        let (items, _count, has_next) = self
+            .page_values(
+                "api/epg/programs/search/",
+                &extra,
+                page,
+                size,
+                "the programme search",
+            )
+            .await?;
+        let hits = Self::parse_items::<ProgramSearchDto>(items, "programme search")
+            .into_iter()
+            .filter_map(ProgramSearchDto::into_hit)
+            .collect();
+        Ok((hits, has_next))
     }
 
     // ---- images -----------------------------------------------------------------------------

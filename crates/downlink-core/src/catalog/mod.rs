@@ -8,7 +8,7 @@ use sqlx::FromRow;
 
 use crate::error::Result;
 use crate::source::{SourceChannel, UserLevel};
-use crate::store::{ChannelRow, Store};
+use crate::store::{ChannelRow, ProgrammeRow, Store};
 
 pub use play::resolve_play_plan;
 
@@ -68,6 +68,10 @@ fn visibility_sql(f: &ChannelFilter) -> String {
     s
 }
 
+/// FTS candidates ranked per search. A narrow query has fewer matches than this, so its ranking
+/// is exact; a broad prefix is ranked within its first candidates (by channel order).
+const CANDIDATES: u32 = 2000;
+
 const COLS: &str = "c.id, c.source_id, c.ext_id, c.uuid, c.number, c.name, c.group_id, c.tvg_id, \
     c.logo_key, c.quality, c.is_adult, c.is_radio, c.is_drm, c.catchup_days, c.catchup_template, \
     c.stream_redirect, c.play_url, c.play_headers, c.epg_match, c.sort_key";
@@ -97,13 +101,24 @@ pub async fn list_channels(
     let search = f.search.as_deref().and_then(fts_query);
     let numeric: Option<f64> = f.search.as_deref().and_then(|s| s.trim().parse().ok());
     let sql = if search.is_some() {
+        // Two stages so a broad prefix ("ne") never sorts every match: FTS yields up to CANDIDATES
+        // matches (bm25 `rank` is evaluated only for those, never for every match of a broad prefix); exact number matches are added via the number index; the
+        // outer query then orders by number proximity, then rank.
         format!(
-            "SELECT {COLS} FROM channel_fts JOIN channel c ON c.id = channel_fts.rowid
-             WHERE channel_fts MATCH ?1 AND {vis}
+            "SELECT {COLS} FROM (
+                 SELECT rowid AS id, min(rank) AS rank FROM (
+                   SELECT rowid, rank FROM (
+                     SELECT rowid, rank FROM channel_fts WHERE channel_fts MATCH ?1
+                       LIMIT {CANDIDATES})
+                   UNION ALL
+                   SELECT id, -1e9 FROM channel WHERE ?4 IS NOT NULL AND number = ?4
+                 ) GROUP BY rowid
+               ) m JOIN channel c ON c.id = m.id
+             WHERE {vis}
                AND (?2 IS NULL OR c.source_id = ?2) AND (?3 IS NULL OR c.group_id = ?3)
              ORDER BY CASE WHEN ?4 IS NOT NULL AND c.number = ?4 THEN 0 ELSE 1 END,
                       CASE WHEN ?4 IS NULL THEN 0 ELSE abs(coalesce(c.number, 1e9) - ?4) END,
-                      bm25(channel_fts), c.number, c.sort_key
+                      m.rank, c.number, c.sort_key
              LIMIT ?5 OFFSET ?6"
         )
     } else {
@@ -146,6 +161,37 @@ pub async fn list_groups(store: &Store, f: &ChannelFilter) -> Result<Vec<GroupRo
     );
     Ok(sqlx::query_as(&sql)
         .bind(f.source_id)
+        .fetch_all(store.pool())
+        .await?)
+}
+
+/// Local guide search (FTS5 over title/subtitle/description), restricted to visible channels and
+/// to programmes that have not ended before `from_utc`. Ranked by bm25, then start time.
+pub async fn search_programmes(
+    store: &Store,
+    f: &ChannelFilter,
+    query: &str,
+    from_utc: i64,
+    limit: i64,
+) -> Result<Vec<ProgrammeRow>> {
+    let Some(q) = fts_query(query) else {
+        return Ok(Vec::new());
+    };
+    let vis = visibility_sql(f);
+    let sql = format!(
+        "SELECT p.channel_id, p.start_utc, p.end_utc, p.ext_id, p.title, p.subtitle, p.description,
+                p.season, p.episode, p.flags
+         FROM programme_fts JOIN programme p ON p.rowid = programme_fts.rowid
+         JOIN channel c ON c.id = p.channel_id
+         WHERE programme_fts MATCH ?1 AND {vis} AND p.end_utc >= ?2
+           AND (?3 IS NULL OR c.source_id = ?3)
+         ORDER BY bm25(programme_fts), p.start_utc LIMIT ?4"
+    );
+    Ok(sqlx::query_as(&sql)
+        .bind(q)
+        .bind(from_utc)
+        .bind(f.source_id)
+        .bind(limit)
         .fetch_all(store.pool())
         .await?)
 }

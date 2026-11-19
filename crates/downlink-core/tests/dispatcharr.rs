@@ -762,3 +762,44 @@ async fn fetch_image_is_same_origin_only() {
         "nothing else was requested"
     );
 }
+
+#[tokio::test]
+async fn endpoint_programme_search() {
+    use downlink_core::source::ProgramSearch;
+    let server = MockServer::start().await;
+    let body = serde_json::json!({
+        "count": 2, "next": "http://dispatcharr.test/x?page=2", "previous": null,
+        "results": [
+            {"id": 222, "title": "Colour Bars Live", "sub_title": "Episode 6", "description": "Synthetic.",
+             "start_time": "2025-01-01T08:00:00Z", "end_time": "2025-01-01T09:00:00Z", "tvg_id": "one.test",
+             "custom_properties": {"new": true, "season": 1, "episode": 6},
+             "channels": [{"id": 7, "name": "Channel One"}, {"id": 8}], "streams": []},
+            {"id": "x", "title": "Bad", "start_time": "nope", "end_time": "nope", "channels": []}
+        ]
+    });
+    Mock::given(method("GET"))
+        .and(path("/api/epg/programs/search/"))
+        .and(query_param("title", "colour"))
+        .and(query_param("start_after", "2025-01-01T00:00:00Z"))
+        .and(query_param("page_size", "500"))
+        .and(header("X-API-Key", KEY))
+        .respond_with(json(body))
+        .mount(&server)
+        .await;
+    let q = ProgramSearch {
+        title: Some("colour".into()),
+        start_after: Some(1_735_689_600),
+        page: 1,
+        page_size: 9999,
+        ..Default::default()
+    };
+    let (hits, more) = client(&server).search_programs(&q).await.unwrap();
+    assert!(more);
+    assert_eq!(hits.len(), 1, "unreadable row skipped");
+    assert_eq!(hits[0].channel_ext_ids, ["7", "8"]);
+    let p = &hits[0].programme;
+    assert_eq!(
+        (p.season, p.episode, p.flags),
+        (Some(1), Some(6), downlink_core::source::flags::NEW)
+    );
+}
