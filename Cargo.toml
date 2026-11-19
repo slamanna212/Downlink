@@ -26,3 +26,10 @@ expect_used = "warn"
 lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
+
+# Keep dev builds small (disk) while preserving usable backtraces.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
