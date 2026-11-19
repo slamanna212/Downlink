@@ -14,8 +14,8 @@ beforeEach(() => {
 
 describe('app shell', () => {
   it('renders rail entries from caps and a page title', async () => {
-    render(<App router={createTestRouter(['/guide'])} client={createQueryClient()} />);
-    expect(await screen.findByRole('heading', { name: 'Guide' })).toBeInTheDocument();
+    render(<App router={createTestRouter(['/settings'])} client={createQueryClient()} />);
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();
     expect(await screen.findByText('Recordings')).toBeInTheDocument();
     expect(screen.getByText('Movies')).toBeInTheDocument();
   });
