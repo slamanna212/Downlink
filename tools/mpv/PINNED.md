@@ -3,16 +3,28 @@
 libmpv ships inside every installer. Nothing here is a system dependency. Update a pin by editing
 this file and the matching script in the same commit; record the reason.
 
-| Platform | Source | Pin | Staged to | Status |
-|---|---|---|---|---|
-| Windows x86_64 | zhongfly GPL `mpv-dev-x86_64` build (`libmpv-2.dll`) | **TBD tag** (choose the newest release that passes M0, record the tag and SHA-256 here) | `resources/mpv/` | script untested |
-| macOS universal | Homebrew bottles (arm64 + x86_64) merged with `lipo`, dylib tree fixed with `install_name_tool` | **TBD** formula version + bottle SHA-256 per arch | `Contents/Frameworks/` | script untested |
-| Linux x86_64 | Collected in an Ubuntu 22.04 (glibc baseline) container, image digest pinned | **TBD** image digest + `libmpv2` package version | AppImage `usr/lib/`; deb/rpm `/usr/lib/downlink/mpv/` | script collects from the host libmpv for dev only |
+Pins live in `tools/mpv/pins.env` (read by the scripts); this file explains them.
+
+| Platform | Source | Pin | Staged by | Staged to | Status |
+|---|---|---|---|---|---|
+| Windows x86_64 | zhongfly GPL `mpv-dev-x86_64` build (`libmpv-2.dll`) | tag `2026-11-18-f92afa75cd`, asset `mpv-dev-x86_64-20261118-git-f92afa75cd.7z`, SHA-256 `f8e087dae56f8bfc5079142ef51ac6a0b8b328a8dea590f6a53cbfb13d1e070e` (download and hash verified from Linux on 2026-11-19) | `windows.ps1 -OutDir <dir>` | `resources/mpv/` | script untested on Windows |
+| macOS universal | Homebrew `mpv` bottle per arch, dylib tree re-rooted with `install_name_tool`, merged with `lipo` | formula version **TBD** (recorded by the first CI run into `pins.env`) | `macos.sh <dir>` on arm64 and x86_64 runners, then `macos.sh <dir> merge` | `Contents/Frameworks/` | script untested on macOS |
+| Linux x86_64 | `libmpv2` from the pinned `ubuntu:22.04` container plus its non-glibc dependency closure | image digest **TBD**, package version **TBD** (`pins.env`; the script warns on mismatch) | `linux.sh <dir>` | AppImage `usr/lib/`; deb/rpm `/usr/lib/downlink/mpv/` | script run here on Debian 13 (173 libraries, 208 MB uncompressed, loads and plays under `--self-test`); trimming the closure is a release task |
+
+`linux.sh` excludes glibc and the host-bound stacks (GL/EGL, X11/xcb, Wayland, DRM/gbm, Vulkan, VA-API/VDPAU, ALSA/Pulse/PipeWire/JACK,
+systemd/dbus/udev, fontconfig/freetype) so GPU and audio come from the user's machine; everything else is bundled with `rpath=$ORIGIN`
+(needs `patchelf`). It writes `MANIFEST.txt` with SHA-256 sums.
 
 ## Dev machine (what M0 ran against)
 
 - Debian 13, system `libmpv.so.2`, mpv 0.40.0 (client API 2.5), FFmpeg 7.1.5. Loaded through
   `DOWNLINK_MPV_PATH` (unsupported in releases).
+
+## CI smoke test
+
+`downlink-desktop --self-test` (with `DOWNLINK_REQUIRE_BUNDLED=1`, and `DOWNLINK_MPV_DIR` if the engine is not next to the
+executable) loads the bundled engine, plays a synthetic lavfi source with `vo=null` for 2 s and prints `OK`/`FAIL`. Run it on a clean VM
+with no mpv installed.
 
 ## Rules
 

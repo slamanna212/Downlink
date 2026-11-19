@@ -48,6 +48,23 @@ pub fn library_file_names() -> &'static [&'static str] {
 /// `bundled_dir` is the app-relative directory holding the shipped engine (`None` in dev builds
 /// that have not staged one).
 pub fn load(bundled_dir: Option<&Path>) -> Result<LoadedMpv, PlayerError> {
+    load_with(bundled_dir, false)
+}
+
+/// Env var that makes [`load_from_env`] refuse everything but the bundled engine (CI smoke test).
+pub const ENV_REQUIRE_BUNDLED: &str = "DOWNLINK_REQUIRE_BUNDLED";
+
+/// [`load`], but when `DOWNLINK_REQUIRE_BUNDLED=1` the escape hatch and the system fallback are off.
+pub fn load_from_env(bundled_dir: Option<&Path>) -> Result<LoadedMpv, PlayerError> {
+    let strict = std::env::var(ENV_REQUIRE_BUNDLED).is_ok_and(|v| v == "1");
+    load_with(bundled_dir, strict)
+}
+
+/// `require_bundled`: only the bundled directory is tried; no env override, no system library.
+pub fn load_with(
+    bundled_dir: Option<&Path>,
+    require_bundled: bool,
+) -> Result<LoadedMpv, PlayerError> {
     let mut attempts: Vec<String> = Vec::new();
 
     if let Some(dir) = bundled_dir {
@@ -60,6 +77,11 @@ pub fn load(bundled_dir: Option<&Path>) -> Result<LoadedMpv, PlayerError> {
                 }
             }
         }
+    }
+
+    if require_bundled {
+        attempts.push("bundled engine required (no env override, no system fallback)".to_owned());
+        return Err(PlayerError::Load(attempts.join("; ")));
     }
 
     if let Some(raw) = std::env::var_os(ENV_MPV_PATH) {
@@ -117,6 +139,13 @@ mod tests {
     fn missing_env_path_is_an_error_not_a_panic() {
         let r = open(Path::new("/nonexistent/libmpv.so.2"));
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn strict_mode_never_falls_back() {
+        // No bundled dir: strict mode must fail without trying the env override or the system.
+        let r = load_with(None, true);
+        assert!(matches!(r, Err(PlayerError::Load(m)) if m.contains("bundled engine required")));
     }
 
     #[test]

@@ -15,7 +15,9 @@ pub mod surface;
 
 pub use engine::{Engine, RenderContext};
 pub use error::PlayerError;
-pub use loader::{ENV_MPV_PATH, LoadSource, LoadedMpv, load};
+pub use loader::{
+    ENV_MPV_PATH, ENV_REQUIRE_BUNDLED, LoadSource, LoadedMpv, load, load_from_env, load_with,
+};
 pub use options::{AudioMode, Deinterlace, Preferences, Profile, RenderBackend, SubtitleStyle};
 pub use player::{
     AudioDevice, EventSink, PlayMode, PlayRequest, Player, PlayerCommand, PlayerEvent,

@@ -1,15 +1,25 @@
-# UNTESTED on Windows. Fetch the pinned zhongfly libmpv build into tools\mpv\out\windows\mpv.
-# Fill in $Tag and $Sha256 from PINNED.md before use.
+# UNTESTED on Windows (the pin was verified from Linux: download + SHA-256 only).
+# Fetch the pinned zhongfly GPL libmpv build into <OutDir> (PLAN §4.10).
+# Usage: tools\mpv\windows.ps1 -OutDir <dir>
+param([Parameter(Mandatory = $true)][string]$OutDir)
 $ErrorActionPreference = 'Stop'
-$Tag    = $env:MPV_TAG    # e.g. a zhongfly release tag, pinned in PINNED.md
-$Sha256 = $env:MPV_SHA256
-if (-not $Tag -or -not $Sha256) { throw 'Set MPV_TAG and MPV_SHA256 (see PINNED.md)' }
-$Out = Join-Path $PSScriptRoot 'out\windows\mpv'
-New-Item -ItemType Directory -Force -Path $Out | Out-Null
-$Url = "https://github.com/zhongfly/mpv-winbuild/releases/download/$Tag/mpv-dev-x86_64-$Tag.7z"  # TODO: confirm asset name
-$Archive = Join-Path $env:TEMP 'mpv-dev.7z'
-Invoke-WebRequest -Uri $Url -OutFile $Archive
-if ((Get-FileHash $Archive -Algorithm SHA256).Hash -ne $Sha256.ToUpper()) { throw 'SHA-256 mismatch' }
-7z x $Archive "-o$Out" -y | Out-Null
-Get-ChildItem $Out -Filter 'libmpv-2.dll' | Out-Null
-Write-Host "staged libmpv into $Out"
+
+# Read pins.env (KEY=VALUE lines).
+$pins = @{}
+Get-Content (Join-Path $PSScriptRoot 'pins.env') | ForEach-Object {
+  if ($_ -match '^\s*([A-Z0-9_]+)=(.*)$') { $pins[$Matches[1]] = $Matches[2].Trim() }
+}
+$Tag = $pins['MPV_WIN_TAG']; $Asset = $pins['MPV_WIN_ASSET']; $Sha = $pins['MPV_WIN_SHA256']
+if (-not $Tag -or -not $Asset -or -not $Sha) { throw 'pins.env is missing MPV_WIN_* entries' }
+
+New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+$Archive = Join-Path $env:TEMP $Asset
+Invoke-WebRequest -Uri "https://github.com/zhongfly/mpv-winbuild/releases/download/$Tag/$Asset" -OutFile $Archive
+$actual = (Get-FileHash $Archive -Algorithm SHA256).Hash.ToLower()
+if ($actual -ne $Sha.ToLower()) { throw "SHA-256 mismatch for $Asset (got $actual)" }
+
+& 7z x $Archive "-o$OutDir" -y | Out-Null
+$dll = Get-ChildItem -Path $OutDir -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1
+if (-not $dll) { throw 'libmpv-2.dll not found in the archive' }
+if ($dll.DirectoryName -ne (Resolve-Path $OutDir).Path) { Copy-Item $dll.FullName -Destination $OutDir -Force }
+Write-Host "staged $($dll.Name) from $Tag into $OutDir"

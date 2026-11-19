@@ -303,6 +303,89 @@ fn bundled_mpv_dir(app: &AppHandle) -> Option<PathBuf> {
     app.path().resource_dir().ok().map(|d| d.join("mpv"))
 }
 
+/// Where the engine lives relative to the executable when there is no Tauri resource dir yet
+/// (`--self-test` runs before the app is built): Windows `mpv\`, AppImage `usr/lib`, deb/rpm
+/// private dir, or `DOWNLINK_MPV_DIR` for CI staging.
+fn exe_relative_mpv_dir() -> Option<PathBuf> {
+    if let Some(d) = std::env::var_os("DOWNLINK_MPV_DIR") {
+        return Some(PathBuf::from(d));
+    }
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let candidates = [
+        dir.join("mpv"),
+        dir.join("resources").join("mpv"),
+        dir.join("../lib/downlink/mpv"),
+        dir.join("../lib"),
+        dir.join("../Frameworks"),
+        dir.join("../../Frameworks"),
+    ];
+    let names = downlink_player::loader::library_file_names();
+    candidates
+        .into_iter()
+        .find(|c| names.iter().any(|n| c.join(n).is_file()))
+}
+
+/// `--self-test`: load the bundled libmpv, create an engine, play a synthetic lavfi source with
+/// `vo=null` for 2 s, print OK/FAIL. Used by the CI clean-machine smoke test; never touches the
+/// network. Set `DOWNLINK_REQUIRE_BUNDLED=1` to forbid the system libmpv.
+fn self_test() -> Result<String, String> {
+    use downlink_player::engine::{Engine, EngineEvent};
+    let loaded = downlink_player::load_from_env(exe_relative_mpv_dir().as_deref())
+        .map_err(|e| e.to_string())?;
+    let opts: Vec<(String, String)> = [
+        ("vo", "null"),
+        ("ao", "null"),
+        ("idle", "yes"),
+        ("terminal", "no"),
+        ("ytdl", "no"),
+        ("load-scripts", "no"),
+        ("input-default-bindings", "no"),
+    ]
+    .iter()
+    .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+    .collect();
+    let engine = Engine::new(&loaded, &opts).map_err(|e| e.to_string())?;
+    let version = engine.get_property("mpv-version").unwrap_or_default();
+    engine
+        .command(&[
+            "loadfile",
+            "av://lavfi:testsrc=size=320x240:rate=25",
+            "replace",
+        ])
+        .map_err(|e| e.to_string())?;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut first_frame = None;
+    while Instant::now() < deadline {
+        match engine.wait_event(0.1) {
+            EngineEvent::PlaybackRestart if first_frame.is_none() => {
+                first_frame = Some(Instant::now())
+            }
+            EngineEvent::EndFile { error, .. } if !error.is_empty() => {
+                return Err(format!("playback failed: {error}"));
+            }
+            _ => {}
+        }
+        if first_frame.is_some_and(|t| t.elapsed() >= Duration::from_secs(2)) {
+            break;
+        }
+    }
+    if first_frame.is_none() {
+        return Err("no first frame within 15 s".into());
+    }
+    let pos: f64 = engine
+        .get_property("time-pos")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
+    if pos < 1.0 {
+        return Err(format!("playback did not advance (time-pos {pos:.2})"));
+    }
+    Ok(format!(
+        "{version}, engine source {:?}, advanced {pos:.1}s",
+        loaded.source
+    ))
+}
+
 fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     let mut state = AppState {
@@ -311,7 +394,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         load_error: None,
     };
 
-    match downlink_player::load(bundled_mpv_dir(&handle).as_deref()) {
+    match downlink_player::load_from_env(bundled_mpv_dir(&handle).as_deref()) {
         Ok(loaded) => {
             tracing::info!(source = ?loaded.source, api = ?loaded.client_api_version, "libmpv loaded");
             let emit_handle = handle.clone();
@@ -589,6 +672,18 @@ fn dump_window(app: &AppHandle, path: &str) {
 }
 
 fn main() {
+    if std::env::args().any(|a| a == "--self-test") {
+        match self_test() {
+            Ok(msg) => {
+                println!("OK {msg}");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                println!("FAIL {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
