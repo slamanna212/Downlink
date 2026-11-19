@@ -2,6 +2,8 @@
 //! base) -> throttled position reports -> delete on stop. Every time comes from the **programme
 //! row** in SQLite (CLAUDE.md rule 12): one clock for guide and archive; nothing is inferred.
 
+pub mod template;
+
 use std::time::Duration;
 
 use crate::epg;
