@@ -1,5 +1,13 @@
 # Releasing Downlink
 
+> ## Before the first release: TODO for Sam
+>
+> - [ ] Generate the updater keypair: `cargo tauri signer generate -w ~/.tauri/downlink.key` (back it up offline; never commit it).
+> - [ ] Add repo secrets `TAURI_SIGNING_PRIVATE_KEY` (contents of the key file) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+> - [ ] Paste the public key (`~/.tauri/downlink.key.pub`) into `plugins.updater.pubkey` in `apps/desktop/tauri.conf.json`.
+> - [ ] Set repo variables `MPV_TAG` and `MPV_SHA256` (pinned Windows libmpv, `tools/mpv/PINNED.md`); optionally `LIBMPV_SRC` for Linux.
+> - [ ] Apply the config in "tauri.conf.json requirements" below and implement the `--self-test` flag.
+
 Implements PLAN §10. Workflows: `.github/workflows/ci.yml` (gates) and `.github/workflows/release.yml`
 (build, sign, publish, smoke).
 
@@ -12,6 +20,8 @@ Implements PLAN §10. Workflows: `.github/workflows/ci.yml` (gates) and `.github
 
 Pipeline (`release.yml`):
 
+0. **ci**: calls `ci.yml` as a reusable workflow; nothing below runs unless it passes. `ci.yml` itself
+   only triggers on pull requests and via this call, so CI runs once per push.
 1. **prepare**: derives version/tag, generates notes with git-cliff, creates a *draft* release. Dev builds
    embed `X.Y.Z-dev.<sha>` as their version (via a merged `--config`) so the updater orders them below
    the eventual `X.Y.Z`. A stable tag must equal the `tauri.conf.json` version or the run fails.
@@ -158,9 +168,10 @@ The smoke job needs a `--self-test` flag on the desktop binary. Contract:
   are supplied through the variables above.
 - Ubuntu 22.04 apt ships libmpv 0.34 (`libmpv.so.1`), not the 0.40 / `libmpv.so.2` that M0 ran on. Linux
   staging therefore needs a pinned libmpv.so.2 source (`LIBMPV_SRC`) or the pinned build container.
-- Dev builds use version `X.Y.Z-dev.<sha>`; confirm the rpm and deb bundlers accept a pre-release version
-  string (rpm forbids `-` in Version). If not, switch the dev scheme for those two (e.g. `X.Y.Z~dev.<sha>`).
-- The workflow runs on every push to main independently of CI; make `release.yml` depend on CI if a red
-  main should not publish.
+- Dev versions: tag, updater version and app version are all `X.Y.Z-dev.<sha>`. For rpm the Tauri
+  bundler (tauri-bundler >= 2.10, checked in its source) converts the semver pre-release to the rpm
+  `Version` tag `X.Y.Z~dev.<sha>` itself, so it sorts below `X.Y.Z`; the file name keeps the semver form
+  (`Downlink-X.Y.Z-dev.<sha>-1.x86_64.rpm`). Debian accepts the hyphenated version as upstream-revision.
+  The workflow installs the latest `tauri-cli ^2`; do not pin it below 2.10. No overlay change is needed.
 - Installed binary name is derived at smoke time (`dpkg -L`, `CFBundleExecutable`, NSIS install dir
   `%LOCALAPPDATA%\Downlink`); adjust if `productName` or the install mode changes.

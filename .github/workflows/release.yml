@@ -23,9 +23,15 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Gate: the full CI workflow must pass before anything is built or published.
+  ci:
+    name: CI gate
+    uses: ./.github/workflows/ci.yml
+
   # ---------------------------------------------------------------------------
   prepare:
     name: Prepare release
+    needs: ci
     runs-on: ubuntu-22.04
     permissions:
       contents: write

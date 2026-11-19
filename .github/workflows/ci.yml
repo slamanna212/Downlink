@@ -1,17 +1,18 @@
 # Quality gates from CLAUDE.md / PLAN §11.3, on every PR and push to main.
 name: CI
 
+# Pushes to main are gated by release.yml, which calls this workflow first (workflow_call),
+# so CI runs exactly once per push and a red main never publishes.
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
