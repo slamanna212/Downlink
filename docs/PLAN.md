@@ -309,6 +309,7 @@ Dispatcharr's API is unversioned. Policy:
 
 ### 3.3 Data shapes used
 
+- (Observed shapes on 0.34.1, incl. deviations from this section, are in `docs/dispatcharr-endpoints.md`.)
 - `Channel`: `id`, `uuid`, `channel_number` (float), `name`, `channel_group_id`, `tvg_id`,
   `epg_data_id`, `streams[]`, `stream_profile_id`, `logo_id`, `user_level`, `is_adult`,
   `is_catchup`, `catchup_days`, `is_radio`, `hidden_from_output`.
@@ -354,8 +355,10 @@ sources.
 1. At sync, record each channel's **effective** stream profile (`stream_profile_id`, or the server
    default when null) and whether it is redirect-type. This is metadata only — no request to a stream endpoint.
 2. At play time, for redirect-type channels only, Rust issues the play request itself with redirects
-   disabled. A redirect profile answers with a 302 and no body, so this does **not** open a provider
-   connection. mpv gets the `Location` URL with **no** auth headers.
+   disabled. A redirect profile answers with a 302 and no body; our client does not open a provider
+   connection itself. (Observed on 0.34.1: Dispatcharr sends its own server-side HEAD — falling back to
+   a streamed GET if the HEAD isn't 2xx — to the provider before replying, so this request is still
+   only made when the user actually plays.) mpv gets the `Location` URL with **no** auth headers.
 3. Proxy-type channels go straight to mpv with the header.
 4. M0 verifies with a real redirect channel that the provider never sees the key.
 
