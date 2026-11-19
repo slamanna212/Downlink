@@ -3,8 +3,14 @@
 import { invoke as tauriInvoke, isTauri } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
 import type {
+  AddSourceInput,
   AppError,
+  AppSettings,
   CatalogUpdated,
+  Diagnostics,
+  TaskProgress,
+  TestSourceResult,
+  VideoBounds,
   Channel,
   Group,
   NowNext,
@@ -26,6 +32,16 @@ export interface Commands {
   play_channel: { args: { channelId: number }; result: null };
   player_command: { args: { command: PlayerCommand }; result: null };
   set_favourite: { args: { channelId: number; favourite: boolean }; result: null };
+  add_source: { args: AddSourceInput; result: Source };
+  test_source: { args: AddSourceInput; result: TestSourceResult };
+  remove_source: { args: { sourceId: number }; result: null };
+  sync_source: { args: { sourceId: number }; result: null };
+  get_diagnostics: { args: Record<string, never>; result: Diagnostics };
+  set_debug_logging: { args: { enabled: boolean }; result: null };
+  get_settings: { args: Record<string, never>; result: AppSettings };
+  set_settings: { args: { patch: Partial<AppSettings> }; result: AppSettings };
+  set_video_bounds: { args: VideoBounds; result: null };
+  set_fullscreen: { args: { enabled: boolean }; result: null };
 }
 export type CommandName = keyof Commands;
 
@@ -33,6 +49,7 @@ export type CommandName = keyof Commands;
 export interface Events {
   'catalog://updated': CatalogUpdated;
   'player://state': PlayerState;
+  'task://progress': TaskProgress;
 }
 export type EventName = keyof Events;
 

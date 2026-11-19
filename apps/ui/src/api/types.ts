@@ -58,8 +58,8 @@ export interface Channel {
   number: number | null;
   name: string;
   groupId: number | null;
-  /** Opaque key resolved by the image command; never a URL. */
-  logoKey: string | null;
+  /** Ready-to-use `dlimg://<hash>/<size>` URL (Tauri custom protocol, PLAN §3.6) or null. */
+  logo: string | null;
   quality: 'SD' | 'HD' | 'FHD' | '4K' | null;
   isCatchup: boolean;
   catchupDays: number;
@@ -149,6 +149,76 @@ export type PlayerCommand =
   | { kind: 'stop' }
   | { kind: 'seek'; seconds: number }
   | { kind: 'setVolume'; volume: number }
-  | { kind: 'setMuted'; muted: boolean };
+  | { kind: 'setMuted'; muted: boolean }
+  | { kind: 'retry' };
 
 export type DensitySetting = 'compact' | 'comfortable' | 'tv';
+
+export type HwdecSetting = 'auto-safe' | 'auto' | 'no' | 'vaapi' | 'nvdec' | 'd3d11va' | 'videotoolbox';
+
+/** Machine-local playback/diagnostic settings owned by Rust. */
+export interface AppSettings {
+  /** 1..10 seconds. */
+  liveBufferSecs: number;
+  hwdec: HwdecSetting;
+  debugLogging: boolean;
+}
+
+export interface AddSourceInput {
+  kind: SourceKind;
+  name: string;
+  url: string;
+  /** Dispatcharr. Goes to the OS keychain in Rust; never echoed back. */
+  apiKey?: string;
+  /** Dispatcharr (alternative) / Xtream. */
+  username?: string;
+  password?: string;
+  /** M3U: optional XMLTV guide URL. */
+  xmltvUrl?: string;
+  allowSelfSigned: boolean;
+}
+
+export interface TestSourceResult {
+  channels: number;
+  groups: number;
+  programmes: number;
+  serverVersion: string | null;
+  /** Authenticated user, when the server reports one. */
+  user?: string | null;
+}
+
+export interface Transition {
+  /** UTC ms. */
+  at: number;
+  from: PlayerPhase;
+  to: PlayerPhase;
+}
+
+export interface Diagnostics {
+  appVersion: string;
+  serverVersions: string[];
+  playerState: PlayerState;
+  hwdecCurrent: string | null;
+  os: string;
+  /** Last 50. */
+  transitions: Transition[];
+  /** Already redacted by Rust. */
+  logTail: string[];
+}
+
+export interface TaskProgress {
+  sourceId: number;
+  phase: string;
+  done: number;
+  total: number;
+}
+
+/** Video rect in PHYSICAL pixels, relative to the window's client area. */
+export interface VideoBounds {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** devicePixelRatio. */
+  scale: number;
+}
