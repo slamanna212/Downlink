@@ -92,6 +92,8 @@ const appError = (code: AppError['code'], message: string): AppError => ({ code,
 
 export function createMockBackend(): Backend {
   const mode = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('mock') : null;
+  const failParam = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('fail') : null;
+  const failId = failParam ? Number(failParam) : null;
   const sources = mockSources(mode === 'empty', mode === 'offline' ? 'offline' : 'connected');
   const channels = mode === 'empty' ? [] : mockChannels();
   const groups = mockGroups();
@@ -144,8 +146,7 @@ export function createMockBackend(): Backend {
       setTimeout(() => setPlayer({ state: 'Connecting' }), 150);
       setTimeout(() => {
         // `?fail=<id>` in the URL makes that channel fail, to exercise the error overlay.
-        const fail = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('fail') : null;
-        if (fail && Number(fail) === channelId)
+        if (failId !== null && failId === channelId)
           setPlayer({ state: 'Failed', error: appError('stream', 'This channel stopped sending video. Try again, or pick another channel.') });
         else setPlayer({ state: 'Playing', hwdecCurrent: 'vaapi', videoCodec: 'h264', width: 1920, height: 1080 });
       }, 400);

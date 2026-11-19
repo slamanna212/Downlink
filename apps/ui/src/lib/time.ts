@@ -86,3 +86,6 @@ export function floorToTick(epoch: Epoch, minutes = 30): Epoch {
 export function formatUpdated(epoch: Epoch, now: Epoch = nowEpoch()): string {
   return startOfDay(epoch) === startOfDay(now) ? formatClock(epoch) : formatDateTime(epoch);
 }
+
+/** 14:05:09 (for session logs) */
+export const formatClockSeconds = (epoch: Epoch): string => at(epoch).format('HH:mm:ss');

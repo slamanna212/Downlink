@@ -93,22 +93,19 @@ const tauriBackend: Backend = {
   },
 };
 
-let backend: Backend | null = null;
+let backend: Promise<Backend> | null = null;
 
-async function getBackend(): Promise<Backend> {
-  if (backend) return backend;
-  if (isTauri()) {
-    backend = tauriBackend;
-  } else {
-    const { createMockBackend } = await import('./ipc.mock');
-    backend = createMockBackend();
-  }
+function getBackend(): Promise<Backend> {
+  // Cache the promise: concurrent first calls must share ONE backend (the mock is stateful).
+  backend ??= isTauri()
+    ? Promise.resolve(tauriBackend)
+    : import('./ipc.mock').then((m) => m.createMockBackend());
   return backend;
 }
 
 /** Test/Storybook hook: replace the backend. */
 export function setBackend(b: Backend | null): void {
-  backend = b;
+  backend = b ? Promise.resolve(b) : null;
 }
 
 export async function invoke<C extends CommandName>(cmd: C, args: Commands[C]['args']): Promise<Commands[C]['result']> {

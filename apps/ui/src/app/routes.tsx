@@ -1,5 +1,6 @@
 import { createBrowserRouter, createMemoryRouter, type RouteObject } from 'react-router';
 import { Shell } from './Shell';
+import { PlayerPage } from '../features/player/PlayerPage';
 import { ChannelsPage } from '../features/channels/ChannelsPage';
 import {
   AddSourcePage,
@@ -7,7 +8,6 @@ import {
   HomePage,
   MoviesPage,
   NotFoundPage,
-  PlayerPage,
   RecordingsPage,
   SearchPage,
   SeriesPage,

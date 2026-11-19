@@ -24,6 +24,7 @@ export function Shell() {
   const density = useUiStore((s) => s.density);
   const railPref = useUiStore((s) => s.railPref);
   const setRailPref = useUiStore((s) => s.setRailPref);
+  const fullscreen = useUiStore((s) => s.fullscreen);
 
   const autoCollapsed = isCollapsedRoute(pathname);
   const collapsed = railPref === 'auto' ? autoCollapsed : railPref === 'collapsed';
@@ -44,9 +45,11 @@ export function Shell() {
       <a href="#main" className={classes.skip}>
         {t('a11y.skipToContent')}
       </a>
-      <aside className={classes.rail} style={{ width }}>
-        <Rail mode={mode} onToggle={() => setRailPref(collapsed ? 'expanded' : 'collapsed')} />
-      </aside>
+      {!(fullscreen && route === 'player') && (
+        <aside className={classes.rail} style={{ width }}>
+          <Rail mode={mode} onToggle={() => setRailPref(collapsed ? 'expanded' : 'collapsed')} />
+        </aside>
+      )}
       <main id="main" className={classes.main} tabIndex={-1}>
         <RouteTransition key={pathname}>
           <Outlet />

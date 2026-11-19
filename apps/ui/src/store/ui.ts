@@ -28,6 +28,9 @@ export function applyDensity(density: DensitySetting): void {
 export type RailPref = 'auto' | 'expanded' | 'collapsed';
 
 interface UiState {
+  /** Window fullscreen (the rail hides on the player route). */
+  fullscreen: boolean;
+  setFullscreen: (f: boolean) => void;
   density: DensitySetting;
   setDensity: (d: DensitySetting) => void;
   /** User preference. 'auto' = collapsed on Guide/Player, expanded elsewhere (DESIGN §8). */
@@ -36,6 +39,8 @@ interface UiState {
 }
 
 export const useUiStore = create<UiState>((set) => ({
+  fullscreen: false,
+  setFullscreen: (fullscreen) => set({ fullscreen }),
   density: readStored(DENSITY_KEY, ['compact', 'comfortable', 'tv'], 'comfortable'),
   setDensity: (density) => {
     writeStored(DENSITY_KEY, density);
