@@ -1,0 +1,34 @@
+# git-cliff configuration: Conventional Commits -> release notes (PLAN §10.4).
+# The user-visible "What's new" section is hand-edited on the GitHub release after generation.
+[changelog]
+header = "# Changelog\n"
+body = """
+{% if version %}## {{ version }} ({{ timestamp | date(format="%Y-%m-%d") }}){% else %}## Unreleased{% endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | upper_first }} ({{ commit.id | truncate(length=7, end="") }}){% if commit.breaking %} **BREAKING**{% endif %}
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+footer = ""
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+split_commits = false
+protect_breaking_commits = false
+filter_commits = false
+topo_order = false
+sort_commits = "oldest"
+tag_pattern = "v[0-9]+\\.[0-9]+\\.[0-9]+$"
+# Dev pre-releases (vX.Y.Z-dev.<sha>) are not release boundaries.
+skip_tags = "-dev\\."
+commit_parsers = [
+  { message = "^feat", group = "Features" },
+  { message = "^fix", group = "Fixes" },
+  { message = "^perf", group = "Performance" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^(chore|ci|build|test|refactor|style)", skip = true },
+  { message = "^revert", group = "Reverts" },
+]
