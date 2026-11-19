@@ -19,4 +19,12 @@ describe('app shell', () => {
     expect(await screen.findByText('Recordings')).toBeInTheDocument();
     expect(screen.getByText('Movies')).toBeInTheDocument();
   });
+
+  it('shows the offline banner when the source is offline', async () => {
+    window.history.pushState({}, '', '/?mock=offline');
+    setBackend(createMockBackend());
+    render(<App router={createTestRouter(['/settings/sources'])} client={createQueryClient()} />);
+    expect(await screen.findByText(/Offline — last updated/)).toBeInTheDocument();
+    window.history.pushState({}, '', '/');
+  });
 });

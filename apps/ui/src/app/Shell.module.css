@@ -24,6 +24,8 @@
   overflow: auto;
   background: var(--dl-surface-0);
   position: relative;
+  display: flex;
+  flex-direction: column;
 }
 .shell[data-route='player'] .main {
   background: transparent;
@@ -32,7 +34,8 @@
 
 /* Route transition (DESIGN §5): fade + 8 px over 240 ms. Reduced motion limits it to opacity via global.css. */
 .route {
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   opacity: 0;
   transform: translateY(8px);
   transition: opacity 240ms var(--dl-ease), transform 240ms var(--dl-ease);
@@ -43,7 +46,6 @@
 }
 .shell[data-route='player'] .route {
   transform: none;
-  height: 100%;
 }
 
 .skip {
@@ -53,4 +55,11 @@
   z-index: 10;
   transform: translateY(-200%);
   &:focus-visible { transform: none; }
+}
+
+.banner {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-xl) 0;
 }

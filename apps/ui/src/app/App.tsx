@@ -5,6 +5,7 @@ import { RouterProvider, type DataRouter } from 'react-router';
 import { cssVariablesResolver, theme } from '../theme';
 import { createQueryClient, startCatalogBridge } from '../api/queries';
 import { startPlayerBridge } from '../store/player';
+import { startTaskBridge } from '../store/tasks';
 import { applyDensity, useUiStore } from '../store/ui';
 import { createAppRouter } from './routes';
 
@@ -17,6 +18,7 @@ export function App({ router, client }: { router?: DataRouter; client?: QueryCli
     const stops: Array<() => void> = [];
     let cancelled = false;
     void startCatalogBridge(qc).then((s) => (cancelled ? s() : stops.push(s)));
+    void startTaskBridge().then((s) => (cancelled ? s() : stops.push(s)));
     void startPlayerBridge().then((s) => (cancelled ? s() : stops.push(s)));
     return () => {
       cancelled = true;

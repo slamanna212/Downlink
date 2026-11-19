@@ -51,3 +51,6 @@ export function useNowNextWindow(ids: number[], windowKey: string) {
     refetchInterval: 60_000,
   });
 }
+
+export const useSettings = () =>
+  useQuery({ queryKey: ['settings'], queryFn: () => invoke('get_settings', {}), staleTime: Infinity });

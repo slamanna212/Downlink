@@ -7,7 +7,6 @@ export const GuidePage = () => <Section title="page.guide" />;
 export const MoviesPage = () => <Section title="page.movies" />;
 export const SeriesPage = () => <Section title="page.series" />;
 export const RecordingsPage = () => <Section title="page.recordings" />;
-export const SettingsPage = () => <Section title="page.settings" />;
 export const SearchPage = () => <Section title="page.search" />;
 
 export function NotFoundPage() {

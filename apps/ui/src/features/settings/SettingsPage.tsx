@@ -1,0 +1,255 @@
+import { useState } from 'react';
+import { Link, Navigate, useNavigate, useParams } from 'react-router';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Modal, NavLink, SegmentedControl, Select, Slider, Switch, Text } from '@mantine/core';
+import { IconPalette, IconPlayerPlay, IconPlugConnected, IconStethoscope } from '@tabler/icons-react';
+import { invoke } from '../../api/ipc';
+import { useSettings, useSources } from '../../api/queries';
+import type { DensitySetting, HwdecSetting, Source } from '../../api/types';
+import { DLButton } from '../../components/DLButton/DLButton';
+import { Icon, type TablerIcon } from '../../components/Icon/Icon';
+import { SettingRow } from '../../components/SettingRow/SettingRow';
+import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
+import { formatUpdated } from '../../lib/time';
+import { t, type MessageKey } from '../../lib/i18n';
+import { useTasksStore } from '../../store/tasks';
+import { useUiStore } from '../../store/ui';
+import { copyDiagnostics } from '../diagnostics/copyDiagnostics';
+import classes from './Settings.module.css';
+
+const SECTIONS: { id: string; label: MessageKey; icon: TablerIcon }[] = [
+  { id: 'sources', label: 'settings.sources', icon: IconPlugConnected },
+  { id: 'playback', label: 'settings.playback', icon: IconPlayerPlay },
+  { id: 'appearance', label: 'settings.appearance', icon: IconPalette },
+  { id: 'about', label: 'settings.about', icon: IconStethoscope },
+];
+
+function Section({ title, help, children }: { title: string; help: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <h2 className={classes.sectionTitle}>{title}</h2>
+      <p className={classes.sectionHelp}>{help}</p>
+      <div className={classes.divider} />
+      {children}
+    </section>
+  );
+}
+
+function SourceRow({ source, onRemove }: { source: Source; onRemove: (s: Source) => void }) {
+  const qc = useQueryClient();
+  const task = useTasksStore((s) => s.bySource[source.id]);
+  const sync = useMutation({
+    mutationFn: () => invoke('sync_source', { sourceId: source.id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog', 'sources'] }),
+  });
+  const syncing = source.status === 'syncing' || !!task || sync.isPending;
+  const help = task
+    ? t('settings.sources.syncing', { phase: task.phase })
+    : source.lastSyncAt
+      ? t('settings.sources.lastSync', { time: formatUpdated(source.lastSyncAt) })
+      : t('settings.sources.never');
+  return (
+    <SettingRow
+      label={source.name}
+      help={`${source.kind} · ${source.host ?? ''} · ${t(`source.status.${source.status}`)} · ${help}`}
+      wide
+    >
+      <div className={classes.actions}>
+        <DLButton variant="default" size="sm" loading={syncing} onClick={() => sync.mutate()}>
+          {t('settings.sources.sync')}
+        </DLButton>
+        <DLButton variant="danger" size="sm" onClick={() => onRemove(source)}>
+          {t('settings.sources.remove')}
+        </DLButton>
+      </div>
+    </SettingRow>
+  );
+}
+
+function SourcesSection() {
+  const qc = useQueryClient();
+  const { data, isLoading } = useSources();
+  const navigate = useNavigate();
+  const [removing, setRemoving] = useState<Source | null>(null);
+  const remove = useMutation({
+    mutationFn: (id: number) => invoke('remove_source', { sourceId: id }),
+    onSuccess: () => {
+      setRemoving(null);
+      void qc.invalidateQueries({ queryKey: ['catalog'] });
+    },
+  });
+  return (
+    <Section title={t('settings.sources')} help={t('settings.sources.help')}>
+      <div className={classes.toolbar}>
+        <DLButton variant="filled" onClick={() => void navigate('/sources/add')}>{t('settings.sources.add')}</DLButton>
+      </div>
+      {isLoading ? <SkeletonList rows={2} label={t('loading.generic')} /> : (data ?? []).map((s) => (
+        <SourceRow key={s.id} source={s} onRemove={setRemoving} />
+      ))}
+      <Modal opened={!!removing} onClose={() => setRemoving(null)} title={t('settings.sources.removeAction')}>
+        <Text size="md" mb="lg">{removing ? t('settings.sources.removeConfirm', { name: removing.name }) : ''}</Text>
+        <div className={`${classes.actions} ${classes.end}`}>
+          <DLButton variant="subtle" onClick={() => setRemoving(null)}>{t('common.cancel')}</DLButton>
+          <DLButton variant="danger" loading={remove.isPending} onClick={() => removing && remove.mutate(removing.id)}>
+            {t('settings.sources.removeAction')}
+          </DLButton>
+        </div>
+      </Modal>
+    </Section>
+  );
+}
+
+const HWDEC: { value: HwdecSetting; label: string }[] = [
+  { value: 'auto-safe', label: t('settings.hwdec.autoSafe') },
+  { value: 'auto', label: t('settings.hwdec.auto') },
+  { value: 'no', label: t('settings.hwdec.no') },
+  { value: 'vaapi', label: 'VA-API' },
+  { value: 'nvdec', label: 'NVDEC' },
+  { value: 'd3d11va', label: 'D3D11VA' },
+  { value: 'videotoolbox', label: 'VideoToolbox' },
+];
+
+function useSettingsPatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Parameters<typeof invoke<'set_settings'>>[1]['patch']) => invoke('set_settings', { patch }),
+    onSuccess: (s) => qc.setQueryData(['settings'], s),
+  });
+}
+
+function PlaybackSection() {
+  const { data } = useSettings();
+  const patch = useSettingsPatch();
+  const diag = useQuery({ queryKey: ['diagnostics', 'hwdec'], queryFn: () => invoke('get_diagnostics', {}) });
+  const [buffer, setBuffer] = useState<number | null>(null);
+  if (!data) return <SkeletonList rows={3} label={t('loading.generic')} />;
+  const shown = buffer ?? data.liveBufferSecs;
+  const current = diag.data?.hwdecCurrent;
+  return (
+    <Section title={t('settings.playback')} help={t('settings.playback.help')}>
+      <SettingRow label={t('settings.hwdec')} help={current ? t('settings.hwdec.current', { current }) : t('settings.hwdec.help')}>
+        <Select
+          w="100%"
+          aria-label={t('settings.hwdec')}
+          data={HWDEC}
+          value={data.hwdec}
+          allowDeselect={false}
+          onChange={(v) => v && patch.mutate({ hwdec: v as HwdecSetting })}
+        />
+      </SettingRow>
+      <SettingRow label={t('settings.buffer')} help={t('settings.buffer.help')}>
+        <div className={classes.sliderRow}>
+          <Slider
+            min={1}
+            max={10}
+            step={1}
+            value={shown}
+            label={null}
+            aria-label={t('settings.buffer')}
+            onChange={setBuffer}
+            onChangeEnd={(v) => {
+              patch.mutate({ liveBufferSecs: v });
+              setBuffer(null);
+            }}
+          />
+          <span className={classes.value}>{shown} s</span>
+        </div>
+      </SettingRow>
+    </Section>
+  );
+}
+
+function AppearanceSection() {
+  const density = useUiStore((s) => s.density);
+  const setDensity = useUiStore((s) => s.setDensity);
+  return (
+    <Section title={t('settings.appearance')} help={t('settings.appearance.help')}>
+      <SettingRow label={t('settings.density')} help={t('settings.density.help')} wide>
+        <SegmentedControl
+          aria-label={t('settings.density')}
+          value={density}
+          onChange={(v) => setDensity(v as DensitySetting)}
+          data={[
+            { value: 'compact', label: t('settings.density.compact') },
+            { value: 'comfortable', label: t('settings.density.comfortable') },
+            { value: 'tv', label: t('settings.density.tv') },
+          ]}
+        />
+      </SettingRow>
+    </Section>
+  );
+}
+
+function AboutSection() {
+  const diag = useQuery({ queryKey: ['diagnostics', 'about'], queryFn: () => invoke('get_diagnostics', {}) });
+  const { data: settings } = useSettings();
+  const qc = useQueryClient();
+  const [copied, setCopied] = useState(false);
+  const debug = useMutation({
+    mutationFn: (enabled: boolean) => invoke('set_debug_logging', { enabled }),
+    onSuccess: (_r, enabled) => qc.setQueryData(['settings'], { ...settings, debugLogging: enabled }),
+  });
+  const d = diag.data;
+  return (
+    <Section title={t('settings.about')} help={t('settings.about.help')}>
+      <SettingRow label={t('settings.about.app')} wide><span className={classes.mono}>{d?.appVersion ?? '–'}</span></SettingRow>
+      <SettingRow label={t('settings.about.servers')} wide>
+        <span className={classes.mono}>{d?.serverVersions.length ? d.serverVersions.join(', ') : t('settings.none')}</span>
+      </SettingRow>
+      <SettingRow label={t('settings.about.hwdec')} wide><span className={classes.mono}>{d?.hwdecCurrent ?? '–'}</span></SettingRow>
+      <SettingRow label={t('settings.about.os')} wide><span className={classes.mono}>{d?.os ?? '–'}</span></SettingRow>
+      <SettingRow label={t('settings.debug')} help={t('settings.debug.help')} wide>
+        <Switch
+          aria-label={t('settings.debug')}
+          checked={settings?.debugLogging ?? false}
+          onChange={(e) => debug.mutate(e.currentTarget.checked)}
+        />
+      </SettingRow>
+      <SettingRow label={t('settings.copy')} help={t('settings.copy.help')} wide>
+        <DLButton
+          variant="default"
+          onClick={() =>
+            void copyDiagnostics().then((ok) => {
+              setCopied(ok);
+              setTimeout(() => setCopied(false), 2000);
+            })
+          }
+        >
+          {copied ? t('settings.copied') : t('settings.copy')}
+        </DLButton>
+      </SettingRow>
+    </Section>
+  );
+}
+
+export function SettingsPage() {
+  const { section } = useParams();
+  if (!section || !SECTIONS.some((s) => s.id === section)) return <Navigate to="/settings/sources" replace />;
+  return (
+    <div className={classes.page}>
+      <nav className={classes.nav} aria-label={t('settings.nav')}>
+        <h1 className={classes.navTitle}>{t('settings.title')}</h1>
+        {SECTIONS.map((s) => (
+          <NavLink
+            key={s.id}
+            component={Link}
+            to={`/settings/${s.id}`}
+            active={section === s.id}
+            aria-current={section === s.id ? 'page' : undefined}
+            className={classes.navItem}
+            label={t(s.label)}
+            leftSection={<Icon icon={s.icon} size={20} />}
+          />
+        ))}
+      </nav>
+      <div className={classes.content}>
+        <div className={classes.inner}>
+          {section === 'sources' && <SourcesSection />}
+          {section === 'playback' && <PlaybackSection />}
+          {section === 'appearance' && <AppearanceSection />}
+          {section === 'about' && <AboutSection />}
+        </div>
+      </div>
+    </div>
+  );
+}
