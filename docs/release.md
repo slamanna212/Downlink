@@ -5,7 +5,7 @@
 > - [ ] Generate the updater keypair: `cargo tauri signer generate -w ~/.tauri/downlink.key` (back it up offline; never commit it).
 > - [ ] Add repo secrets `TAURI_SIGNING_PRIVATE_KEY` (contents of the key file) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
 > - [ ] Paste the public key (`~/.tauri/downlink.key.pub`) into `plugins.updater.pubkey` in `apps/desktop/tauri.conf.json`.
-> - [ ] Set repo variables `MPV_TAG` and `MPV_SHA256` (pinned Windows libmpv, `tools/mpv/PINNED.md`); optionally `LIBMPV_SRC` for Linux.
+> - [ ] (Optional) repo variable `LIBMPV_SRC` for Linux. The Windows libmpv pin lives in `tools/mpv/pins.env`; no `MPV_*` variables are needed.
 > - [ ] Apply the config in "tauri.conf.json requirements" below and implement the `--self-test` flag.
 
 Implements PLAN §10. Workflows: `.github/workflows/ci.yml` (gates) and `.github/workflows/release.yml`
@@ -54,12 +54,20 @@ Run `git cliff --current` locally to preview.
 |---|---|---|
 | `TAURI_SIGNING_PRIVATE_KEY` | secret | minisign private key (contents of the key file) for updater `.sig` files |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret | its password |
-| `MPV_TAG` | variable | pinned zhongfly release tag for Windows libmpv (`tools/mpv/PINNED.md`) |
-| `MPV_SHA256` | variable | SHA-256 of that archive |
 | `LIBMPV_SRC` | variable (optional) | absolute path of the `libmpv.so.2` to bundle on Linux; default is the runner's linker cache |
 
 `GITHUB_TOKEN` is used for everything else. Workflow permissions are least-privilege per job
 (`contents: write`; `id-token` + `attestations: write` only in `publish`).
+
+## Testing dev builds before the updater key exists
+
+If `TAURI_SIGNING_PRIVATE_KEY` is empty, dev builds still build and publish all installers (NSIS `.exe`,
+`.deb`, `.AppImage`, `.rpm`, `.dmg`, plus `SHA256SUMS-linux-x86_64.txt`) to the `vX.Y.Z-dev.<sha>`
+pre-release, with a workflow warning annotation. The build gets `bundle.createUpdaterArtifacts=false`
+(merged by `.github/actions/setup-build`), no `.sig` files are made, and `latest.json` and the rolling
+`dev` release are skipped, so in-app updates do not work until the key is added. A stable tag without the
+key fails in `prepare`. Libmpv pins (Windows tag/asset/SHA-256, Linux, macOS) are read from
+`tools/mpv/pins.env` by the staging scripts.
 
 ## Updater keypair
 
@@ -126,7 +134,7 @@ compile time). The release workflow merges `tauri.release.<os>.conf.json` over t
 `apps/desktop/tauri.release.macos.conf.json`
 
 ```json
-{ "bundle": { "macOS": { "files": { "Frameworks": "../../tools/mpv/out/macos/Frameworks" } } } }
+{ "bundle": { "macOS": { "files": { "Frameworks": "../../tools/mpv/out/macos/universal" } } } }
 ```
 
 `apps/desktop/tauri.release.linux.conf.json`
@@ -163,9 +171,8 @@ The smoke job needs a `--self-test` flag on the desktop binary. Contract:
 
 ## Open items and assumptions
 
-- `tools/mpv/*.sh|ps1` currently have fixed output dirs and no output-dir argument; the workflow uses
-  those fixed paths (`tools/mpv/out/{windows/mpv,macos/Frameworks,linux/lib}`). Pins (TBD in PINNED.md)
-  are supplied through the variables above.
+- The staging scripts take an output dir (`windows.ps1 -OutDir`, `linux.sh <dir>`, `macos.sh <dir> collect|merge`);
+  the workflow stages into `tools/mpv/out/{windows/mpv,macos/universal,linux/lib}`. Pins come from `tools/mpv/pins.env`.
 - Ubuntu 22.04 apt ships libmpv 0.34 (`libmpv.so.1`), not the 0.40 / `libmpv.so.2` that M0 ran on. Linux
   staging therefore needs a pinned libmpv.so.2 source (`LIBMPV_SRC`) or the pinned build container.
 - Dev versions: tag, updater version and app version are all `X.Y.Z-dev.<sha>`. For rpm the Tauri

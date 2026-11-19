@@ -40,6 +40,7 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       version: ${{ steps.meta.outputs.version }}
       release_id: ${{ steps.create.outputs.release_id }}
+      signed: ${{ steps.meta.outputs.signed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -47,7 +48,19 @@ jobs:
 
       - id: meta
         name: Compute channel, version and tag
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
+          if [[ -n "$SIGNING_KEY" ]]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+              echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set; a stable release must ship signed updater artefacts (docs/release.md)"
+              exit 1
+            fi
+            echo "::warning title=Unsigned dev build::TAURI_SIGNING_PRIVATE_KEY is not set. Installers are built and published, but without updater signatures or latest.json, so in-app updates will not work. See docs/release.md."
+          fi
           base="$(jq -r .version apps/desktop/tauri.conf.json)"
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             channel=stable
@@ -113,7 +126,7 @@ jobs:
       - name: Collect libmpv dylib tree
         env:
           ARCH_DIR: ${{ matrix.arch }}
-        run: ./tools/mpv/macos.sh collect
+        run: ./tools/mpv/macos.sh tools/mpv/out/macos collect
       - uses: actions/upload-artifact@v4
         with:
           name: mpv-macos-${{ matrix.arch }}
@@ -130,16 +143,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Stage libmpv (tools/mpv/windows.ps1 -> tools/mpv/out/windows/mpv)
+      - name: Stage libmpv (pinned in tools/mpv/pins.env)
         shell: pwsh
-        env:
-          MPV_TAG: ${{ vars.MPV_TAG }}
-          MPV_SHA256: ${{ vars.MPV_SHA256 }}
-        run: ./tools/mpv/windows.ps1
+        # Pins (tag, asset, SHA-256) come from tools/mpv/pins.env; no repo variables needed.
+        run: ./tools/mpv/windows.ps1 -OutDir tools/mpv/out/windows/mpv
 
       - uses: ./.github/actions/setup-build
         with:
           channel-version: ${{ needs.prepare.outputs.version }}
+          signed: ${{ needs.prepare.outputs.signed }}
           overlay: windows
 
       - uses: tauri-apps/tauri-action@v0
@@ -172,12 +184,13 @@ jobs:
         with:
           name: mpv-macos-x86_64
           path: tools/mpv/out/macos/x86_64
-      - name: Merge libmpv into universal Frameworks
-        run: ./tools/mpv/macos.sh merge
+      - name: Merge libmpv into a universal set (tools/mpv/out/macos/universal)
+        run: ./tools/mpv/macos.sh tools/mpv/out/macos merge
 
       - uses: ./.github/actions/setup-build
         with:
           channel-version: ${{ needs.prepare.outputs.version }}
+          signed: ${{ needs.prepare.outputs.signed }}
           overlay: macos
           rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
 
@@ -220,11 +233,12 @@ jobs:
           if [ -z "$src" ]; then
             echo "::error::no libmpv.so.2 found; set repo variable LIBMPV_SRC (PINNED.md)"; exit 1
           fi
-          LIBMPV_SRC="$src" ./tools/mpv/linux.sh
+          LIBMPV_SRC="$src" ./tools/mpv/linux.sh tools/mpv/out/linux/lib
 
       - uses: ./.github/actions/setup-build
         with:
           channel-version: ${{ needs.prepare.outputs.version }}
+          signed: ${{ needs.prepare.outputs.signed }}
           overlay: linux
 
       - uses: tauri-apps/tauri-action@v0
@@ -245,6 +259,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
+          SIGNED: ${{ needs.prepare.outputs.signed }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
@@ -252,11 +267,14 @@ jobs:
           mkdir -p out
           cp "$bundle"/appimage/*.AppImage "$bundle"/deb/*.deb "$bundle"/rpm/*.rpm out/
           cd out
-          for f in *.deb *.rpm; do
-            cargo tauri signer sign "$f"   # reads key + password from the TAURI_SIGNING_* env vars
-          done
+          if [[ "$SIGNED" == true ]]; then
+            for f in *.deb *.rpm; do
+              cargo tauri signer sign "$f"   # reads key + password from the TAURI_SIGNING_* env vars
+            done
+          fi
           sha256sum -- *.AppImage *.deb *.rpm > SHA256SUMS-linux-x86_64.txt
-          gh release upload "$TAG" -- *.deb.sig *.rpm.sig SHA256SUMS-linux-x86_64.txt --clobber
+          gh release upload "$TAG" -- *.deb *.rpm SHA256SUMS-linux-x86_64.txt --clobber
+          if [[ "$SIGNED" == true ]]; then gh release upload "$TAG" -- *.deb.sig *.rpm.sig --clobber; fi
 
   # ---------------------------------------------------------------------------
   publish:
@@ -273,6 +291,7 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       CHANNEL: ${{ needs.prepare.outputs.channel }}
       RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+      SIGNED: ${{ needs.prepare.outputs.signed }}
     steps:
       - uses: actions/checkout@v4
 
@@ -287,6 +306,7 @@ jobs:
           ls -l assets
 
       - name: Build latest.json
+        if: needs.prepare.outputs.signed == 'true'
         run: |
           gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq .body > notes.md
           python3 tools/release/make-latest-json.py \
@@ -315,7 +335,7 @@ jobs:
             gh release upload "$TAG" assets/Downlink_x64-setup.exe assets/Downlink_universal.dmg \
               assets/Downlink_amd64.AppImage assets/Downlink_amd64.deb assets/Downlink-x86_64.rpm --clobber
           fi
-          gh release upload "$TAG" latest.json --clobber
+          if [[ "$SIGNED" == true ]]; then gh release upload "$TAG" latest.json --clobber; fi
 
       - name: Publish release
         run: |
@@ -327,7 +347,7 @@ jobs:
 
       # Rolling `dev` release: always holds the newest dev latest.json (endpoint .../releases/download/dev/latest.json).
       - name: Update rolling dev release
-        if: needs.prepare.outputs.channel == 'dev'
+        if: needs.prepare.outputs.channel == 'dev' && needs.prepare.outputs.signed == 'true'
         run: |
           git tag -f dev "$GITHUB_SHA"
           git push -f origin refs/tags/dev
