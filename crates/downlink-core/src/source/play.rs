@@ -72,12 +72,8 @@ impl PlayPlan {
             headers: self
                 .headers
                 .iter()
-                .map(|(k, v)| {
-                    (
-                        k.clone(),
-                        redact::redact_header_value(k, v.expose()).into_owned(),
-                    )
-                })
+                // every per-file header value is treated as secret
+                .map(|(k, _)| (k.clone(), redact::MASK.to_owned()))
                 .collect(),
             surface: self.surface,
             profile: self.profile,

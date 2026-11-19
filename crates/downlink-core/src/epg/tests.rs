@@ -1,0 +1,136 @@
+use super::*;
+use crate::store::{ChannelUpsert, NewSource};
+
+async fn seeded() -> (Store, i64, i64) {
+    let store = Store::open_memory().await.unwrap();
+    let src = store
+        .insert_source(&NewSource {
+            kind: "dispatcharr".into(),
+            name: "T".into(),
+            base_url: None,
+            secret_ref: None,
+            username: None,
+            tls_insecure: false,
+            created_at: 1,
+        })
+        .await
+        .unwrap();
+    let g = store
+        .sync_groups(src.id, &[("1".into(), "G".into())])
+        .await
+        .unwrap();
+    store
+        .sync_channels(
+            src.id,
+            &[ChannelUpsert {
+                ext_id: "1".into(),
+                name: "C".into(),
+                tvg_id: Some("c.test".into()),
+                group_ext_id: Some("1".into()),
+                ..Default::default()
+            }],
+            &g,
+        )
+        .await
+        .unwrap();
+    let id = store.channel_by_ext(src.id, "1").await.unwrap().unwrap().id;
+    (store, src.id, id)
+}
+
+fn p(cid: i64, s: i64, e: i64, t: &str) -> ProgrammeRow {
+    ProgrammeRow {
+        channel_id: cid,
+        start_utc: s,
+        end_utc: e,
+        ext_id: None,
+        title: Some(t.into()),
+        subtitle: None,
+        description: None,
+        season: None,
+        episode: None,
+        flags: 0,
+    }
+}
+
+#[tokio::test]
+async fn now_next_boundaries() {
+    let (store, _, c) = seeded().await;
+    store
+        .upsert_programmes(&[p(c, 0, 100, "A"), p(c, 100, 200, "B"), p(c, 250, 300, "C")])
+        .await
+        .unwrap();
+    let nn = now_next(&store, c, 50).await.unwrap();
+    assert_eq!(
+        (
+            nn.now.unwrap().title.as_deref(),
+            nn.next.unwrap().title.as_deref()
+        ),
+        (Some("A"), Some("B"))
+    );
+    // end is exclusive, start inclusive
+    let nn = now_next(&store, c, 100).await.unwrap();
+    assert_eq!(nn.now.unwrap().title.as_deref(), Some("B"));
+    // gap: nothing now, next is C
+    let nn = now_next(&store, c, 220).await.unwrap();
+    assert!(nn.now.is_none());
+    assert_eq!(nn.next.unwrap().title.as_deref(), Some("C"));
+    // after everything
+    let nn = now_next(&store, c, 400).await.unwrap();
+    assert!(nn.now.is_none() && nn.next.is_none());
+}
+
+#[tokio::test]
+async fn window_overlap_and_order() {
+    let (store, _, c) = seeded().await;
+    store
+        .upsert_programmes(&[p(c, 200, 300, "B"), p(c, 0, 100, "A"), p(c, 100, 200, "M")])
+        .await
+        .unwrap();
+    let r = window(
+        &store,
+        &[c],
+        TimeWindow {
+            start_utc: 50,
+            end_utc: 200,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        r.iter()
+            .map(|x| x.title.as_deref().unwrap())
+            .collect::<Vec<_>>(),
+        ["A", "M"]
+    );
+}
+
+#[test]
+fn windows_and_retention() {
+    let w = visible_window(10_000);
+    assert_eq!((w.start_utc, w.end_utc), (10_000 - 7200, 10_000 + 43_200));
+    assert_eq!(retention_cutoff(1_000_000, 3), 1_000_000 - 3 * 86_400);
+    assert_eq!(
+        retention_cutoff(1_000_000, 30),
+        1_000_000 - 7 * 86_400,
+        "capped at 7 days"
+    );
+}
+
+#[tokio::test]
+async fn prune_uses_max_catchup_days() {
+    let (store, sid, c) = seeded().await;
+    sqlx::query("UPDATE channel SET catchup_days = 1")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let now = 10 * 86_400;
+    store
+        .upsert_programmes(&[
+            p(c, now - 3 * 86_400, now - 3 * 86_400 + 60, "old"),
+            p(c, now - 3600, now, "recent"),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(prune(&store, now).await.unwrap(), 1);
+    let _ = sid;
+}

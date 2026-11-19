@@ -250,3 +250,16 @@ impl Store {
         Ok(rows.into_iter().collect())
     }
 }
+
+impl Store {
+    /// `ext_id -> stream_redirect` as currently stored (used to keep the last known value when
+    /// profile metadata cannot be fetched).
+    pub async fn redirect_flags(&self, source_id: i64) -> Result<HashMap<String, bool>> {
+        let rows: Vec<(String, bool)> =
+            sqlx::query_as("SELECT ext_id, stream_redirect FROM channel WHERE source_id = ?")
+                .bind(source_id)
+                .fetch_all(self.pool())
+                .await?;
+        Ok(rows.into_iter().collect())
+    }
+}

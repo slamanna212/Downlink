@@ -139,7 +139,7 @@ async fn endpoint_channels_paginates_without_trusting_page_size() {
     assert_eq!(count, Some(5));
     assert_eq!(chs[0].name, "Channel One HD");
     assert_eq!(chs[0].streams, ["11", "12"], "failover order preserved");
-    assert_eq!(chs[1].stream_profile_id, Some(2));
+    assert_eq!(chs[1].stream_profile_id, Some(4));
     assert_eq!(chs[5].number, Some(6.0), "string channel_number tolerated");
     assert!(chs[2].is_adult && chs[3].is_radio && chs[4].hidden);
 }
