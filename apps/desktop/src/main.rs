@@ -427,7 +427,7 @@ fn attach_surface(
     dispatch: MainThreadDispatch,
 ) -> Result<Surface, String> {
     let win = app.get_webview_window("main").ok_or("no main window")?;
-    let view = win.ns_view().map_err(|e| e.to_string())?;
+    let view = win.ns_window().map_err(|e| e.to_string())?;
     let mut s = Surface::new(p.engine(), dispatch);
     s.attach(&view).map_err(|e| e.to_string())?;
     Ok(s)
