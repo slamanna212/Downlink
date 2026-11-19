@@ -1002,7 +1002,7 @@ Settings, empty/loading/offline states, 10-foot variants of Channels/Guide/Playe
   in the scroll handler. Do **not** use `@mantine/schedule` for the guide — it's an event calendar,
   not a 5k-row EPG.
 - **Spatial navigation**: `@noriginmedia/norigin-spatial-navigation` from M1 for d-pad/remote focus;
-  theme `focusRing: 'always'` plus custom focus styles.
+  Mantine's own ring off (`focusRing: 'never'`) and our always-visible `--dl-focus-ring` applied via `:focus-visible` and `data-focused` (DESIGN.md §5).
 - **Command palette**: `@mantine/spotlight`.
 - **Time**: dayjs with `utc` and `timezone` plugins behind one `time.ts` module; no other date math
   in the UI.
