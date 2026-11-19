@@ -2,5 +2,6 @@
 
 pub mod error;
 pub mod redact;
+pub mod store;
 
 pub use error::{AppError, ErrorCode, Result};
