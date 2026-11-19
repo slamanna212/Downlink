@@ -40,6 +40,7 @@ impl Store {
             .max_connections(4)
             .connect_with(opts)
             .await?;
+        backup_before_migrate(&pool, path.as_ref()).await?;
         Self::from_pool(pool).await
     }
 
@@ -112,6 +113,59 @@ impl Store {
         .await?;
         Ok(row)
     }
+}
+
+/// Number of backups kept next to the database (`<db>.bak1` newest, `<db>.bak2` older).
+pub const BACKUPS_KEPT: usize = 2;
+
+fn backup_path(db: &Path, n: usize) -> std::path::PathBuf {
+    let mut name = db.as_os_str().to_owned();
+    name.push(format!(".bak{n}"));
+    std::path::PathBuf::from(name)
+}
+
+/// PLAN §7.6: before applying pending migrations to a database that already holds data, copy it
+/// (consistent, WAL-aware, via `VACUUM INTO`) and keep the last two copies. Fresh databases and
+/// up-to-date ones are not backed up.
+async fn backup_before_migrate(pool: &SqlitePool, db: &Path) -> Result<()> {
+    let has_table: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if has_table.is_none() {
+        return Ok(());
+    }
+    let applied: Option<i64> = sqlx::query_scalar("SELECT max(version) FROM _sqlx_migrations")
+        .fetch_one(pool)
+        .await?;
+    let Some(applied) = applied else {
+        return Ok(());
+    };
+    let pending = sqlx::migrate!("./migrations")
+        .iter()
+        .any(|m| m.version > applied && !m.migration_type.is_down_migration());
+    if !pending {
+        return Ok(());
+    }
+    // Rotate: drop the oldest, shift the rest up.
+    for n in (1..BACKUPS_KEPT).rev() {
+        let from = backup_path(db, n);
+        if from.exists() {
+            std::fs::rename(&from, backup_path(db, n + 1))?;
+        }
+    }
+    let target = backup_path(db, 1);
+    let _ = std::fs::remove_file(&target);
+    let target_str = target
+        .to_str()
+        .ok_or_else(|| crate::AppError::local("The database path is not valid text."))?
+        .replace('\'', "''");
+    sqlx::query(&format!("VACUUM INTO '{target_str}'"))
+        .execute(pool)
+        .await?;
+    tracing::info!("database backed up before migration");
+    Ok(())
 }
 
 #[cfg(test)]

@@ -302,3 +302,60 @@ async fn no_secret_is_ever_written_to_the_db() {
         .unwrap();
     assert!(row.secret_ref.unwrap().starts_with("downlink/source/"));
 }
+
+#[tokio::test]
+async fn pending_migration_backs_up_and_keeps_two_copies() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("d.sqlite");
+    let bak = |n: usize| super::backup_path(&path, n);
+
+    // Fresh database: nothing to back up.
+    let s = Store::open(&path).await.unwrap();
+    s.insert_source(&NewSource {
+        kind: "m3u".into(),
+        name: "KEEP".into(),
+        base_url: None,
+        secret_ref: None,
+        username: None,
+        tls_insecure: false,
+        created_at: 1,
+    })
+    .await
+    .unwrap();
+    s.close().await;
+    assert!(!bak(1).exists());
+    // Up to date: still nothing.
+    Store::open(&path).await.unwrap().close().await;
+    assert!(!bak(1).exists());
+
+    // Simulate "older app version": forget the newest migration so it is pending again.
+    for round in 1..=3 {
+        let s = Store::open(&path).await.unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = (SELECT max(version) FROM _sqlx_migrations)")
+            .execute(s.pool())
+            .await
+            .unwrap();
+        sqlx::query("DROP TABLE IF EXISTS programme_fts")
+            .execute(s.pool())
+            .await
+            .unwrap();
+        for t in ["programme_fts_ai", "programme_fts_ad", "programme_fts_au"] {
+            sqlx::query(&format!("DROP TRIGGER IF EXISTS {t}"))
+                .execute(s.pool())
+                .await
+                .unwrap();
+        }
+        s.close().await;
+        let s = Store::open(&path).await.unwrap(); // re-applies it, backing up first
+        s.close().await;
+        assert!(bak(1).exists(), "round {round}");
+        assert_eq!(bak(2).exists(), round >= 2, "round {round}");
+        assert!(
+            !super::backup_path(&path, 3).exists(),
+            "only two copies are kept"
+        );
+    }
+    // The backup is a usable database holding the data.
+    let b = Store::open(bak(1)).await.unwrap();
+    assert_eq!(b.list_sources().await.unwrap()[0].name, "KEEP");
+}
