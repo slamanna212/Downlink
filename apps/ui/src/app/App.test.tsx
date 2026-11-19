@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, beforeEach } from 'vitest';
 import { App } from './App';
 import { createTestRouter } from './routes';
@@ -26,5 +27,13 @@ describe('app shell', () => {
     render(<App router={createTestRouter(['/settings/sources'])} client={createQueryClient()} />);
     expect(await screen.findByText(/Offline — last updated/)).toBeInTheDocument();
     window.history.pushState({}, '', '/');
+  });
+
+  it('searches channels and programmes', async () => {
+    const user = userEvent.setup();
+    render(<App router={createTestRouter(['/search'])} client={createQueryClient()} />);
+    await user.type(await screen.findByRole('combobox'), 'harbor');
+    expect(await screen.findAllByRole('option')).not.toHaveLength(0);
+    expect(screen.getAllByText('Harbor News 24').length).toBeGreaterThan(0);
   });
 });

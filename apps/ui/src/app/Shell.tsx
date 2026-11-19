@@ -10,6 +10,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '../api/ipc';
 import { Banner } from '../components/Banner/Banner';
 import { formatUpdated } from '../lib/time';
+import { ChannelDetail } from '../features/detail/ChannelDetail';
 import { Rail, type RailMode } from './Rail';
 import { isCollapsedRoute } from './nav';
 import classes from './Shell.module.css';
@@ -86,6 +87,7 @@ export function Shell() {
           <Outlet />
         </RouteTransition>
       </main>
+      <ChannelDetail />
     </div>
   );
 }

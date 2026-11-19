@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Box } from '@mantine/core';
 import { dl } from '../../theme';
 import { useUiStore } from '../../store/ui';
 import { initialsOf, logoColor } from '../../lib/logo';
@@ -22,7 +21,7 @@ export function ChannelLogo({ channelId, name, src, density }: ChannelLogoProps)
   const showImage = !!src && failedSrc !== src;
 
   return (
-    <Box
+    <div
       className={classes.plate}
       style={showImage ? { width: w, height: h } : { width: w, height: h, background: logoColor(channelId) }}
       data-fallback={showImage ? undefined : 'true'}
@@ -34,6 +33,6 @@ export function ChannelLogo({ channelId, name, src, density }: ChannelLogoProps)
           {initialsOf(name)}
         </span>
       )}
-    </Box>
+    </div>
   );
 }

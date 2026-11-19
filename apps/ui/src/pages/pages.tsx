@@ -5,7 +5,6 @@ import { Section } from './Section';
 export const MoviesPage = () => <Section title="page.movies" />;
 export const SeriesPage = () => <Section title="page.series" />;
 export const RecordingsPage = () => <Section title="page.recordings" />;
-export const SearchPage = () => <Section title="page.search" />;
 
 export function NotFoundPage() {
   return <PageHeader title={t('page.notFound')} />;

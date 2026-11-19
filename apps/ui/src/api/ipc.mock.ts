@@ -142,6 +142,7 @@ export function createMockBackend(): Backend {
     deinterlace: 'auto', subtitleSize: 100, subtitleBackground: true,
   };
   let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, lastChecked: null };
+  let searchIndex: { programme: Programme; channel: Channel; hay: string }[] | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let player = idleState();
   const transitions: Transition[] = [];
@@ -236,12 +237,13 @@ export function createMockBackend(): Backend {
       const q = query.trim().toLowerCase();
       if (!q) return { channels: [], programmes: [] };
       const hits = channels.filter((c) => c.name.toLowerCase().includes(q) || String(c.number ?? '').startsWith(q));
-      const now = nowSec();
-      const progs = channels.slice(0, 300).flatMap((c) => {
-        const nn = mockNowNext(c.id, now, scheduled);
-        return [nn.now, nn.next].filter((p): p is Programme => !!p && (p.title ?? '').toLowerCase().includes(q)).map((p) => ({ programme: p, channel: c }));
+      // Programme index built once (now/next of the first 300 channels): keeps the mock off the render path.
+      searchIndex ??= channels.slice(0, 300).flatMap((c) => {
+        const nn = mockNowNext(c.id, nowSec(), scheduled);
+        return [nn.now, nn.next].filter((p): p is Programme => !!p).map((p) => ({ programme: p, channel: c, hay: (p.title ?? '').toLowerCase() }));
       });
-      return { channels: hits.slice(0, limit), programmes: progs.slice(0, limit) };
+      const progs = searchIndex.filter((x) => x.hay.includes(q)).slice(0, limit).map(({ programme, channel }) => ({ programme, channel }));
+      return { channels: hits.slice(0, limit), programmes: progs };
     },
     get_player_state: () => player,
     play_channel: ({ channelId }) => {

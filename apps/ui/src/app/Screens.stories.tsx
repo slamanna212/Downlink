@@ -26,6 +26,8 @@ const meta: Meta<typeof Screen> = {
 export default meta;
 type Story = StoryObj<typeof Screen>;
 
+export const Home: Story = { args: { path: '/' } };
+export const Search: Story = { args: { path: '/search' } };
 export const Channels: Story = { args: { path: '/channels' } };
 export const Guide: Story = { args: { path: '/guide' } };
 export const Player: Story = { args: { path: '/player' } };

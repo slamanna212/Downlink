@@ -4,13 +4,13 @@ import { SettingsPage } from '../features/settings/SettingsPage';
 import { AddSourcePage } from '../features/sources/AddSourcePage';
 import { GuidePage } from '../features/guide/GuidePage';
 import { HomePage } from '../features/home/HomePage';
+import { SearchPage } from '../features/search/SearchPage';
 import { PlayerPage } from '../features/player/PlayerPage';
 import { ChannelsPage } from '../features/channels/ChannelsPage';
 import {
   MoviesPage,
   NotFoundPage,
   RecordingsPage,
-  SearchPage,
   SeriesPage,
 } from '../pages/pages';
 
