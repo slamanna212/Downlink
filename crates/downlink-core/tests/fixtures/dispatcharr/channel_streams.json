@@ -1,0 +1,4 @@
+[
+  {"id": 12, "name": "Source B", "url": "http://provider.test/live/someuser/somepass/12.ts", "m3u_account": 1},
+  {"id": 11, "name": "Source A", "url": "http://provider.test/live/someuser/somepass/11.ts", "m3u_account": 1}
+]

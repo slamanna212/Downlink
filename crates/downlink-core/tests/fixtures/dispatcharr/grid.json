@@ -1,0 +1,10 @@
+{"data": [
+  {"id": 1001, "start_time": "2025-01-01T10:00:00Z", "end_time": "2025-01-01T11:00:00Z", "title": "Morning Show",
+   "sub_title": "Episode 5", "description": "A synthetic programme.", "tvg_id": "one.test", "season": 2, "episode": 5,
+   "is_new": true, "is_live": false, "is_premiere": false, "is_finale": false},
+  {"id": "dummy-77", "start_time": "2025-01-01T11:00:00Z", "end_time": "2025-01-01T12:30:00+00:00", "title": "Midday News",
+   "tvg_id": "one.test", "is_live": true},
+  {"id": "1003", "start_time": "2025-01-01T10:30:00Z", "end_time": "2025-01-01T11:30:00Z", "title": "Channel Two Film",
+   "tvg_id": "two.test"},
+  {"id": "bad", "start_time": "not a time", "end_time": "2025-01-01T11:30:00Z", "title": "Unreadable", "tvg_id": "two.test"}
+]}

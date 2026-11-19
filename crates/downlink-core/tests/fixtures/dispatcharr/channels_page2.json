@@ -1,0 +1,11 @@
+{
+  "count": 5,
+  "next": "http://dispatcharr.test/api/channels/channels/?page=3&page_size=2",
+  "previous": "http://dispatcharr.test/api/channels/channels/?page=1&page_size=2",
+  "results": [
+    {"id": 3, "uuid": "00000000-0000-4000-8000-000000000003", "channel_number": 3.0, "name": "Adult Example",
+     "channel_group_id": 2, "tvg_id": "adult.test", "streams": [14], "is_adult": true},
+    {"id": 4, "uuid": "00000000-0000-4000-8000-000000000004", "channel_number": 4.0, "name": "Radio One",
+     "channel_group_id": 2, "tvg_id": "radio.test", "streams": [15], "is_radio": true}
+  ]
+}

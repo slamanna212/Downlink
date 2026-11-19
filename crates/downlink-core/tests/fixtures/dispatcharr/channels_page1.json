@@ -1,0 +1,15 @@
+{
+  "count": 5,
+  "next": "http://dispatcharr.test/api/channels/channels/?page=2&page_size=2",
+  "previous": null,
+  "results": [
+    {"id": 1, "uuid": "00000000-0000-4000-8000-000000000001", "channel_number": 1.0, "name": "Channel One HD",
+     "channel_group_id": 1, "tvg_id": "one.test", "epg_data_id": 10, "streams": [11, 12], "stream_profile_id": null,
+     "logo_id": 100, "user_level": 0, "is_adult": false, "is_catchup": true, "catchup_days": 7, "is_radio": false,
+     "hidden_from_output": false, "some_future_field": [1, 2, 3]},
+    {"id": 2, "uuid": "00000000-0000-4000-8000-000000000002", "channel_number": 2.5, "name": "Channel Two",
+     "channel_group_id": 1, "tvg_id": "two.test", "epg_data_id": 11, "streams": [13], "stream_profile_id": 2,
+     "logo_id": null, "user_level": 0, "is_adult": false, "is_catchup": false, "catchup_days": 0, "is_radio": false,
+     "hidden_from_output": false}
+  ]
+}

@@ -1,0 +1,5 @@
+[
+  {"id": 3, "name": "Proxy", "command": "", "parameters": "", "is_active": true, "user_agent": null, "locked": true},
+  {"id": 4, "name": "Redirect", "command": "", "parameters": "", "is_active": true, "user_agent": null, "locked": true},
+  {"id": 1, "name": "FFmpeg", "command": "ffmpeg", "parameters": "-i {streamUrl}", "is_active": true, "user_agent": 1, "locked": true}
+]

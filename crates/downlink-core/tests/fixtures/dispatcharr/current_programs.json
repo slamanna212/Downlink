@@ -1,0 +1,4 @@
+[
+  {"channel_uuid": "00000000-0000-4000-8000-000000000001", "id": 1001, "start_time": "2025-01-01T10:00:00Z", "end_time": "2025-01-01T11:00:00Z", "title": "Morning Show", "tvg_id": "one.test"},
+  {"channel_uuid": "00000000-0000-4000-8000-000000000002", "id": 1003, "start_time": "2025-01-01T10:30:00Z", "end_time": "2025-01-01T11:30:00Z", "title": "Channel Two Film", "tvg_id": "two.test"}
+]
