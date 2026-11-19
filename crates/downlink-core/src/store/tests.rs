@@ -328,20 +328,18 @@ async fn pending_migration_backs_up_and_keeps_two_copies() {
     Store::open(&path).await.unwrap().close().await;
     assert!(!bak(1).exists());
 
-    // Simulate "older app version": forget the newest migration so it is pending again.
+    // Simulate "older app version": forget the newest migration so it is pending again, then run
+    // the pre-migration backup step directly (re-applying the migration itself would fail here
+    // because its effects are still in the schema).
+    let s = Store::open(&path).await.unwrap();
+    sqlx::query(
+        "DELETE FROM _sqlx_migrations WHERE version = (SELECT max(version) FROM _sqlx_migrations)",
+    )
+    .execute(s.pool())
+    .await
+    .unwrap();
     for round in 1..=3 {
-        let s = Store::open(&path).await.unwrap();
-        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = (SELECT max(version) FROM _sqlx_migrations)")
-            .execute(s.pool())
-            .await
-            .unwrap();
-        sqlx::query("DROP TABLE IF EXISTS app_kv")
-            .execute(s.pool())
-            .await
-            .unwrap();
-        s.close().await;
-        let s = Store::open(&path).await.unwrap(); // re-applies it, backing up first
-        s.close().await;
+        super::backup_before_migrate(s.pool(), &path).await.unwrap();
         assert!(bak(1).exists(), "round {round}");
         assert_eq!(bak(2).exists(), round >= 2, "round {round}");
         assert!(
@@ -349,7 +347,13 @@ async fn pending_migration_backs_up_and_keeps_two_copies() {
             "only two copies are kept"
         );
     }
+    s.close().await;
     // The backup is a usable database holding the data.
-    let b = Store::open(bak(1)).await.unwrap();
-    assert_eq!(b.list_sources().await.unwrap()[0].name, "KEEP");
+    let url = format!("sqlite://{}?mode=ro", bak(1).display());
+    let b = sqlx::SqlitePool::connect(&url).await.unwrap();
+    let name: String = sqlx::query_scalar("SELECT name FROM source")
+        .fetch_one(&b)
+        .await
+        .unwrap();
+    assert_eq!(name, "KEEP");
 }

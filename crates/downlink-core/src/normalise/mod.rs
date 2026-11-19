@@ -89,6 +89,7 @@ pub fn channel_row(c: &SourceChannel, stream_redirect: StreamMode) -> ChannelUps
         group_ext_id: c.group_ext_id.clone(),
         epg_match: Some(if tvg.is_some() { "id" } else { "none" }.to_owned()),
         tvg_id: tvg,
+        tvg_name: c.tvg_name.clone(),
         logo_key: c.logo_key.clone(),
         quality,
         is_adult: c.is_adult,
@@ -99,10 +100,10 @@ pub fn channel_row(c: &SourceChannel, stream_redirect: StreamMode) -> ChannelUps
         } else {
             0
         },
-        catchup_template: None,
+        catchup_template: c.catchup_template.clone(),
         stream_redirect,
-        play_url: None,
-        play_headers: None,
+        play_url: c.play_url.clone(),
+        play_headers: c.play_headers.clone(),
         streams: c.streams.clone(),
     }
 }

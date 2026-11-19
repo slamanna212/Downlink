@@ -147,6 +147,7 @@ pub struct SourceChannel {
     pub name: String,
     pub group_ext_id: Option<String>,
     pub tvg_id: Option<String>,
+    pub tvg_name: Option<String>,
     pub logo_key: Option<String>,
     /// Failover order. Never reorder.
     pub streams: Vec<String>,
@@ -157,6 +158,11 @@ pub struct SourceChannel {
     pub catchup_days: i64,
     pub is_radio: bool,
     pub is_drm: bool,
+    /// M3U only: stream URL (any `|headers` suffix removed) and per-file headers as a JSON object.
+    pub play_url: Option<String>,
+    pub play_headers: Option<String>,
+    /// JSON `catchup::template::CatchupTemplate` (M3U/Xtream template path).
+    pub catchup_template: Option<String>,
     /// `hidden_from_output`: never shown in Downlink.
     pub hidden: bool,
 }

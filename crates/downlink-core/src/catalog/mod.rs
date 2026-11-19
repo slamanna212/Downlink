@@ -75,7 +75,7 @@ fn visibility_sql(f: &ChannelFilter) -> String {
 const CANDIDATES: u32 = 2000;
 
 const COLS: &str = "c.id, c.source_id, c.ext_id, c.uuid, c.number, c.name, c.group_id, c.tvg_id, \
-    c.logo_key, c.quality, c.is_adult, c.is_radio, c.is_drm, c.catchup_days, c.catchup_template, \
+    c.tvg_name, c.logo_key, c.quality, c.is_adult, c.is_radio, c.is_drm, c.catchup_days, c.catchup_template, \
     c.stream_redirect, c.play_url, c.play_headers, c.epg_match, c.sort_key";
 
 /// FTS5 prefix query from free text: every token quoted and starred.

@@ -15,6 +15,7 @@ pub struct ChannelUpsert {
     pub name: String,
     pub group_ext_id: Option<String>,
     pub tvg_id: Option<String>,
+    pub tvg_name: Option<String>,
     pub logo_key: Option<String>,
     pub quality: Option<String>,
     pub is_adult: bool,
@@ -41,6 +42,7 @@ pub struct ChannelRow {
     pub name: String,
     pub group_id: Option<i64>,
     pub tvg_id: Option<String>,
+    pub tvg_name: Option<String>,
     pub logo_key: Option<String>,
     pub quality: Option<String>,
     pub is_adult: bool,
@@ -56,7 +58,7 @@ pub struct ChannelRow {
 }
 
 pub const CHANNEL_COLUMNS: &str = "id, source_id, ext_id, uuid, number, name, group_id, tvg_id, \
-    logo_key, quality, is_adult, is_radio, is_drm, catchup_days, catchup_template, stream_redirect, \
+    tvg_name, logo_key, quality, is_adult, is_radio, is_drm, catchup_days, catchup_template, stream_redirect, \
     play_url, play_headers, epg_match, sort_key";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -128,18 +130,19 @@ impl Store {
                 .and_then(|g| group_ids.get(g))
                 .copied();
             let id: i64 = sqlx::query_scalar(
-                "INSERT INTO channel (source_id, ext_id, uuid, number, name, group_id, tvg_id, logo_key,
+                "INSERT INTO channel (source_id, ext_id, uuid, number, name, group_id, tvg_id, tvg_name, logo_key,
                    quality, is_adult, is_radio, is_drm, catchup_days, catchup_template, stream_redirect,
                    play_url, play_headers, epg_match, sort_key)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                  ON CONFLICT(source_id, ext_id) DO UPDATE SET
                    uuid=excluded.uuid, number=excluded.number, name=excluded.name,
-                   group_id=excluded.group_id, tvg_id=excluded.tvg_id, logo_key=excluded.logo_key,
+                   group_id=excluded.group_id, tvg_id=excluded.tvg_id, tvg_name=excluded.tvg_name, logo_key=excluded.logo_key,
                    quality=excluded.quality, is_adult=excluded.is_adult, is_radio=excluded.is_radio,
                    is_drm=excluded.is_drm, catchup_days=excluded.catchup_days,
                    catchup_template=excluded.catchup_template, stream_redirect=excluded.stream_redirect,
                    play_url=excluded.play_url, play_headers=excluded.play_headers,
-                   epg_match=excluded.epg_match, sort_key=excluded.sort_key
+                   epg_match=CASE WHEN channel.epg_match IN ('name','display','manual') THEN channel.epg_match ELSE excluded.epg_match END,
+                   sort_key=excluded.sort_key
                  RETURNING id",
             )
             .bind(source_id)
@@ -149,6 +152,7 @@ impl Store {
             .bind(&c.name)
             .bind(group_id)
             .bind(&c.tvg_id)
+            .bind(&c.tvg_name)
             .bind(&c.logo_key)
             .bind(&c.quality)
             .bind(c.is_adult)
