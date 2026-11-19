@@ -6,6 +6,7 @@ pub mod catchup;
 pub mod epg;
 pub mod error;
 pub mod images;
+pub mod m3u;
 pub mod normalise;
 pub mod redact;
 pub mod service;
@@ -14,5 +15,6 @@ pub mod source;
 pub mod store;
 pub mod sync;
 pub mod userstate;
+pub mod util;
 
 pub use error::{AppError, ErrorCode, Result};
