@@ -1,0 +1,21 @@
+.root {
+  min-height: 40px;
+  padding: 0 var(--mantine-spacing-md);
+  border-radius: var(--mantine-radius-md);
+  color: var(--dl-text);
+}
+
+.info { background: var(--dl-accent-banner); }
+.ok { background: var(--dl-ok-tint); }
+.warn { background: var(--dl-warn-tint); }
+.error { background: var(--dl-live-banner); }
+
+.iconInfo { color: var(--dl-accent-text); }
+.iconOk { color: var(--dl-ok-text); }
+.iconWarn { color: var(--dl-warn); }
+.iconError { color: var(--dl-live-text); }
+
+.message {
+  flex: 1;
+  min-width: 0;
+}

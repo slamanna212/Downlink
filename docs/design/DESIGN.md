@@ -51,6 +51,7 @@ catch-up, playing row, links) · `--dl-on-accent #120A33` (text on accent fill, 
 
 ### States and alpha
 - Interaction = white overlays on any surface: hover 6%, pressed 10%, focus = ring + 4%. Selected = surface-3.
+- Tokens added during M1 UI scaffold: `--dl-live-banner` (live 10%, error banners), `--dl-outline-badge` (white 18%, outline badges).
 - Hue tints at **6 / 10 / 14 / 18 % only**: wash (playing row, audio tile) / banner / badge + toggled
   icon / live badge. Glow 24% is for the focus halo only.
 - Approved text pairs with computed contrast ratios are listed in design-language-v2 §04. Use only those.

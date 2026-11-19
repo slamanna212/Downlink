@@ -1,0 +1,50 @@
+.root {
+  --badge-height: 20px;
+  --badge-fz: 0.6875rem;
+  --badge-padding-x: var(--mantine-spacing-sm);
+  border-radius: var(--mantine-radius-sm);
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--dl-text-2);
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+}
+
+/* LIVE / REC: live tint + dot. Text colour is the approved live-text pair. */
+.live {
+  background: var(--dl-live-tint);
+  color: var(--dl-live-text);
+}
+
+/* CATCH-UP: accent tint + history icon */
+.catchup {
+  background: var(--dl-accent-tint);
+  color: var(--dl-accent-text);
+}
+
+/* NEW / HD / 4K / RADIO: outline, hairline 18% */
+.outline {
+  border-color: var(--dl-outline-badge);
+  color: var(--dl-text-2);
+}
+
+/* DRM: surface-3 + lock, text-dim */
+.drm {
+  background: var(--dl-surface-3);
+  color: var(--dl-text-dim);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dl-live);
+  flex: none;
+}

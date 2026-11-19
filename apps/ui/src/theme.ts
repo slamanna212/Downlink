@@ -38,9 +38,9 @@ const dlOther = {
     previewDwellMs: 300,
     layout: { railExpanded: 224, railCollapsed: 68, railTv: 96, groupSidebar: 220, settingsNav: 240, infoPanel: 380 },
     density: {
-      compact: { channelRow: 44, guideRow: 48, logo: [48, 24], control: 32 },
-      comfortable: { channelRow: 64, guideRow: 64, logo: [72, 36], control: 36 },
-      tv: { channelRow: 88, guideRow: 96, logo: [112, 56], control: 56, typeScale: 1.25, focusRing: 3 },
+      compact: { channelRow: 44, guideRow: 48, logo: [48, 24] as [number, number], control: 32 },
+      comfortable: { channelRow: 64, guideRow: 64, logo: [72, 36] as [number, number], control: 36 },
+      tv: { channelRow: 88, guideRow: 96, logo: [112, 56] as [number, number], control: 56, typeScale: 1.25, focusRing: 3 },
     },
     guide: { channelColumn: 180, headerHeight: 40, tickMinutes: 30 },
     multiview: { maxTiles: 4, maxTilesCapable: 9, tileGap: 4, layouts: ['2-up', '2x2', '1+3', '3x3'] as const },
@@ -131,6 +131,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-live-tint': 'rgb(242 73 92 / 0.18)',
     '--dl-live-tint-hover': 'rgb(242 73 92 / 0.24)',
     '--dl-live-tint-pressed': 'rgb(242 73 92 / 0.30)',
+    '--dl-live-banner': 'rgb(242 73 92 / 0.10)',     // error banners (10% tier)
     '--dl-danger-border': 'rgb(242 73 92 / 0.40)',
     '--dl-danger-hover': 'rgb(242 73 92 / 0.10)',
     '--dl-danger-pressed': 'rgb(242 73 92 / 0.16)',
@@ -143,6 +144,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-hover': 'rgb(255 255 255 / 0.06)',
     '--dl-pressed': 'rgb(255 255 255 / 0.10)',
     '--dl-focus-wash': 'rgb(255 255 255 / 0.04)',
+    '--dl-outline-badge': 'rgb(255 255 255 / 0.18)', // outline badges (NEW/HD/4K/RADIO)
     '--dl-focus-ring': focusRing,
     '--dl-focus-ring-tv': focusRingTv,
     '--dl-focus-ring-video': focusRingVideo,

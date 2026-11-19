@@ -11,14 +11,6 @@
 
   &:focus-visible,
   &[data-focused] { outline: none; box-shadow: var(--dl-focus-ring); }
-
-  &[data-disabled],
-  &:disabled {
-    background: var(--dl-surface-2);
-    color: var(--dl-text-disabled);
-    border-color: transparent;
-    cursor: not-allowed;
-  }
 }
 
 /* Primary */
@@ -46,7 +38,6 @@
   color: var(--dl-text-dim);
   &:hover { background: var(--dl-hover); color: var(--dl-text); }
   &:active { background: var(--dl-pressed); color: var(--dl-text); }
-  &[data-disabled] { background: transparent; }
 }
 
 /* Live — Go live, Record. Always render a 7px --dl-live dot in leftSection. */
@@ -64,7 +55,6 @@
   border: 1px solid var(--dl-danger-border);
   &:hover { background: var(--dl-danger-hover); }
   &:active { background: var(--dl-danger-pressed); }
-  &[data-disabled] { background: transparent; border-color: var(--dl-hairline); }
 }
 
 /* Overlay — anything on video */
@@ -75,9 +65,21 @@
   &:active { background: var(--dl-video-btn-pressed); }
   &:focus-visible,
   &[data-focused] { box-shadow: var(--dl-focus-ring-video); }
-  &[data-disabled] { background: rgb(255 255 255 / 0.06); color: rgb(243 246 249 / 0.38); }
 }
 :global([data-allow-blur='true']) .root[data-variant='overlay'] { backdrop-filter: blur(12px); }
+
+/* Disabled. Placed after every variant so it wins at equal specificity (hover/active included). */
+.root[data-variant][data-disabled],
+.root[data-variant]:disabled {
+  background: var(--dl-surface-2);
+  color: var(--dl-text-disabled);
+  border-color: transparent;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.root[data-variant='subtle'][data-disabled] { background: transparent; }
+.root[data-variant='danger'][data-disabled] { background: transparent; border-color: var(--dl-hairline); }
+.root[data-variant='overlay'][data-disabled] { background: rgb(255 255 255 / 0.06); color: rgb(243 246 249 / 0.38); }
 
 /* Toggled ActionIcon (aria-pressed / data-active): accent tint, never a filled accent square */
 .root[aria-pressed='true'],
