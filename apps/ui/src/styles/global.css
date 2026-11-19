@@ -22,6 +22,9 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* 10-foot: everything x1.25 (Mantine rem() scale). */
+[data-density='tv'] { --mantine-scale: 1.25; }
+
 /* App shell paints the opaque surface; the player route leaves the video rect transparent. */
 .dl-shell { background: var(--dl-surface-0); min-height: 100vh; color-scheme: dark; }
 

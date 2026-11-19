@@ -32,7 +32,7 @@
 
 /* Route transition (DESIGN §5): fade + 8 px over 240 ms. Reduced motion limits it to opacity via global.css. */
 .route {
-  min-height: 100%;
+  height: 100%;
   opacity: 0;
   transform: translateY(8px);
   transition: opacity 240ms var(--dl-ease), transform 240ms var(--dl-ease);

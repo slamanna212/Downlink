@@ -40,3 +40,14 @@ export function useCaps(): { caps: Caps; loaded: boolean; hasSource: boolean } {
   const { data, isSuccess } = useSources();
   return { caps: data ? unionCaps(data) : NO_CAPS, loaded: isSuccess, hasSource: (data?.length ?? 0) > 0 };
 }
+
+/** Now/next for a window of channels, batched so scrolling does not issue one query per row. */
+export function useNowNextWindow(ids: number[], windowKey: string) {
+  return useQuery({
+    queryKey: ['catalog', 'nowNext', windowKey],
+    queryFn: () => invoke('get_now_next', { channelIds: ids }),
+    enabled: ids.length > 0,
+    placeholderData: (prev) => prev,
+    refetchInterval: 60_000,
+  });
+}

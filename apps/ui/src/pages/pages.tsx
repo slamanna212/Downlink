@@ -9,7 +9,6 @@ import { Section } from './Section';
 import classes from './Player.module.css';
 
 export const HomePage = () => <Section title="page.home" />;
-export const ChannelsPage = () => <Section title="page.channels" showCount />;
 export const GuidePage = () => <Section title="page.guide" />;
 export const MoviesPage = () => <Section title="page.movies" />;
 export const SeriesPage = () => <Section title="page.series" />;

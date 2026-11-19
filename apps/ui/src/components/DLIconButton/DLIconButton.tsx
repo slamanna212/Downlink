@@ -24,6 +24,7 @@ export interface DLIconButtonProps
   loading?: boolean;
   onClick?: (e: MouseEvent<HTMLButtonElement>) => void;
   'data-focused'?: string;
+  tabIndex?: number;
 }
 
 export const DLIconButton = forwardRef<HTMLButtonElement, DLIconButtonProps>(function DLIconButton(

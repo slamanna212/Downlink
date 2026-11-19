@@ -41,6 +41,13 @@ export function mockGroups(): Group[] {
   return GROUP_NAMES.map((name, i) => ({ id: i + 1, sourceId: 1, name, channelCount: 0 }));
 }
 
+/** Inline SVG stand-in for a `dlimg://` logo so the real-logo plate renders in the browser. */
+function mockLogo(name: string): string {
+  const text = name.split(' ')[0]?.slice(0, 6).toUpperCase() ?? '';
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 72 36'><text x='36' y='23' font-family='sans-serif' font-size='13' font-weight='700' text-anchor='middle' fill='%23E8ECF1'>${text}</text></svg>`;
+  return `data:image/svg+xml;utf8,${svg}`;
+}
+
 /** Enough channels to exercise virtualisation. */
 export function mockChannels(count = 240): Channel[] {
   return Array.from({ length: count }, (_, i) => {
@@ -50,7 +57,7 @@ export function mockChannels(count = 240): Channel[] {
       id: 100 + i, sourceId: 1, uuid: `mock-channel-${i}`, number: i + 1 + (i === 4 ? 0.5 : 0),
       name: i < NAMES.length ? base : `${base} ${Math.floor(i / NAMES.length) + 1}`,
       groupId: (i % GROUP_NAMES.length) + 1,
-      logo: i % 4 === 1 ? null : `dlimg://mock${i}/72`,
+      logo: i % 4 === 1 ? null : mockLogo(base),
       quality: QUALITIES[i % QUALITIES.length] ?? null,
       isCatchup: catchup, catchupDays: catchup ? (i % 2 === 0 ? 7 : 3) : 0, isRadio: i === 6, hasDrm: i === 11,
       isFavourite: i % 5 === 0, epgMatch: 'id',
