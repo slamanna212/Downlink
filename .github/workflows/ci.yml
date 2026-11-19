@@ -4,7 +4,9 @@ name: CI
 # Pushes to main are gated by release.yml, which calls this workflow first (workflow_call),
 # so CI runs exactly once per push and a red main never publishes.
 on:
-  pull_request:
+  # Automatic triggers are paused until the app is further along (Sam, 2026-11-19).
+  # Re-enable by restoring `pull_request:`.
+  workflow_dispatch:
   workflow_call:
 
 permissions:

@@ -4,9 +4,11 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  # Automatic triggers are paused until the app is further along (Sam, 2026-11-19).
+  # Re-enable by restoring:
+  #   push:
+  #     branches: [main]
+  #     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
 
 permissions:
