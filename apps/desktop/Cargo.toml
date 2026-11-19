@@ -17,6 +17,7 @@ spike = ["custom-protocol"]
 
 [dependencies]
 downlink-player = { path = "../../crates/downlink-player" }
+downlink-platform = { path = "../../crates/downlink-platform" }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

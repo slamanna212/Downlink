@@ -373,6 +373,23 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if let (Some(p), Ok(urls)) = (state.player.clone(), std::env::var("DOWNLINK_SPIKE_URLS")) {
         spawn_autorun(handle.clone(), p, state.surface.clone(), urls);
     }
+    // Rule 6: sleep and quit pause and release the stream (protects provider slots).
+    let quit = downlink_platform::QuitHooks::new();
+    if let Some(p) = state.player.clone() {
+        let p2 = p.clone();
+        quit.register(move || {
+            let _ = p2.stop();
+        });
+        let cb: downlink_platform::PowerCallback = Arc::new(move |e| {
+            if e == downlink_platform::PowerEvent::Sleep {
+                let _ = p.stop();
+            }
+        });
+        if let Err(e) = downlink_platform::watch_power(cb) {
+            tracing::warn!("sleep notifications unavailable: {e}");
+        }
+    }
+    app.manage(quit);
     app.manage(state);
     Ok(())
 }
@@ -592,9 +609,18 @@ fn main() {
             player_diagnostics,
             zap_bench
         ])
-        .run(tauri::generate_context!());
-    if let Err(e) = result {
-        tracing::error!("tauri failed: {e}");
-        std::process::exit(1);
+        .build(tauri::generate_context!());
+    match result {
+        Ok(app) => app.run(|handle, event| {
+            if let tauri::RunEvent::Exit = event
+                && let Some(q) = handle.try_state::<downlink_platform::QuitHooks>()
+            {
+                q.run_all();
+            }
+        }),
+        Err(e) => {
+            tracing::error!("tauri failed: {e}");
+            std::process::exit(1);
+        }
     }
 }

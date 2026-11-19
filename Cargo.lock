@@ -1252,6 +1252,7 @@ dependencies = [
 name = "downlink-desktop"
 version = "0.1.0"
 dependencies = [
+ "downlink-platform",
  "downlink-player",
  "gtk",
  "serde",
@@ -1266,6 +1267,11 @@ dependencies = [
 [[package]]
 name = "downlink-platform"
 version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.21",
+ "tracing",
+ "zbus",
+]
 
 [[package]]
 name = "downlink-player"
