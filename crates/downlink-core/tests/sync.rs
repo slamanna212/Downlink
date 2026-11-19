@@ -350,3 +350,205 @@ async fn profile_failure_marks_new_channels_unknown() {
         );
     }
 }
+
+// ---- catch-up flow (PLAN §5.2) --------------------------------------------------------------
+
+mod catchup_flow {
+    use super::*;
+    use downlink_core::catchup::{self, PositionReporter};
+    use downlink_core::sessions::{self, KIND_CATCHUP};
+    use wiremock::matchers::body_json;
+
+    const UUID1: &str = "00000000-0000-4000-8000-000000000001";
+    const START: i64 = 1_735_725_600; // grid fixture programme 1001: 10:00Z..11:00Z
+
+    async fn synced(server: &MockServer) -> (Store, i64, DispatcharrClient, i64) {
+        mount_all(server).await;
+        let (store, sid, client, _) = setup(server).await;
+        sync::sync_channels(&client, &store, sid, None)
+            .await
+            .unwrap();
+        epg::sync_guide(&client, &store, sid, epg::visible_window(START + 1800))
+            .await
+            .unwrap();
+        let one = store.channel_by_ext(sid, "1").await.unwrap().unwrap().id;
+        (store, sid, client, one)
+    }
+
+    #[tokio::test]
+    async fn create_play_position_delete_using_programme_row_times() {
+        let server = MockServer::start().await;
+        let (store, _sid, client, one) = synced(&server).await;
+        Mock::given(method("POST")).and(path("/api/catchup/sessions/"))
+            .and(body_json(serde_json::json!({"channel_uuid": UUID1, "start": "2025-01-01T10:00:00Z", "duration": 60})))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "session_id": "sess-1", "playback_url": format!("/proxy/catchup/{UUID1}?session_id=sess-1"),
+                "channel_uuid": UUID1
+            })))
+            .expect(1).mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/api/catchup/sessions/sess-1/position/"))
+            .and(body_json(serde_json::json!({"position_secs": 12})))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(2)
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/catchup/sessions/sess-1/"))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let now = START + 7200;
+        let play = catchup::play_catchup(&store, &client, one, START, now)
+            .await
+            .unwrap();
+        assert_eq!((play.start_utc, play.end_utc), (START, START + 3600));
+        assert_eq!(
+            play.plan.profile,
+            downlink_core::source::PlayProfile::Seekable
+        );
+        assert_eq!(
+            play.plan.url,
+            format!("{}/proxy/catchup/{UUID1}?session_id=sess-1", server.uri()),
+            "relative playback_url joined"
+        );
+        // Persisted before playback for crash cleanup.
+        assert_eq!(store.list_open_sessions().await.unwrap().len(), 1);
+
+        let mut rep = PositionReporter::new(play.session.clone());
+        assert!(rep.report(&client, 0, 12, false).await.unwrap());
+        assert!(
+            !rep.report(&client, 4_000, 16, false).await.unwrap(),
+            "throttled"
+        );
+        assert!(
+            rep.report(&client, 5_000, 12, true).await.unwrap(),
+            "forced on pause/seek"
+        );
+
+        catchup::stop(&store, &client, &play).await.unwrap();
+        assert!(store.list_open_sessions().await.unwrap().is_empty());
+        let _ = (sessions::KIND_HLS, KIND_CATCHUP);
+    }
+
+    #[tokio::test]
+    async fn restart_programme_starts_from_the_airing_programmes_row() {
+        let server = MockServer::start().await;
+        let (store, _sid, client, one) = synced(&server).await;
+        Mock::given(method("POST")).and(path("/api/catchup/sessions/"))
+            .and(body_json(serde_json::json!({"channel_uuid": UUID1, "start": "2025-01-01T10:00:00Z", "duration": 60})))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({"session_id": "s2", "playback_url": "/p?s=2"})))
+            .expect(1).mount(&server).await;
+        // 10:30: "Morning Show" (10:00-11:00) is airing; restart goes to its start.
+        let play = catchup::restart_programme(&store, &client, one, START + 1800)
+            .await
+            .unwrap();
+        assert_eq!(play.start_utc, START);
+        // Nothing airing -> plain error, no request.
+        let e = catchup::restart_programme(&store, &client, one, START + 10 * 86_400)
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, downlink_core::ErrorCode::Stream);
+    }
+
+    #[tokio::test]
+    async fn refusals_make_no_requests() {
+        let server = MockServer::start().await;
+        let (store, sid, client, one) = synced(&server).await;
+        let before = server.received_requests().await.unwrap().len();
+        // Future programme.
+        let e = catchup::play_catchup(&store, &client, one, START, START - 10)
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, downlink_core::ErrorCode::Stream);
+        // Channel without an archive (channel 2 has catchup_days 0).
+        let two = store.channel_by_ext(sid, "2").await.unwrap().unwrap().id;
+        let e = catchup::play_catchup(&store, &client, two, START, START + 9999)
+            .await
+            .unwrap_err();
+        assert!(e.message.contains("archive"));
+        // Unknown programme.
+        assert!(
+            catchup::play_catchup(&store, &client, one, 12345, START + 9999)
+                .await
+                .is_err()
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), before);
+        assert!(store.list_open_sessions().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn server_refusal_is_a_plain_sentence_and_leaves_no_session() {
+        let server = MockServer::start().await;
+        let (store, _sid, client, one) = synced(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/api/catchup/sessions/"))
+            .respond_with(
+                ResponseTemplate::new(400)
+                    .set_body_string("{\"error\":\"Catch-up not supported for this channel\"}"),
+            )
+            .mount(&server)
+            .await;
+        let e = catchup::play_catchup(&store, &client, one, START, START + 9999)
+            .await
+            .unwrap_err();
+        assert_eq!(e.code, downlink_core::ErrorCode::Stream);
+        assert!(
+            !e.message.contains("Catch-up not supported"),
+            "raw body never shown"
+        );
+        assert!(store.list_open_sessions().await.unwrap().is_empty());
+    }
+}
+
+// ---- refresh policy runner ------------------------------------------------------------------
+
+#[tokio::test]
+async fn refresh_plan_runner_fills_visible_then_history_and_is_cancellable() {
+    use downlink_core::epg::refresh::{self, WindowKind};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let server = MockServer::start().await;
+    mount_all(&server).await;
+    let (store, sid, client, _) = setup(&server).await;
+    sync::sync_channels(&client, &store, sid, None)
+        .await
+        .unwrap();
+    let now = 1_735_725_600 + 1800;
+    let days = refresh::max_catchup_days(&store, sid).await.unwrap();
+    assert_eq!(days, 7);
+    let plan = refresh::plan_windows(now, days, refresh::parse_tz(Some("Europe/Berlin")));
+    let cancel = AtomicBool::new(false);
+    let mut seen = Vec::new();
+    let r = refresh::run_plan(
+        &client,
+        &store,
+        sid,
+        &plan,
+        &[WindowKind::Visible, WindowKind::CatchupHistory],
+        &cancel,
+        |d, t| seen.push((d, t)),
+    )
+    .await
+    .unwrap();
+    assert!(r.windows_total >= 2 && r.windows_done == r.windows_total && !r.cancelled);
+    assert_eq!(
+        seen.last().copied(),
+        Some((r.windows_done, r.windows_total))
+    );
+    // Cancel before the first window.
+    cancel.store(true, Ordering::Relaxed);
+    let r = refresh::run_plan(
+        &client,
+        &store,
+        sid,
+        &plan,
+        &[WindowKind::Ahead],
+        &cancel,
+        |_, _| {},
+    )
+    .await
+    .unwrap();
+    assert!(r.cancelled && r.windows_done == 0);
+}

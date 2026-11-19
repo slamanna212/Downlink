@@ -289,6 +289,14 @@ pub trait Source: Send + Sync {
     async fn play(&self, ch: ChannelKey) -> Result<PlayPlan>;
     async fn catchup(&self, ch: ChannelKey, p: &Programme) -> Result<PlayPlan>;
     async fn stop_session(&self, s: SessionId) -> Result<()>;
+    /// Report catch-up playback position (seconds). Not an error while playback has not begun.
+    async fn catchup_position(&self, _s: &SessionId, _position_secs: u64) -> Result<()> {
+        Ok(())
+    }
+    /// Authenticated image fetch (same-origin only).
+    async fn fetch_image(&self, _url: &str) -> Result<crate::images::RawImage> {
+        Err(AppError::local("This source has no images."))
+    }
 
     /// Groups, for sync. Not part of PLAN §6.1's sketch but needed by ingestion.
     async fn groups(&self) -> Result<Vec<SourceGroup>>;
@@ -324,4 +332,15 @@ pub async fn all_channels(
         page += 1;
     }
     Ok((out, count))
+}
+
+/// Everything the app needs from a live source connection. Blanket-implemented, so a new source
+/// kind only implements the individual traits.
+pub trait SourceClient:
+    Source + crate::sessions::SessionStopper + crate::userstate::AppDataRemote
+{
+}
+impl<T> SourceClient for T where
+    T: Source + crate::sessions::SessionStopper + crate::userstate::AppDataRemote
+{
 }

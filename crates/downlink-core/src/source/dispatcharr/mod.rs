@@ -1128,6 +1128,14 @@ impl Source for DispatcharrClient {
         self.delete_catchup(&s).await
     }
 
+    async fn catchup_position(&self, s: &SessionId, position_secs: u64) -> Result<()> {
+        DispatcharrClient::catchup_position(self, s, position_secs).await
+    }
+
+    async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {
+        DispatcharrClient::fetch_image(self, url).await
+    }
+
     async fn groups(&self) -> Result<Vec<SourceGroup>> {
         self.group_list().await
     }

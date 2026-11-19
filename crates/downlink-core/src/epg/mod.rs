@@ -1,5 +1,7 @@
 //! Guide: windowing, now/next and sync. All times are UTC seconds.
 
+pub mod refresh;
+
 use std::collections::HashMap;
 
 use crate::error::Result;

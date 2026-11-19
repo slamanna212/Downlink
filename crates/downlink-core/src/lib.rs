@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod catalog;
+pub mod catchup;
 pub mod epg;
 pub mod error;
 pub mod images;

@@ -11,6 +11,8 @@ workspace = true
 [dependencies]
 async-trait = "0.1.92"
 bitflags = "2.13.2"
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+chrono-tz = "0.10.4"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 keyring = "4.2.0"
 regex = "1.13.2"
