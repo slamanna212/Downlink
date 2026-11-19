@@ -30,6 +30,35 @@ export const focusRingVideo = '0 0 0 1px rgb(5 6 7 / 0.7), 0 0 0 3px var(--dl-ac
 
 const isLinux = typeof navigator !== 'undefined' && /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent);
 
+const dlOther = {
+    allowBlur: !isLinux,
+    motion: { fast: 120, base: 160, route: 240, videoFade: 200, ease: 'cubic-bezier(0.2, 0, 0, 1)' },
+    controlsIdleMs: 3000,
+    zapOverlayMs: 1200,
+    previewDwellMs: 300,
+    layout: { railExpanded: 224, railCollapsed: 68, railTv: 96, groupSidebar: 220, settingsNav: 240, infoPanel: 380 },
+    density: {
+      compact: { channelRow: 44, guideRow: 48, logo: [48, 24], control: 32 },
+      comfortable: { channelRow: 64, guideRow: 64, logo: [72, 36], control: 36 },
+      tv: { channelRow: 88, guideRow: 96, logo: [112, 56], control: 56, typeScale: 1.25, focusRing: 3 },
+    },
+    guide: { channelColumn: 180, headerHeight: 40, tickMinutes: 30 },
+    multiview: { maxTiles: 4, maxTilesCapable: 9, tileGap: 4, layouts: ['2-up', '2x2', '1+3', '3x3'] as const },
+    buttonSizes: {
+      xs: { h: 28, fz: 12, px: 10, icon: 14, gap: 6, r: 4 },
+      sm: { h: 32, fz: 13, px: 12, icon: 16, gap: 6, r: 6 },
+      md: { h: 36, fz: 14, px: 16, icon: 16, gap: 8, r: 6 },
+      lg: { h: 44, fz: 15, px: 20, icon: 20, gap: 8, r: 8 },
+      tv: { h: 56, fz: 18, px: 24, icon: 24, gap: 10, r: 8 },
+    },
+    iconSizes: [14, 16, 20, 24] as const, // 26 in 10-foot
+    iconStroke: 1.75,
+    logoPalette,
+  };
+
+export type DLOther = typeof dlOther;
+export const dl = dlOther;
+
 export const theme = createTheme({
   primaryColor: 'iris',
   primaryShade: { light: 6, dark: 4 },
@@ -67,31 +96,7 @@ export const theme = createTheme({
   cursorType: 'pointer',
   respectReducedMotion: true,
 
-  other: {
-    allowBlur: !isLinux,
-    motion: { fast: 120, base: 160, route: 240, videoFade: 200, ease: 'cubic-bezier(0.2, 0, 0, 1)' },
-    controlsIdleMs: 3000,
-    zapOverlayMs: 1200,
-    previewDwellMs: 300,
-    layout: { railExpanded: 224, railCollapsed: 68, railTv: 96, groupSidebar: 220, settingsNav: 240, infoPanel: 380 },
-    density: {
-      compact: { channelRow: 44, guideRow: 48, logo: [48, 24], control: 32 },
-      comfortable: { channelRow: 64, guideRow: 64, logo: [72, 36], control: 36 },
-      tv: { channelRow: 88, guideRow: 96, logo: [112, 56], control: 56, typeScale: 1.25, focusRing: 3 },
-    },
-    guide: { channelColumn: 180, headerHeight: 40, tickMinutes: 30 },
-    multiview: { maxTiles: 4, maxTilesCapable: 9, tileGap: 4, layouts: ['2-up', '2x2', '1+3', '3x3'] as const },
-    buttonSizes: {
-      xs: { h: 28, fz: 12, px: 10, icon: 14, gap: 6, r: 4 },
-      sm: { h: 32, fz: 13, px: 12, icon: 16, gap: 6, r: 6 },
-      md: { h: 36, fz: 14, px: 16, icon: 16, gap: 8, r: 6 },
-      lg: { h: 44, fz: 15, px: 20, icon: 20, gap: 8, r: 8 },
-      tv: { h: 56, fz: 18, px: 24, icon: 24, gap: 10, r: 8 },
-    },
-    iconSizes: [14, 16, 20, 24] as const, // 26 in 10-foot
-    iconStroke: 1.75,
-    logoPalette,
-  },
+  other: dlOther,
 
   components: {
     Button: { classNames: buttonClasses, defaultProps: { radius: 'md', size: 'md', variant: 'default' } },
@@ -186,6 +191,8 @@ declare module '@mantine/core' {
   export interface MantineThemeColorsOverride {
     colors: Record<DLColor, MantineColorsTuple>;
   }
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  export interface MantineThemeOther extends DLOther {}
   export interface ButtonProps {
     variant?: DLButtonVariant;
   }

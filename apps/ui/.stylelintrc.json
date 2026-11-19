@@ -1,0 +1,101 @@
+{
+  "extends": [
+    "stylelint-config-standard"
+  ],
+  "rules": {
+    "color-no-hex": true,
+    "declaration-property-unit-allowed-list": {
+      "font-size": [
+        "rem",
+        "em",
+        "%"
+      ],
+      "line-height": [],
+      "/^(margin|padding)/": [
+        "rem",
+        "em",
+        "%"
+      ],
+      "/^gap|-gap$/": [
+        "rem",
+        "em",
+        "%"
+      ],
+      "/^border(-.+)?-radius$/": [
+        "rem",
+        "em",
+        "%"
+      ]
+    },
+    "declaration-property-value-disallowed-list": {
+      "outline": [
+        "none",
+        "0"
+      ],
+      "outline-style": [
+        "none"
+      ]
+    },
+    "alpha-value-notation": null,
+    "color-function-alias-notation": null,
+    "color-function-notation": null,
+    "import-notation": null,
+    "selector-class-pattern": null,
+    "custom-property-pattern": null,
+    "declaration-empty-line-before": null,
+    "comment-empty-line-before": null,
+    "rule-empty-line-before": null,
+    "at-rule-no-unknown": [
+      true,
+      {
+        "ignoreAtRules": [
+          "mixin",
+          "define-mixin"
+        ]
+      }
+    ],
+    "function-no-unknown": [
+      true,
+      {
+        "ignoreFunctions": [
+          "rem",
+          "em",
+          "light-dark",
+          "alpha",
+          "lighten",
+          "darken"
+        ]
+      }
+    ],
+    "property-no-unknown": [
+      true,
+      {
+        "ignoreProperties": [
+          "/^--/"
+        ]
+      }
+    ],
+    "no-descending-specificity": null,
+    "selector-pseudo-class-no-unknown": [
+      true,
+      {
+        "ignorePseudoClasses": [
+          "global",
+          "local"
+        ]
+      }
+    ],
+    "value-keyword-case": null
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/styles/global.css",
+        "src/styles/Button.module.css"
+      ],
+      "rules": {
+        "declaration-property-value-disallowed-list": null
+      }
+    }
+  ]
+}
