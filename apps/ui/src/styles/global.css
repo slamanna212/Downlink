@@ -10,6 +10,11 @@
 /* Transparent so libmpv shows through on the player route (PLAN: html/body/#root transparent). */
 html, body, #root { background: transparent; }
 
+/* A dark root colour-scheme makes Chromium paint an opaque canvas, which would hide the native video
+   surface. Keep the root neutral and scope the dark scheme to the shell (form controls, scrollbars). */
+:root { color-scheme: normal !important; }
+
+
 body {
   color: var(--dl-text);
   font-variant-numeric: tabular-nums; /* every time, channel number, count, duration */
@@ -18,7 +23,7 @@ body {
 }
 
 /* App shell paints the opaque surface; the player route leaves the video rect transparent. */
-.dl-shell { background: var(--dl-surface-0); min-height: 100vh; }
+.dl-shell { background: var(--dl-surface-0); min-height: 100vh; color-scheme: dark; }
 
 a { color: var(--dl-accent-text); text-decoration: none; }
 a:hover { color: var(--dl-accent-hover); }

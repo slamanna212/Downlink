@@ -1,0 +1,27 @@
+.root {
+  min-height: 60vh;
+  text-align: center;
+  padding: var(--mantine-spacing-xl);
+}
+
+.mark {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--dl-accent-tint);
+  color: var(--dl-accent-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.title {
+  font-size: var(--mantine-font-size-xl);
+  font-weight: 650;
+  color: var(--dl-text);
+}
+
+.body {
+  max-width: 420px;
+  color: var(--dl-text-dim);
+}

@@ -16,8 +16,9 @@ export function initSpatialNavigation(): void {
   });
 }
 
-export function useDLFocusable<P extends object = object>(config?: UseFocusableConfig<P>) {
-  const result = useFocusable<P, HTMLElement>(config);
+export function useDLFocusable<P extends object = object, E extends HTMLElement = HTMLElement>(config?: UseFocusableConfig<P>) {
+  initSpatialNavigation(); // idempotent; must precede the first registration (child effects run before parent effects)
+  const result = useFocusable<P, E>(config);
   const focusProps = {
     'data-focusable': true as const,
     'data-focused': result.focused ? ('true' as const) : undefined,

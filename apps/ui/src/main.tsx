@@ -1,11 +1,9 @@
 import '@mantine/core/styles.css';
 import './styles/global.css';
 import { createRoot } from 'react-dom/client';
-import { MantineProvider } from '@mantine/core';
-import { theme, dl, cssVariablesResolver } from './theme';
+import { App } from './app/App';
+import { initSpatialNavigation } from './lib/spatial';
 
-createRoot(document.getElementById('root')!).render(
-  <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} defaultColorScheme="dark">
-    <div className="dl-shell" data-allow-blur={String(dl.allowBlur)} />
-  </MantineProvider>,
-);
+initSpatialNavigation();
+
+createRoot(document.getElementById('root')!).render(<App />);
