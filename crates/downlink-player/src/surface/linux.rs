@@ -262,7 +262,7 @@ impl VideoSurface for LinuxSurface {
                     rc.report_swap();
                     if debug_readback() {
                         let n = frames.load(Ordering::Relaxed);
-                        if n % 60 == 0 {
+                        if n.is_multiple_of(60) {
                             let name = c"glReadPixels";
                             let p = loader_keepalive.proc_address(name.as_ptr());
                             if !p.is_null() {
