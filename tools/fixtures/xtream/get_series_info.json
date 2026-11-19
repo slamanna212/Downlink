@@ -1,0 +1,160 @@
+{
+  "seasons": [
+    {
+      "air_date": "2026-01-01",
+      "episode_count": "3",
+      "id": 1,
+      "name": "Season 1",
+      "overview": "",
+      "season_number": 1,
+      "cover": "http://xtream.test/s1.jpg"
+    },
+    {
+      "air_date": "2026-06-01",
+      "episode_count": "3",
+      "id": 2,
+      "name": "Season 2",
+      "overview": "",
+      "season_number": 2,
+      "cover": ""
+    }
+  ],
+  "info": {
+    "name": "Test Series 1",
+    "cover": "http://xtream.test/series/1.jpg",
+    "plot": "Synthetic plot 1.",
+    "cast": "Test Actor",
+    "director": "Test Director",
+    "genre": "Drama, Test",
+    "releaseDate": "2026-01-01",
+    "last_modified": "1767225600",
+    "rating": "7.5",
+    "rating_5based": "3.75",
+    "backdrop_path": [
+      "http://xtream.test/bd/1.jpg"
+    ],
+    "youtube_trailer": "",
+    "episode_run_time": "45",
+    "category_id": "1"
+  },
+  "episodes": {
+    "1": [
+      {
+        "id": "50101",
+        "episode_num": 1,
+        "title": "Test Series 1 - S01E01 - Episode 1",
+        "container_extension": "mkv",
+        "info": {
+          "movie_image": "http://xtream.test/ep/11.jpg",
+          "plot": "Synthetic episode.",
+          "duration_secs": 2700,
+          "duration": "00:45:00",
+          "releasedate": "2026-01-01",
+          "rating": 7.1,
+          "bitrate": 4000
+        },
+        "custom_sid": "",
+        "added": "1767225600",
+        "season": 1,
+        "direct_source": ""
+      },
+      {
+        "id": "50102",
+        "episode_num": 2,
+        "title": "Test Series 1 - S01E02 - Episode 2",
+        "container_extension": "mkv",
+        "info": {
+          "movie_image": "http://xtream.test/ep/12.jpg",
+          "plot": "Synthetic episode.",
+          "duration_secs": 2700,
+          "duration": "00:45:00",
+          "releasedate": "2026-01-01",
+          "rating": 7.1,
+          "bitrate": 4000
+        },
+        "custom_sid": "",
+        "added": "1767225600",
+        "season": 1,
+        "direct_source": ""
+      },
+      {
+        "id": "50103",
+        "episode_num": 3,
+        "title": "Test Series 1 - S01E03 - Episode 3",
+        "container_extension": "mkv",
+        "info": {
+          "movie_image": "http://xtream.test/ep/13.jpg",
+          "plot": "Synthetic episode.",
+          "duration_secs": 2700,
+          "duration": "00:45:00",
+          "releasedate": "2026-01-01",
+          "rating": 7.1,
+          "bitrate": 4000
+        },
+        "custom_sid": "",
+        "added": "1767225600",
+        "season": 1,
+        "direct_source": ""
+      }
+    ],
+    "2": [
+      {
+        "id": "50201",
+        "episode_num": 1,
+        "title": "Test Series 1 - S02E01 - Episode 1",
+        "container_extension": "mkv",
+        "info": {
+          "movie_image": "http://xtream.test/ep/21.jpg",
+          "plot": "Synthetic episode.",
+          "duration_secs": 2700,
+          "duration": "00:45:00",
+          "releasedate": "2026-01-01",
+          "rating": 7.1,
+          "bitrate": 4000
+        },
+        "custom_sid": "",
+        "added": "1767225600",
+        "season": 2,
+        "direct_source": ""
+      },
+      {
+        "id": "50202",
+        "episode_num": 2,
+        "title": "Test Series 1 - S02E02 - Episode 2",
+        "container_extension": "mkv",
+        "info": {
+          "movie_image": "http://xtream.test/ep/22.jpg",
+          "plot": "Synthetic episode.",
+          "duration_secs": 2700,
+          "duration": "00:45:00",
+          "releasedate": "2026-01-01",
+          "rating": 7.1,
+          "bitrate": 4000
+        },
+        "custom_sid": "",
+        "added": "1767225600",
+        "season": 2,
+        "direct_source": ""
+      },
+      {
+        "id": "50203",
+        "episode_num": 3,
+        "title": "Test Series 1 - S02E03 - Episode 3",
+        "container_extension": "mkv",
+        "info": {
+          "movie_image": "http://xtream.test/ep/23.jpg",
+          "plot": "Synthetic episode.",
+          "duration_secs": 2700,
+          "duration": "00:45:00",
+          "releasedate": "2026-01-01",
+          "rating": 7.1,
+          "bitrate": 4000
+        },
+        "custom_sid": "",
+        "added": "1767225600",
+        "season": 2,
+        "direct_source": ""
+      }
+    ]
+  }
+}

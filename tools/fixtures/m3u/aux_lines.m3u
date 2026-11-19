@@ -1,0 +1,22 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="ua.test" group-title="Test Lab",Custom UA Channel
+#EXTVLCOPT:http-user-agent=SyntheticAgent/1.0
+#EXTVLCOPT:http-referrer=http://iptv.test/ref
+#EXTVLCOPT:http-origin=http://iptv.test
+#EXTVLCOPT:network-caching=1000
+http://iptv.test/ua/1.m3u8
+#EXTINF:-1 tvg-id="drm.test" group-title="Test Lab",DRM Channel
+#KODIPROP:inputstream=inputstream.adaptive
+#KODIPROP:inputstream.adaptive.manifest_type=mpd
+#KODIPROP:inputstream.adaptive.license_type=com.widevine.alpha
+#KODIPROP:inputstream.adaptive.license_key=https://license.test/key
+http://iptv.test/drm/1.mpd
+#EXTGRP:Group From EXTGRP
+#EXTINF:-1 tvg-id="grp.test",Group Via EXTGRP
+http://iptv.test/grp/1.ts
+#EXTINF:-1 tvg-id="hdr.test" group-title="Test Lab",Pipe Headers
+http://iptv.test/hdr/1.ts|User-Agent=SyntheticAgent/2.0&Referer=http://iptv.test/ref
+#EXTINF:-1 tvg-id="cred.test" group-title="Test Lab",Credentials In URL
+http://testuser:testpass@iptv.test/auth/1.ts
+#EXTINF:-1 tvg-id="cred2.test" group-title="Test Lab",Credentials In Query
+http://iptv.test/live/testuser/testpass/1.ts?username=testuser&password=testpass&token=testtoken123

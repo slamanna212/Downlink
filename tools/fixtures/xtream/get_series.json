@@ -1,0 +1,96 @@
+[
+  {
+    "num": 1,
+    "name": "Test Series 1",
+    "series_id": 3001,
+    "cover": "http://xtream.test/series/1.jpg",
+    "plot": "Synthetic plot 1.",
+    "cast": "Test Actor, Another Actor",
+    "director": "Test Director",
+    "genre": "Drama, Test",
+    "releaseDate": "2021-01-01",
+    "release_date": "2021-01-01",
+    "last_modified": "1767225600",
+    "rating": "7.5",
+    "rating_5based": 3.75,
+    "backdrop_path": [
+      "http://xtream.test/bd/1.jpg"
+    ],
+    "youtube_trailer": "",
+    "episode_run_time": "45",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ]
+  },
+  {
+    "num": 2,
+    "name": "Test Series 2",
+    "series_id": 3002,
+    "cover": "http://xtream.test/series/2.jpg",
+    "plot": "Synthetic plot 2.",
+    "cast": "Test Actor, Another Actor",
+    "director": "Test Director",
+    "genre": "Drama, Test",
+    "releaseDate": "2022-01-01",
+    "release_date": "2022-01-01",
+    "last_modified": "1767225600",
+    "rating": "7.5",
+    "rating_5based": 3.75,
+    "backdrop_path": [],
+    "youtube_trailer": "",
+    "episode_run_time": "45",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ]
+  },
+  {
+    "num": 3,
+    "name": "Test Series 3",
+    "series_id": 3003,
+    "cover": "http://xtream.test/series/3.jpg",
+    "plot": "Synthetic plot 3.",
+    "cast": "Test Actor, Another Actor",
+    "director": "Test Director",
+    "genre": "Drama, Test",
+    "releaseDate": "2023-01-01",
+    "release_date": "2023-01-01",
+    "last_modified": "1767225600",
+    "rating": "7.5",
+    "rating_5based": 3.75,
+    "backdrop_path": [
+      "http://xtream.test/bd/3.jpg"
+    ],
+    "youtube_trailer": "",
+    "episode_run_time": "45",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ]
+  },
+  {
+    "num": 4,
+    "name": "Test Series 4",
+    "series_id": 3004,
+    "cover": "http://xtream.test/series/4.jpg",
+    "plot": "Synthetic plot 4.",
+    "cast": "Test Actor, Another Actor",
+    "director": "Test Director",
+    "genre": "Drama, Test",
+    "releaseDate": "2024-01-01",
+    "release_date": "2024-01-01",
+    "last_modified": "1767225600",
+    "rating": "7.5",
+    "rating_5based": 3.75,
+    "backdrop_path": [
+      "http://xtream.test/bd/4.jpg"
+    ],
+    "youtube_trailer": "",
+    "episode_run_time": "45",
+    "category_id": "1",
+    "category_ids": [
+      1
+    ]
+  }
+]

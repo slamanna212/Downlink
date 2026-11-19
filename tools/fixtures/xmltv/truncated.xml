@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<tv>
+<channel id="t.test"><display-name>Truncated</display-name></channel>
+<programme start="20260101120000 +0000" stop="20260101130000 +0000" channel="t.test"><title>Complete</title></programme>
+<programme start="20260101130000 +0000" stop="20260101140000 +0000" channel="t.test"><title>Cut off mid-ele

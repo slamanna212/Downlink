@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<tv>
+<channel id="l1.test"><display-name>Café Chaîne</display-name></channel>
+<programme start="20260101120000 +0000" stop="20260101130000 +0000" channel="l1.test"><title>Crème Brûlée</title></programme>
+</tv>

@@ -1,0 +1,7 @@
+#EXTM3U x-tvg-url="http://iptv.test/epg.xml"
+#EXTINF:-1 tvg-id="one.test" tvg-name="One" tvg-logo="http://iptv.test/logo/1.png" tvg-chno="1" group-title="Test Entertainment",Channel One
+http://iptv.test/live/1.ts
+#EXTINF:-1 tvg-id="two.test" tvg-name="Two" tvg-chno="2" group-title="Test News",Test News
+http://iptv.test/live/2.ts
+#EXTINF:-1 tvg-id="" group-title="",No Group, No Id
+http://iptv.test/live/3.ts

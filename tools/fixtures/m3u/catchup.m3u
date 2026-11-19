@@ -1,0 +1,15 @@
+#EXTM3U catchup="default" catchup-days="7" catchup-source="http://iptv.test/timeshift.php?username=testuser&password=testpass&stream=1&utc={utc}&duration={duration:60}" catchup-timezone="UTC"
+#EXTINF:-1 tvg-id="cu1.test" catchup="default" catchup-days="7" catchup-source="http://iptv.test/ts/1?utc={utc}&utcend={utcend}" group-title="Catchup",Default Mode
+http://iptv.test/live/cu1.ts
+#EXTINF:-1 tvg-id="cu2.test" catchup="append" catchup-days="3" catchup-source="?offset=-{duration}&start={start}" group-title="Catchup",Append Mode
+http://iptv.test/live/cu2.ts
+#EXTINF:-1 tvg-id="cu3.test" catchup="shift" catchup-days="2" group-title="Catchup",Shift Mode
+http://iptv.test/live/cu3.ts
+#EXTINF:-1 tvg-id="cu4.test" catchup="xc" catchup-days="5" catchup-correction="-1" catchup-timezone="Europe/London" group-title="Catchup",XC Mode Corrected
+http://iptv.test/live/testuser/testpass/4.ts
+#EXTINF:-1 tvg-id="cu5.test" tv_archive="1" tv_archive_duration="3" group-title="Catchup",Dispatcharr tv_archive Attrs
+http://iptv.test/live/cu5.ts
+#EXTINF:-1 tvg-id="cu6.test" catchup="flussonic" catchup-days="1" group-title="Catchup",Unsupported Flussonic
+http://iptv.test/live/cu6.ts
+#EXTINF:-1 tvg-id="cu7.test" catchup="default" catchup-days="abc" catchup-source="" group-title="Catchup",Bad Days And Empty Source
+http://iptv.test/live/cu7.ts

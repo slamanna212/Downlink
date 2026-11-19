@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv generator-info-name="downlink-fixtures">
+<channel id="tz.test"><display-name>TZ Channel</display-name></channel>
+<programme start="20260101120000 +0000" stop="20260101130000 +0000" channel="tz.test"><title>UTC Offset</title></programme>
+<programme start="20260101130000 +0100" stop="20260101140000 +0100" channel="tz.test"><title>Plus One Offset</title></programme>
+<programme start="20260101080000 -0500" stop="20260101090000 -0500" channel="tz.test"><title>Minus Five Offset</title></programme>
+<programme start="20260101150000" stop="20260101160000" channel="tz.test"><title>No Offset (assume UTC)</title></programme>
+<programme start="202601011600 +0000" stop="202601011700 +0000" channel="tz.test"><title>No Seconds</title></programme>
+<programme start="20260101170000+0000" stop="20260101180000+0000" channel="tz.test"><title>No Space Before Offset</title></programme>
+<programme start="20260101180000 +0530" stop="20260101190000 +0530" channel="tz.test"><title>Half Hour Offset</title></programme>
+</tv>
