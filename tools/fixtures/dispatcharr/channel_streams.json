@@ -1,0 +1,47 @@
+[
+  {
+    "id": 1,
+    "name": "Channel One",
+    "url": "http://streams.dispatcharr.test/ch/channel-one.ts",
+    "m3u_account": 2,
+    "logo_url": "",
+    "tvg_id": "channel-one.test",
+    "local_file": null,
+    "current_viewers": 0,
+    "updated_at": "2026-11-19T15:49:56.295213Z",
+    "last_seen": "2026-11-19T15:49:56.294001Z",
+    "is_stale": false,
+    "is_adult": false,
+    "stream_profile_id": null,
+    "is_custom": false,
+    "channel_group": 2,
+    "stream_hash": "6e0f8b9ef4a1821783307e5ea59fb0bf763243acd8d66e7225458a355689f4ed",
+    "stream_stats": {
+      "resolution": "1920x1080",
+      "source_fps": 30.0,
+      "audio_codec": "aac",
+      "sample_rate": 48000,
+      "stream_type": "mpegts",
+      "video_codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_bitrate": 129.0,
+      "audio_streams": [
+        {
+          "index": 1,
+          "audio_codec": "aac",
+          "sample_rate": 48000,
+          "audio_bitrate": 129.0,
+          "audio_channels": "mono"
+        }
+      ],
+      "audio_channels": "mono",
+      "ffmpeg_output_bitrate": 6553.0
+    },
+    "stream_stats_updated_at": "2026-11-19T15:50:55.613538Z",
+    "stream_id": null,
+    "stream_chno": 1.0,
+    "is_catchup": false,
+    "catchup_days": 0,
+    "is_radio": false
+  }
+]

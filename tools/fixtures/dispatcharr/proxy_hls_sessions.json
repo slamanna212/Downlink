@@ -1,0 +1,3 @@
+{
+  "note": "DELETE /api/proxy/hls/sessions/{token}/ returns 204; no list endpoint"
+}

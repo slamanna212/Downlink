@@ -1,0 +1,17 @@
+{
+  "limits": {
+    "max_value_bytes": 131072,
+    "max_total_bytes": 1048576,
+    "max_apps": 25,
+    "max_depth": 8,
+    "key_min_length": 8,
+    "key_max_length": 64
+  },
+  "total_bytes": 17,
+  "apps": [
+    {
+      "key": "downlink-fixture",
+      "bytes": 17
+    }
+  ]
+}

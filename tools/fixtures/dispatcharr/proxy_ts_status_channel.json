@@ -1,0 +1,74 @@
+{
+  "channel_id": "e8e49cc7-484c-413f-8c31-058bd25ef0c7",
+  "state": "active",
+  "url": "http://streams.dispatcharr.test/ch/channel-one.ts",
+  "stream_profile": "1",
+  "started_at": 1795103443.437577,
+  "owner": "dispatcharr-test:1",
+  "buffer_index": 26,
+  "channel_name": "Channel One",
+  "stream_id": 1,
+  "stream_name": "Channel One",
+  "m3u_profile_id": 2,
+  "m3u_profile_name": "Synthetic Playlist Default",
+  "state_changed_at": 1795103448.4806237,
+  "state_duration": 2.955918312072754,
+  "uptime": 7.998966932296753,
+  "total_bytes": 1957888,
+  "total_data": "1.87 MB",
+  "avg_bitrate_kbps": 1958.1408615103044,
+  "avg_bitrate": "1.96 Mbps",
+  "clients": [
+    {
+      "client_id": "client_1795103443395_9993",
+      "user_agent": "downlink-fixtures/0",
+      "worker_id": "b38fc84f8eb4:402",
+      "ip_address": "192.0.2.10",
+      "user_id": "1",
+      "output_format": "mpegts",
+      "output_profile_id": null,
+      "connected_at": 1795103443.4400725,
+      "last_active": 1795103450.8238468,
+      "last_active_ago": 0.6130831241607666,
+      "bytes_sent": 6396700,
+      "avg_rate_KBps": 2750.9,
+      "current_rate_KBps": 819.7
+    }
+  ],
+  "client_count": 1,
+  "buffer_stats": {
+    "chunks": 26,
+    "diagnostics": {
+      "exception": "'utf-8' codec can't decode byte 0xab in position 4: invalid start byte"
+    },
+    "error": "'utf-8' codec can't decode byte 0xab in position 4: invalid start byte",
+    "latest_chunk_ttl": 60
+  },
+  "local_manager": {
+    "healthy": true,
+    "connected": true,
+    "last_data_time": 1795103451.2970994,
+    "last_data_age": 0.14203453063964844
+  },
+  "video_codec": "h264",
+  "resolution": "1920x1080",
+  "source_fps": "30.0",
+  "pixel_format": "yuv420p",
+  "audio_codec": "aac",
+  "sample_rate": "48000",
+  "audio_channels": "mono",
+  "audio_bitrate": "129.0",
+  "audio_streams": [
+    {
+      "index": 1,
+      "audio_codec": "aac",
+      "audio_channels": "mono",
+      "audio_bitrate": 129.0,
+      "sample_rate": 48000
+    }
+  ],
+  "ffmpeg_speed": "2.68",
+  "ffmpeg_fps": "80.0",
+  "actual_fps": "29.9",
+  "stream_type": "mpegts"
+}

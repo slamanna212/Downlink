@@ -1,0 +1,23 @@
+[
+  {
+    "id": 13,
+    "key": "stream_settings",
+    "name": "Stream Settings",
+    "value": {
+      "m3u_hash_key": "url",
+      "default_user_agent": 1,
+      "default_stream_profile": 1
+    }
+  },
+  {
+    "id": 16,
+    "key": "system_settings",
+    "name": "System Settings",
+    "value": {
+      "time_zone": "UTC",
+      "preferred_region": "us",
+      "max_system_events": 100,
+      "auto_import_mapped_files": true
+    }
+  }
+]

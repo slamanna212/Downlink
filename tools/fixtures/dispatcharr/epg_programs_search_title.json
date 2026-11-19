@@ -1,0 +1,198 @@
+{
+  "count": 94,
+  "next": "https://dispatcharr.test/api/epg/programs/search/?page=2&page_size=5&title=colour",
+  "previous": null,
+  "results": [
+    {
+      "id": 222,
+      "title": "Colour Bars Live",
+      "sub_title": "Episode 6",
+      "description": "Synthetic programme 5 on Catchup One.",
+      "start_time": "2026-11-17T08:00:00Z",
+      "end_time": "2026-11-17T09:00:00Z",
+      "tvg_id": "catchup-one.test",
+      "custom_properties": {
+        "new": true,
+        "season": 1,
+        "episode": 6,
+        "categories": [
+          "Test Entertainment"
+        ],
+        "onscreen_episode": "S01E06"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Catchup One",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 7,
+          "name": "Catchup One",
+          "channel_number": 7.0,
+          "channel_group": "Test Entertainment",
+          "tvg_id": "catchup-one.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 7,
+          "name": "Catchup One",
+          "channel_group": "Test Entertainment",
+          "tvg_id": "catchup-one.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 230,
+      "title": "Colour Bars Live",
+      "sub_title": "Episode 14",
+      "description": "Synthetic programme 13 on Catchup One.",
+      "start_time": "2026-11-17T16:00:00Z",
+      "end_time": "2026-11-17T17:00:00Z",
+      "tvg_id": "catchup-one.test",
+      "custom_properties": {
+        "season": 1,
+        "episode": 14,
+        "categories": [
+          "Test Entertainment"
+        ],
+        "onscreen_episode": "S01E14"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Catchup One",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 7,
+          "name": "Catchup One",
+          "channel_number": 7.0,
+          "channel_group": "Test Entertainment",
+          "tvg_id": "catchup-one.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 7,
+          "name": "Catchup One",
+          "channel_group": "Test Entertainment",
+          "tvg_id": "catchup-one.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 238,
+      "title": "Colour Bars Live",
+      "sub_title": "Episode 2",
+      "description": "Synthetic programme 21 on Catchup One.",
+      "start_time": "2026-11-18T00:00:00Z",
+      "end_time": "2026-11-18T01:00:00Z",
+      "tvg_id": "catchup-one.test",
+      "custom_properties": {
+        "season": 1,
+        "episode": 2,
+        "categories": [
+          "Test Entertainment"
+        ],
+        "onscreen_episode": "S01E02"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Catchup One",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 7,
+          "name": "Catchup One",
+          "channel_number": 7.0,
+          "channel_group": "Test Entertainment",
+          "tvg_id": "catchup-one.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 7,
+          "name": "Catchup One",
+          "channel_group": "Test Entertainment",
+          "tvg_id": "catchup-one.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 246,
+      "title": "Colour Bars Live",
+      "sub_title": "Episode 10",
+      "description": "Synthetic programme 29 on Catchup One.",
+      "start_time": "2026-11-18T08:00:00Z",
+      "end_time": "2026-11-18T09:00:00Z",
+      "tvg_id": "catchup-one.test",
+      "custom_properties": {
+        "season": 1,
+        "episode": 10,
+        "categories": [
+          "Test Entertainment"
+        ],
+        "onscreen_episode": "S01E10"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Catchup One",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 7,
+          "name": "Catchup One",
+          "channel_number": 7.0,
+          "channel_group": "Test Entertainment",
+          "tvg_id": "catchup-one.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 7,
+          "name": "Catchup One",
+          "channel_group": "Test Entertainment",
+          "tvg_id": "catchup-one.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 469,
+      "title": "Colour Bars Live",
+      "sub_title": "Episode 17",
+      "description": "Synthetic programme 36 on Redirect One.",
+      "start_time": "2026-11-18T15:00:00Z",
+      "end_time": "2026-11-18T16:00:00Z",
+      "tvg_id": "redirect-one.test",
+      "custom_properties": {
+        "season": 1,
+        "episode": 17,
+        "categories": [
+          "Test Lab"
+        ],
+        "onscreen_episode": "S01E17"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Redirect One",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 8,
+          "name": "Redirect One",
+          "channel_number": 8.0,
+          "channel_group": "Test Lab",
+          "tvg_id": "redirect-one.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 8,
+          "name": "Redirect One",
+          "channel_group": "Test Lab",
+          "tvg_id": "redirect-one.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    }
+  ]
+}

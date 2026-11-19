@@ -1,0 +1,47 @@
+[
+  {
+    "id": 3,
+    "name": "Proxy",
+    "command": "",
+    "parameters": "",
+    "is_active": true,
+    "user_agent": null,
+    "locked": true
+  },
+  {
+    "id": 4,
+    "name": "Redirect",
+    "command": "",
+    "parameters": "",
+    "is_active": true,
+    "user_agent": null,
+    "locked": true
+  },
+  {
+    "id": 5,
+    "name": "VLC",
+    "command": "cvlc",
+    "parameters": "-vv -I dummy --no-video-title-show --play-and-exit --http-user-agent {userAgent} {streamUrl} --sout #standard{access=file,mux=ts,dst=-}",
+    "is_active": true,
+    "user_agent": 1,
+    "locked": true
+  },
+  {
+    "id": 2,
+    "name": "Streamlink",
+    "command": "streamlink",
+    "parameters": "--http-header User-Agent={userAgent} --ffmpeg-fout mpegts --stdout {streamUrl} best",
+    "is_active": true,
+    "user_agent": 1,
+    "locked": true
+  },
+  {
+    "id": 1,
+    "name": "FFmpeg",
+    "command": "ffmpeg",
+    "parameters": "-fflags +genpts+discardcorrupt -user_agent {userAgent} -i {streamUrl} -map 0 -max_interleave_delta 100K -c copy -mpegts_flags +pat_pmt_at_frames+resend_headers+initial_discontinuity -f mpegts pipe:1",
+    "is_active": true,
+    "user_agent": 1,
+    "locked": true
+  }
+]

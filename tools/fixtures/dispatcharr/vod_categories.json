@@ -1,0 +1,16 @@
+[
+  {
+    "id": 1,
+    "name": "Uncategorized",
+    "category_type": "movie",
+    "category_type_display": "Movie",
+    "m3u_accounts": []
+  },
+  {
+    "id": 2,
+    "name": "Uncategorized",
+    "category_type": "series",
+    "category_type_display": "Series",
+    "m3u_accounts": []
+  }
+]

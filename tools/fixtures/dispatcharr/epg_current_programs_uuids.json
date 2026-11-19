@@ -1,0 +1,50 @@
+[
+  {
+    "id": 709,
+    "start_time": "2026-11-19T15:00:00Z",
+    "end_time": "2026-11-19T16:00:00Z",
+    "title": "Late Night Noise",
+    "sub_title": "Episode 1",
+    "description": "Synthetic programme 60 on Test Kids.",
+    "tvg_id": "test-kids.test",
+    "season": 1,
+    "episode": 1,
+    "is_new": true,
+    "is_live": false,
+    "is_premiere": false,
+    "is_finale": false,
+    "channel_uuid": "3d949869-3e5b-44b5-9ebd-cbf422eb2611"
+  },
+  {
+    "id": 493,
+    "start_time": "2026-11-19T15:00:00Z",
+    "end_time": "2026-11-19T16:00:00Z",
+    "title": "Colour Bars Live",
+    "sub_title": "Episode 1",
+    "description": "Synthetic programme 60 on Redirect One.",
+    "tvg_id": "redirect-one.test",
+    "season": 1,
+    "episode": 1,
+    "is_new": true,
+    "is_live": false,
+    "is_premiere": false,
+    "is_finale": false,
+    "channel_uuid": "5815b3ac-45c6-461c-a3bb-595dfa0f05dd"
+  },
+  {
+    "id": 637,
+    "start_time": "2026-11-19T15:00:00Z",
+    "end_time": "2026-11-19T16:00:00Z",
+    "title": "Sine Wave Cinema",
+    "sub_title": "Episode 1",
+    "description": "Synthetic programme 60 on Test Movies.",
+    "tvg_id": "test-movies.test",
+    "season": 1,
+    "episode": 1,
+    "is_new": true,
+    "is_live": false,
+    "is_premiere": false,
+    "is_finale": false,
+    "channel_uuid": "1e29b871-1284-496b-8481-136c6debf3cd"
+  }
+]

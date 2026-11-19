@@ -1,0 +1,202 @@
+{
+  "count": 10,
+  "next": "https://dispatcharr.test/api/epg/programs/search/?airing_at=2026-11-19T15%3A51%3A25Z&page=2&page_size=5",
+  "previous": null,
+  "results": [
+    {
+      "id": 25,
+      "title": "Sine Wave Cinema",
+      "sub_title": "Episode 1",
+      "description": "Synthetic programme 60 on Channel One.",
+      "start_time": "2026-11-19T15:00:00Z",
+      "end_time": "2026-11-19T16:00:00Z",
+      "tvg_id": "channel-one.test",
+      "custom_properties": {
+        "new": true,
+        "season": 1,
+        "episode": 1,
+        "categories": [
+          "Test Entertainment"
+        ],
+        "onscreen_episode": "S01E01"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Channel One",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 1,
+          "name": "Channel One",
+          "channel_number": 1.0,
+          "channel_group": "Test Entertainment",
+          "tvg_id": "channel-one.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 1,
+          "name": "Channel One",
+          "channel_group": "Test Entertainment",
+          "tvg_id": "channel-one.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 97,
+      "title": "Late Night Noise",
+      "sub_title": "Episode 1",
+      "description": "Synthetic programme 60 on Test News.",
+      "start_time": "2026-11-19T15:00:00Z",
+      "end_time": "2026-11-19T16:00:00Z",
+      "tvg_id": "test-news.test",
+      "custom_properties": {
+        "new": true,
+        "season": 1,
+        "episode": 1,
+        "categories": [
+          "Test News"
+        ],
+        "onscreen_episode": "S01E01"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Test News",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 2,
+          "name": "Test News",
+          "channel_number": 2.0,
+          "channel_group": "Test News",
+          "tvg_id": "test-news.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 2,
+          "name": "Test News",
+          "channel_group": "Test News",
+          "tvg_id": "test-news.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 169,
+      "title": "Test Pattern Theatre",
+      "sub_title": "Episode 1",
+      "description": "Synthetic programme 60 on Test Sports 1080i.",
+      "start_time": "2026-11-19T15:00:00Z",
+      "end_time": "2026-11-19T16:00:00Z",
+      "tvg_id": "test-sports.test",
+      "custom_properties": {
+        "new": true,
+        "season": 1,
+        "episode": 1,
+        "categories": [
+          "Test Sports"
+        ],
+        "onscreen_episode": "S01E01"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Test Sports 1080i",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 3,
+          "name": "Test Sports 1080i",
+          "channel_number": 3.0,
+          "channel_group": "Test Sports",
+          "tvg_id": "test-sports.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 3,
+          "name": "Test Sports 1080i",
+          "channel_group": "Test Sports",
+          "tvg_id": "test-sports.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 277,
+      "title": "Pattern Playhouse",
+      "sub_title": "Episode 1",
+      "description": "Synthetic programme 60 on Catchup One.",
+      "start_time": "2026-11-19T15:00:00Z",
+      "end_time": "2026-11-19T16:00:00Z",
+      "tvg_id": "catchup-one.test",
+      "custom_properties": {
+        "new": true,
+        "season": 1,
+        "episode": 1,
+        "categories": [
+          "Test Entertainment"
+        ],
+        "onscreen_episode": "S01E01"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Catchup One",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 7,
+          "name": "Catchup One",
+          "channel_number": 7.0,
+          "channel_group": "Test Entertainment",
+          "tvg_id": "catchup-one.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 7,
+          "name": "Catchup One",
+          "channel_group": "Test Entertainment",
+          "tvg_id": "catchup-one.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 349,
+      "title": "The Synthetic Hour",
+      "sub_title": "Episode 1",
+      "description": "Synthetic programme 60 on HDR Demo.",
+      "start_time": "2026-11-19T15:00:00Z",
+      "end_time": "2026-11-19T16:00:00Z",
+      "tvg_id": "hdr-demo.test",
+      "custom_properties": {
+        "new": true,
+        "season": 1,
+        "episode": 1,
+        "categories": [
+          "Test Lab"
+        ],
+        "onscreen_episode": "S01E01"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "HDR Demo",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 6,
+          "name": "HDR Demo",
+          "channel_number": 6.0,
+          "channel_group": "Test Lab",
+          "tvg_id": "hdr-demo.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 6,
+          "name": "HDR Demo",
+          "channel_group": "Test Lab",
+          "tvg_id": "hdr-demo.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    }
+  ]
+}

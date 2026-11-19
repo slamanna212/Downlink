@@ -1,0 +1,27 @@
+[
+  {
+    "id": 7,
+    "name": "Catchup One",
+    "url": "http://streams.dispatcharr.test/ch/catchup-one.ts",
+    "m3u_account": 2,
+    "logo_url": "",
+    "tvg_id": "catchup-one.test",
+    "local_file": null,
+    "current_viewers": 0,
+    "updated_at": "2026-11-19T15:49:56.295276Z",
+    "last_seen": "2026-11-19T15:49:56.294340Z",
+    "is_stale": false,
+    "is_adult": false,
+    "stream_profile_id": null,
+    "is_custom": false,
+    "channel_group": 2,
+    "stream_hash": "ff4fc84f7a82265e024354bef5714d4a6376716093436948d08128a04ebefee6",
+    "stream_stats": null,
+    "stream_stats_updated_at": null,
+    "stream_id": null,
+    "stream_chno": 7.0,
+    "is_catchup": true,
+    "catchup_days": 3,
+    "is_radio": false
+  }
+]

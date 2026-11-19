@@ -1,0 +1,37 @@
+[
+  {
+    "id": 2,
+    "channel_number": 2.0,
+    "name": "Test News",
+    "channel_group_id": 3,
+    "tvg_id": "test-news.test",
+    "tvc_guide_stationid": null,
+    "epg_data_id": 2,
+    "streams": [
+      2
+    ],
+    "stream_profile_id": null,
+    "uuid": "fbcccc31-c202-4aa0-a07a-08418ae0a010",
+    "logo_id": null,
+    "user_level": 0,
+    "is_adult": false,
+    "is_catchup": false,
+    "catchup_days": 0,
+    "is_radio": false,
+    "hidden_from_output": false,
+    "auto_created": false,
+    "auto_created_by": null,
+    "auto_created_by_name": null,
+    "override": null,
+    "source_stream": null,
+    "effective_name": "Test News",
+    "effective_channel_number": 2.0,
+    "effective_channel_group_id": 3,
+    "effective_logo_id": null,
+    "effective_tvg_id": "test-news.test",
+    "effective_tvc_guide_stationid": null,
+    "effective_epg_data_id": 2,
+    "effective_stream_profile_id": null,
+    "effective_is_radio": false
+  }
+]

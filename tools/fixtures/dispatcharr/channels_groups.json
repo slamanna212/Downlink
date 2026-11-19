@@ -1,0 +1,142 @@
+[
+  {
+    "id": 1,
+    "name": "Default Group",
+    "channel_count": 0,
+    "is_custom": false,
+    "m3u_account_count": 1,
+    "m3u_accounts": [
+      {
+        "channel_group": 1,
+        "enabled": true,
+        "auto_channel_sync": false,
+        "auto_sync_channel_start": null,
+        "auto_sync_channel_end": null,
+        "custom_properties": {},
+        "is_stale": true,
+        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "stream_count": 0
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "name": "Test Entertainment",
+    "channel_count": 2,
+    "is_custom": true,
+    "m3u_account_count": 1,
+    "m3u_accounts": [
+      {
+        "channel_group": 2,
+        "enabled": true,
+        "auto_channel_sync": false,
+        "auto_sync_channel_start": null,
+        "auto_sync_channel_end": null,
+        "custom_properties": {},
+        "is_stale": true,
+        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "stream_count": 2
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "name": "Test News",
+    "channel_count": 1,
+    "is_custom": true,
+    "m3u_account_count": 1,
+    "m3u_accounts": [
+      {
+        "channel_group": 3,
+        "enabled": true,
+        "auto_channel_sync": false,
+        "auto_sync_channel_start": null,
+        "auto_sync_channel_end": null,
+        "custom_properties": {},
+        "is_stale": true,
+        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "stream_count": 1
+      }
+    ]
+  },
+  {
+    "id": 4,
+    "name": "Test Sports",
+    "channel_count": 1,
+    "is_custom": true,
+    "m3u_account_count": 1,
+    "m3u_accounts": [
+      {
+        "channel_group": 4,
+        "enabled": true,
+        "auto_channel_sync": false,
+        "auto_sync_channel_start": null,
+        "auto_sync_channel_end": null,
+        "custom_properties": {},
+        "is_stale": true,
+        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "stream_count": 1
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "name": "Test Lab",
+    "channel_count": 4,
+    "is_custom": true,
+    "m3u_account_count": 1,
+    "m3u_accounts": [
+      {
+        "channel_group": 5,
+        "enabled": true,
+        "auto_channel_sync": false,
+        "auto_sync_channel_start": null,
+        "auto_sync_channel_end": null,
+        "custom_properties": {},
+        "is_stale": true,
+        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "stream_count": 4
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "name": "Test Movies",
+    "channel_count": 1,
+    "is_custom": true,
+    "m3u_account_count": 1,
+    "m3u_accounts": [
+      {
+        "channel_group": 6,
+        "enabled": true,
+        "auto_channel_sync": false,
+        "auto_sync_channel_start": null,
+        "auto_sync_channel_end": null,
+        "custom_properties": {},
+        "is_stale": true,
+        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "stream_count": 1
+      }
+    ]
+  },
+  {
+    "id": 7,
+    "name": "Test Kids",
+    "channel_count": 1,
+    "is_custom": true,
+    "m3u_account_count": 1,
+    "m3u_accounts": [
+      {
+        "channel_group": 7,
+        "enabled": true,
+        "auto_channel_sync": false,
+        "auto_sync_channel_start": null,
+        "auto_sync_channel_end": null,
+        "custom_properties": {},
+        "is_stale": true,
+        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "stream_count": 1
+      }
+    ]
+  }
+]
