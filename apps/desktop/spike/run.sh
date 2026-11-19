@@ -5,5 +5,5 @@
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 export DOWNLINK_MPV_PATH="${DOWNLINK_MPV_PATH:-/usr/lib/x86_64-linux-gnu/libmpv.so.2}"
-export TAURI_CONFIG='{"build":{"frontendDist":"./spike"}}'
+export TAURI_CONFIG='{"build":{"frontendDist":"./spike","beforeDevCommand":null,"beforeBuildCommand":null},"app":{"security":{"csp":null}}}'
 exec cargo run -p downlink-desktop --features spike "$@"

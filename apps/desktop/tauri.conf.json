@@ -5,7 +5,9 @@
   "identifier": "com.slamanna212.downlink",
   "build": {
     "devUrl": "http://localhost:1420",
-    "frontendDist": "../ui/dist"
+    "frontendDist": "../ui/dist",
+    "beforeDevCommand": "pnpm -C ../ui dev",
+    "beforeBuildCommand": "pnpm -C ../ui build"
   },
   "app": {
     "withGlobalTauri": true,
@@ -24,11 +26,23 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' dlimg: http://dlimg.localhost https://dlimg.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; img-src 'self' dlimg: http://dlimg.localhost https://dlimg.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420; script-src 'self' 'unsafe-inline' 'unsafe-eval'"
     }
   },
   "bundle": {
-    "active": false,
-    "icon": ["icons/icon.png"]
+    "active": true,
+    "targets": ["nsis", "dmg", "app", "appimage", "deb", "rpm"],
+    "createUpdaterArtifacts": true,
+    "icon": ["icons/icon.png"],
+    "macOS": { "signingIdentity": "-" },
+    "windows": { "nsis": { "installMode": "currentUser" } }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "TODO_REPLACE_WITH_CONTENTS_OF_downlink.key.pub",
+      "endpoints": ["https://github.com/slamanna212/Downlink/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
   }
 }

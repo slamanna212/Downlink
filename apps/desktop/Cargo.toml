@@ -18,11 +18,15 @@ spike = ["custom-protocol"]
 [dependencies]
 downlink-player = { path = "../../crates/downlink-player" }
 downlink-platform = { path = "../../crates/downlink-platform" }
+downlink-core = { path = "../../crates/downlink-core" }
 tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+url = "2"
+tokio = { version = "1", features = ["time", "sync", "rt"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "registry"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"

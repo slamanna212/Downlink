@@ -168,6 +168,7 @@ pub fn subtitle_options(style: &SubtitleStyle) -> Opts {
 /// Values accepted for the per-user `hwdec` override (PLAN §4.7).
 pub const HWDEC_ALLOWED: &[&str] = &[
     "auto-safe",
+    "auto",
     "d3d11va",
     "videotoolbox",
     "vaapi",

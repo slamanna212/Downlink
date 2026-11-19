@@ -517,6 +517,16 @@ impl Player {
         load_current(&self.inner, &mut s)
     }
 
+    /// Fail the session without touching mpv (play plan could not be built, for example).
+    pub fn mark_failed(&self, message: String) {
+        let mut s = self.lock();
+        s.request = None;
+        s.retry_at = None;
+        s.load_started = None;
+        s.error = Some(message.clone());
+        go(&self.inner, &mut s, SessionState::Failed, Some(message));
+    }
+
     /// Stop and release the stream (zap away, navigate away, sleep, quit).
     pub fn stop(&self) -> Result<(), PlayerError> {
         let mut s = self.lock();
