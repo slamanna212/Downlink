@@ -335,16 +335,10 @@ async fn pending_migration_backs_up_and_keeps_two_copies() {
             .execute(s.pool())
             .await
             .unwrap();
-        sqlx::query("DROP TABLE IF EXISTS programme_fts")
+        sqlx::query("DROP TABLE IF EXISTS app_kv")
             .execute(s.pool())
             .await
             .unwrap();
-        for t in ["programme_fts_ai", "programme_fts_ad", "programme_fts_au"] {
-            sqlx::query(&format!("DROP TRIGGER IF EXISTS {t}"))
-                .execute(s.pool())
-                .await
-                .unwrap();
-        }
         s.close().await;
         let s = Store::open(&path).await.unwrap(); // re-applies it, backing up first
         s.close().await;

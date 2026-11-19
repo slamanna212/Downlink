@@ -11,5 +11,6 @@ pub mod sessions;
 pub mod source;
 pub mod store;
 pub mod sync;
+pub mod userstate;
 
 pub use error::{AppError, ErrorCode, Result};
