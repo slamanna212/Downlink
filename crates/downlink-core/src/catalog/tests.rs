@@ -379,3 +379,31 @@ async fn programme_search_is_visibility_aware_and_tracks_updates() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn favourites_only_filter_orders_by_user_position_and_respects_visibility() {
+    let (store, sid) = fill().await;
+    let id = |e: &'static str| {
+        let store = store.clone();
+        async move { store.channel_by_ext(sid, e).await.unwrap().unwrap().id }
+    };
+    store.set_favourite(id("6").await, true, 1).await.unwrap();
+    store.set_favourite(id("1").await, true, 2).await.unwrap();
+    store.set_favourite(id("3").await, true, 3).await.unwrap(); // adult: hidden
+    store.set_favourite(id("2").await, true, 4).await.unwrap();
+    store.set_favourite(id("2").await, false, 5).await.unwrap();
+    let f = ChannelFilter {
+        favourites_only: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        names(&list_channels(&store, &f, 10, 0).await.unwrap()),
+        ["Channel Six", "Channel One"]
+    );
+    let fs = ChannelFilter {
+        favourites_only: true,
+        search: Some("chan".into()),
+        ..Default::default()
+    };
+    assert_eq!(list_channels(&store, &fs, 10, 0).await.unwrap().len(), 2);
+}

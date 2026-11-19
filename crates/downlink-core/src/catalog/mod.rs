@@ -51,6 +51,8 @@ pub struct ChannelFilter {
     pub include_adult: bool,
     pub include_radio: bool,
     pub include_drm: bool,
+    /// Only live favourites, in the user's order.
+    pub favourites_only: bool,
 }
 
 /// SQL fragment (table alias `c`) implementing the visibility rules.
@@ -116,6 +118,7 @@ pub async fn list_channels(
                ) m JOIN channel c ON c.id = m.id
              WHERE {vis}
                AND (?2 IS NULL OR c.source_id = ?2) AND (?3 IS NULL OR c.group_id = ?3)
+               AND (?7 = 0 OR c.id IN (SELECT channel_id FROM favourite WHERE deleted = 0))
              ORDER BY CASE WHEN ?4 IS NOT NULL AND c.number = ?4 THEN 0 ELSE 1 END,
                       CASE WHEN ?4 IS NULL THEN 0 ELSE abs(coalesce(c.number, 1e9) - ?4) END,
                       m.rank, c.number, c.sort_key
@@ -126,7 +129,10 @@ pub async fn list_channels(
             "SELECT {COLS} FROM channel c
              WHERE {vis} AND (?2 IS NULL OR c.source_id = ?2) AND (?3 IS NULL OR c.group_id = ?3)
                AND (?1 IS NULL OR 1 = 1) AND (?4 IS NULL OR 1 = 1)
-             ORDER BY c.number IS NULL, c.number, c.sort_key
+               AND (?7 = 0 OR c.id IN (SELECT channel_id FROM favourite WHERE deleted = 0))
+             ORDER BY CASE WHEN ?7 = 0 THEN 0
+                           ELSE (SELECT position FROM favourite f WHERE f.channel_id = c.id) END,
+                      c.number IS NULL, c.number, c.sort_key
              LIMIT ?5 OFFSET ?6"
         )
     };
@@ -137,6 +143,7 @@ pub async fn list_channels(
         .bind(numeric)
         .bind(limit)
         .bind(offset)
+        .bind(f.favourites_only)
         .fetch_all(store.pool())
         .await?)
 }
@@ -163,6 +170,26 @@ pub async fn list_groups(store: &Store, f: &ChannelFilter) -> Result<Vec<GroupRo
         .bind(f.source_id)
         .fetch_all(store.pool())
         .await?)
+}
+
+/// Visible channels for the given row ids, in the order given (unknown/hidden ids are skipped).
+pub async fn channels_by_ids(
+    store: &Store,
+    f: &ChannelFilter,
+    ids: &[i64],
+) -> Result<Vec<ChannelRow>> {
+    let vis = visibility_sql(f);
+    let mut out = Vec::with_capacity(ids.len());
+    for &id in ids {
+        let row: Option<ChannelRow> = sqlx::query_as(&format!(
+            "SELECT {COLS} FROM channel c WHERE c.id = ?1 AND {vis}"
+        ))
+        .bind(id)
+        .fetch_optional(store.pool())
+        .await?;
+        out.extend(row);
+    }
+    Ok(out)
 }
 
 /// Local guide search (FTS5 over title/subtitle/description), restricted to visible channels and
@@ -212,6 +239,17 @@ pub async fn channel_by_number(
         .bind(number)
         .fetch_optional(store.pool())
         .await?)
+}
+
+/// Total visible channel count for a filter (ignores `search`).
+pub async fn count_channels(store: &Store, f: &ChannelFilter) -> Result<i64> {
+    let vis = visibility_sql(f);
+    Ok(sqlx::query_scalar(&format!(
+        "SELECT count(*) FROM channel c WHERE {vis} AND (?1 IS NULL OR c.source_id = ?1)"
+    ))
+    .bind(f.source_id)
+    .fetch_one(store.pool())
+    .await?)
 }
 
 #[cfg(test)]

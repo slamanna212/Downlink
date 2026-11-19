@@ -68,7 +68,7 @@ async fn endpoint_version_me_settings_connect() {
     assert_eq!(info.timezone.as_deref(), Some("Europe/Berlin"));
     assert_eq!(
         client(&server).caps(),
-        Caps::EPG | Caps::CATCHUP | Caps::FAILOVER | Caps::PROFILES
+        Caps::LIVE | Caps::EPG | Caps::CATCHUP | Caps::FAVOURITES | Caps::FAILOVER | Caps::PROFILES
     );
 }
 

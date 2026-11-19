@@ -8,6 +8,7 @@ pub mod error;
 pub mod images;
 pub mod normalise;
 pub mod redact;
+pub mod service;
 pub mod sessions;
 pub mod source;
 pub mod store;

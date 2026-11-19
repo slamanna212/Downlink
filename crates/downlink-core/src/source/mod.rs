@@ -52,13 +52,17 @@ bitflags! {
     /// What a source can do. The UI branches on these, never on [`SourceKind`] (PLAN §6.1).
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct Caps: u32 {
-        const EPG      = 1 << 0;
-        const VOD      = 1 << 1;
-        const DVR      = 1 << 2;
-        const CATCHUP  = 1 << 3;
-        const FAILOVER = 1 << 4;
-        const LIMITS   = 1 << 5;
-        const PROFILES = 1 << 6;
+        // Bits 0-5 match `Cap` in apps/ui/src/api/types.ts (the UI owns that contract).
+        const LIVE       = 1 << 0;
+        const EPG        = 1 << 1;
+        const CATCHUP    = 1 << 2;
+        const VOD        = 1 << 3;
+        const DVR        = 1 << 4;
+        const FAVOURITES = 1 << 5;
+        // Core-only flags (PLAN §6.1): never needed by the UI.
+        const FAILOVER   = 1 << 6;
+        const LIMITS     = 1 << 7;
+        const PROFILES   = 1 << 8;
     }
 }
 
@@ -76,6 +80,9 @@ impl<'de> Deserialize<'de> for Caps {
 }
 
 impl Caps {
+    /// The bits the UI knows (`Cap` in types.ts).
+    pub const UI_MASK: u32 = 0b11_1111;
+
     /// Value stored in `source.caps`.
     pub fn to_db(self) -> i64 {
         i64::from(self.bits())

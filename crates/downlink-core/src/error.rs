@@ -41,11 +41,12 @@ impl ErrorCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppError {
     pub code: ErrorCode,
     pub message: String,
     /// Seconds the caller should wait before retrying (from `Retry-After`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub retry_after: Option<u64>,
     /// True for the only failures that stop the app from working: auth, and unsupported server
     /// version (PLAN §2.5). Everything else degrades.
@@ -243,16 +244,16 @@ mod tests {
         let e = AppError::from_status(429, Some(30), "channels");
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(v["code"], "server");
-        assert_eq!(v["retry_after"], 30);
+        assert_eq!(v["retryAfter"], 30);
         assert!(v["message"].is_string());
         let back: AppError = serde_json::from_value(v).unwrap();
         assert_eq!(back, e);
     }
 
     #[test]
-    fn retry_after_omitted_when_none() {
+    fn retry_after_is_null_when_none() {
         let v = serde_json::to_value(AppError::network("x")).unwrap();
-        assert!(v.get("retry_after").is_none());
+        assert!(v["retryAfter"].is_null());
     }
 
     #[test]

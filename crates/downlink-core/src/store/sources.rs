@@ -89,6 +89,15 @@ impl Store {
         Ok(())
     }
 
+    pub async fn set_source_secret_ref(&self, id: i64, secret_ref: Option<&str>) -> Result<()> {
+        sqlx::query("UPDATE source SET secret_ref = ? WHERE id = ?")
+            .bind(secret_ref)
+            .bind(id)
+            .execute(self.pool())
+            .await?;
+        Ok(())
+    }
+
     pub async fn touch_source_sync(&self, id: i64, now: i64) -> Result<()> {
         sqlx::query("UPDATE source SET last_sync_at = ? WHERE id = ?")
             .bind(now)

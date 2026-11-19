@@ -996,6 +996,13 @@ impl DispatcharrClient {
     }
 }
 
+/// Absolute logo URL for a base URL (no client needed; carries no credentials).
+pub fn logo_url(base: &Url, logo_id: &str) -> Result<String> {
+    Ok(base
+        .join(&format!("api/channels/logos/{logo_id}/cache"))?
+        .to_string())
+}
+
 /// Dispatcharr requires app-data keys of 8-64 characters.
 fn check_app_data_key(key: &str) -> Result<()> {
     if (8..=64).contains(&key.len()) {
@@ -1079,7 +1086,7 @@ impl Source for DispatcharrClient {
     }
 
     fn caps(&self) -> Caps {
-        Caps::EPG | Caps::CATCHUP | Caps::FAILOVER | Caps::PROFILES
+        Caps::LIVE | Caps::EPG | Caps::CATCHUP | Caps::FAVOURITES | Caps::FAILOVER | Caps::PROFILES
     }
 
     async fn connect(&self) -> Result<AccountInfo> {
