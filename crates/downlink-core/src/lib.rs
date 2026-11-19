@@ -1,3 +1,6 @@
 //! downlink-core: pure domain logic. Never depends on Tauri, wry, React or mpv.
 
+pub mod error;
 pub mod redact;
+
+pub use error::{AppError, ErrorCode, Result};
