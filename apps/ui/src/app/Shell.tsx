@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { useHotkeys } from '@mantine/hooks';
 import { dl } from '../theme';
+import { useCaps } from '../api/queries';
 import { useUiStore } from '../store/ui';
 import { t } from '../lib/i18n';
 import { Rail, type RailMode } from './Rail';
@@ -25,6 +26,7 @@ export function Shell() {
   const railPref = useUiStore((s) => s.railPref);
   const setRailPref = useUiStore((s) => s.setRailPref);
   const fullscreen = useUiStore((s) => s.fullscreen);
+  const { loaded, hasSource } = useCaps();
 
   const autoCollapsed = isCollapsedRoute(pathname);
   const collapsed = railPref === 'auto' ? autoCollapsed : railPref === 'collapsed';
@@ -45,7 +47,7 @@ export function Shell() {
       <a href="#main" className={classes.skip}>
         {t('a11y.skipToContent')}
       </a>
-      {!(fullscreen && route === 'player') && (
+      {!(fullscreen && route === 'player') && !(pathname === '/sources/add' && loaded && !hasSource) && (
         <aside className={classes.rail} style={{ width }}>
           <Rail mode={mode} onToggle={() => setRailPref(collapsed ? 'expanded' : 'collapsed')} />
         </aside>
