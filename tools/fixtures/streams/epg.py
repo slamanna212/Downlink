@@ -41,6 +41,7 @@ def m3u(stream_host, epg_url=None, redirect_host=None):
     hdr = '#EXTM3U' + (f' x-tvg-url="{epg_url}"' if epg_url else '')
     out = [hdr]
     for c in CHANNELS:
+        if c.get("xc_id"): continue
         host = redirect_host if (c.get("redirect") and redirect_host) else stream_host
         attrs = (f'tvg-id="{c["tvg_id"]}" tvg-name="{c["name"]}" tvg-chno="{c["number"]}" '
                  f'group-title="{c["group"]}"')
@@ -49,3 +50,32 @@ def m3u(stream_host, epg_url=None, redirect_host=None):
         out.append(f'#EXTINF:-1 {attrs},{c["name"]}')
         out.append(f'http://{host}/ch/{c["slug"]}.ts')
     return "\n".join(out) + "\n"
+
+
+XC_USER, XC_PASS = "testuser", "testpass"
+
+def xc_channels(): return [c for c in CHANNELS if c.get("xc_id")]
+
+def xc_categories():
+    return [{"category_id": "1", "category_name": "Test Xtream", "parent_id": 0}]
+
+def xc_live_streams(host, now=None):
+    now = int((now or dt.datetime.now(dt.timezone.utc)).timestamp())
+    out = []
+    for i, c in enumerate(xc_channels(), 1):
+        out.append({"num": i, "name": c["name"], "stream_type": "live", "stream_id": c["xc_id"], "stream_icon": "",
+                    "epg_channel_id": c["tvg_id"], "added": str(now - 86400), "is_adult": "0", "category_id": "1",
+                    "category_ids": [1], "custom_sid": "", "tv_archive": 1 if c.get("catchup_days") else 0,
+                    "direct_source": "", "tv_archive_duration": c.get("catchup_days", 0)})
+    return out
+
+def xc_login(host):
+    now = dt.datetime.now(dt.timezone.utc)
+    h, _, p = host.partition(":")
+    return {"user_info": {"username": XC_USER, "password": XC_PASS, "message": "", "auth": 1, "status": "Active",
+                          "exp_date": str(int(now.timestamp()) + 365 * 86400), "is_trial": "0", "active_cons": "0",
+                          "created_at": str(int(now.timestamp()) - 86400), "max_connections": "5",
+                          "allowed_output_formats": ["ts"]},
+            "server_info": {"url": h, "port": p or "80", "https_port": "443", "server_protocol": "http", "rtmp_port": "1935",
+                            "timezone": "UTC", "timestamp_now": int(now.timestamp()),
+                            "time_now": now.strftime("%Y-%m-%d %H:%M:%S")}}

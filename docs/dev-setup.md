@@ -32,7 +32,7 @@ What it starts:
 |---|---|---|
 | Synthetic TS channels, M3U, XMLTV | `http://localhost:8088` (bound on 0.0.0.0 so the container can reach it) | `tools/fixtures/streams/streams-up.sh` / `streams-down.sh`; log in `tools/dev/.state/streams.log` |
 | Test Dispatcharr 0.34.1 (pinned image tag in `dispatcharr-up.sh`) | `http://localhost:9191`, container `dispatcharr-test`, volume `dispatcharr_test`, `--add-host=host.docker.internal:host-gateway` | `tools/dev/dispatcharr-up.sh` / `dispatcharr-down.sh [--purge]` |
-| Bootstrap via Dispatcharr's own REST API | admin user, API key, M3U account, XMLTV source, 10 channels with EPG, catch-up on `Catchup One`, Redirect profile on `Redirect One` | `tools/dev/bootstrap-dispatcharr.py` |
+| Bootstrap via Dispatcharr's own REST API | admin user, API key, M3U account, Xtream account, XMLTV source, 13 channels with EPG, catch-up that actually plays on `XC Catchup`, Redirect profile on `Redirect One` | `tools/dev/bootstrap-dispatcharr.py` |
 
 Credentials and the API key are written to **`tools/dev/.env.local`** (gitignored, mode 600):
 `DISPATCHARR_URL`, `DISPATCHARR_USER`, `DISPATCHARR_PASSWORD`, `DISPATCHARR_API_KEY`. Use it:
@@ -74,6 +74,25 @@ generated at request time, synthetic titles). Playlist and EPG URLs can be added
 the app, with no Dispatcharr in between.
 
 Direct playback check without Dispatcharr: `mpv http://localhost:8088/ch/channel-one.ts`.
+
+## Synthetic Xtream server (catch-up)
+
+The same server on :8088 also speaks Xtream: `/player_api.php` (login with `server_info.timezone: UTC`, `get_live_categories`,
+`get_live_streams` with `tv_archive`), `/live/testuser/testpass/<id>.ts`, `/timeshift/<u>/<p>/<min>/<start>/<id>.ts` and
+`/streaming/timeshift.php`. Credentials are the synthetic `testuser` / `testpass`. Dispatcharr only plays catch-up from
+XC-type accounts, so `tools/dev/bootstrap-dispatcharr.py` adds a "Synthetic Xtream" account (3 channels, ids 101-103);
+`XC Catchup` has 3 days of archive. Archive requests are logged as `TIMESHIFT stream=… start=… minutes=…` in
+`tools/dev/.state/streams.log` and return the looping H.264 clip, ending after the requested programme length (max 2 h).
+`Catchup One` (plain M3U) still has `is_catchup: true` but cannot play, which is useful for testing error paths.
+The same Xtream server can be added directly in Downlink as an Xtream source (`http://localhost:8088`, `testuser`/`testpass`).
+
+Manual verification, done once by hand (it requests a stream endpoint, so it is not scripted):
+
+```bash
+# create a session for XC Catchup (start = a past programme start, duration in minutes), then:
+ffprobe -v error -show_entries stream=codec_name,width,height "$DISPATCHARR_URL<playback_url>"
+curl -X DELETE -H "X-API-Key: $DISPATCHARR_API_KEY" "$DISPATCHARR_URL/api/catchup/sessions/<session_id>/"
+```
 
 ## Fixtures
 

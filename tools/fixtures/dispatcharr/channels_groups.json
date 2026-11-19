@@ -4,7 +4,7 @@
     "name": "Default Group",
     "channel_count": 0,
     "is_custom": false,
-    "m3u_account_count": 1,
+    "m3u_account_count": 2,
     "m3u_accounts": [
       {
         "channel_group": 1,
@@ -13,8 +13,19 @@
         "auto_sync_channel_start": null,
         "auto_sync_channel_end": null,
         "custom_properties": {},
-        "is_stale": true,
-        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "is_stale": false,
+        "last_seen": "2026-11-19T19:38:13.472031Z",
+        "stream_count": 0
+      },
+      {
+        "channel_group": 1,
+        "enabled": true,
+        "auto_channel_sync": false,
+        "auto_sync_channel_start": null,
+        "auto_sync_channel_end": null,
+        "custom_properties": {},
+        "is_stale": false,
+        "last_seen": "2026-11-19T19:38:13.483442Z",
         "stream_count": 0
       }
     ]
@@ -33,8 +44,8 @@
         "auto_sync_channel_start": null,
         "auto_sync_channel_end": null,
         "custom_properties": {},
-        "is_stale": true,
-        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "is_stale": false,
+        "last_seen": "2026-11-19T19:38:13.472031Z",
         "stream_count": 2
       }
     ]
@@ -53,8 +64,8 @@
         "auto_sync_channel_start": null,
         "auto_sync_channel_end": null,
         "custom_properties": {},
-        "is_stale": true,
-        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "is_stale": false,
+        "last_seen": "2026-11-19T19:38:13.472031Z",
         "stream_count": 1
       }
     ]
@@ -73,8 +84,8 @@
         "auto_sync_channel_start": null,
         "auto_sync_channel_end": null,
         "custom_properties": {},
-        "is_stale": true,
-        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "is_stale": false,
+        "last_seen": "2026-11-19T19:38:13.472031Z",
         "stream_count": 1
       }
     ]
@@ -93,8 +104,8 @@
         "auto_sync_channel_start": null,
         "auto_sync_channel_end": null,
         "custom_properties": {},
-        "is_stale": true,
-        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "is_stale": false,
+        "last_seen": "2026-11-19T19:38:13.472031Z",
         "stream_count": 4
       }
     ]
@@ -113,8 +124,8 @@
         "auto_sync_channel_start": null,
         "auto_sync_channel_end": null,
         "custom_properties": {},
-        "is_stale": true,
-        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "is_stale": false,
+        "last_seen": "2026-11-19T19:38:13.472031Z",
         "stream_count": 1
       }
     ]
@@ -133,9 +144,31 @@
         "auto_sync_channel_start": null,
         "auto_sync_channel_end": null,
         "custom_properties": {},
-        "is_stale": true,
-        "last_seen": "2026-11-19T15:49:46.079161Z",
+        "is_stale": false,
+        "last_seen": "2026-11-19T19:38:13.472031Z",
         "stream_count": 1
+      }
+    ]
+  },
+  {
+    "id": 8,
+    "name": "Test Xtream",
+    "channel_count": 3,
+    "is_custom": true,
+    "m3u_account_count": 1,
+    "m3u_accounts": [
+      {
+        "channel_group": 8,
+        "enabled": true,
+        "auto_channel_sync": false,
+        "auto_sync_channel_start": null,
+        "auto_sync_channel_end": null,
+        "custom_properties": {
+          "xc_id": "1"
+        },
+        "is_stale": false,
+        "last_seen": "2026-11-19T19:38:13.483442Z",
+        "stream_count": 3
       }
     ]
   }

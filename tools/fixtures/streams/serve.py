@@ -9,7 +9,7 @@
 A channel with "drop_after" closes the connection mid-playback after that many seconds.
 Every stream request is logged to stdout (tools/dev uses the log to confirm the app-side network discipline).
 """
-import argparse, os, subprocess, sys, time, threading
+import argparse, json, os, subprocess, sys, time, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -41,10 +41,40 @@ class H(BaseHTTPRequestHandler):
         if u.path == "/playlist.m3u":
             sh = q.get("streamhost", [host])[0]; rh = q.get("redirecthost", [None])[0]
             return self._send(200, epg.m3u(sh, f"http://{host}/epg.xml", rh), "audio/x-mpegurl")
+        if u.path == "/player_api.php": return self._xc_api(q, host)
+        parts = u.path.strip("/").split("/")
+        # Xtream: /live/U/P/<id>.ts, /timeshift/U/P/<min>/<start>/<id>.ts, /streaming/timeshift.php?...
+        xc = {c["xc_id"]: c for c in epg.xc_channels()}
+        try:
+            if parts[0] == "live" and len(parts) == 4 and self._xc_auth(parts[1], parts[2]):
+                return self._stream_if(xc.get(int(parts[3].split(".")[0])))
+            if parts[0] == "timeshift" and len(parts) == 6 and self._xc_auth(parts[1], parts[2]):
+                return self._stream_if(xc.get(int(parts[5].split(".")[0])), minutes=int(parts[3]), start=parts[4])
+            if u.path == "/streaming/timeshift.php" and self._xc_auth(q.get("username", [""])[0], q.get("password", [""])[0]):
+                return self._stream_if(xc.get(int(q["stream"][0])), minutes=int(q.get("duration", ["60"])[0]), start=q.get("start", [""])[0])
+        except (ValueError, KeyError):
+            pass
         if u.path.startswith("/ch/") and u.path.endswith(".ts"):
             c = BY_SLUG.get(u.path[4:-3])
             if c and os.path.isfile(os.path.join(MEDIA, c["clip"] + ".ts")): return self._stream(c)
         self._send(404, "not found", "text/plain")
+
+    def _xc_auth(self, user, pw): return user == epg.XC_USER and pw == epg.XC_PASS
+
+    def _stream_if(self, c, minutes=None, start=None):
+        if not c: return self._send(404, "unknown stream", "text/plain")
+        if start is not None:  # archive request: log it, and stop after the requested programme length
+            sys.stdout.write("%s TIMESHIFT stream=%s start=%s minutes=%s\n" % (time.strftime("%H:%M:%S"), c["xc_id"], start, minutes))
+            c = dict(c, drop_after=max(1, min(minutes, 120)) * 60)
+        return self._stream(c)
+
+    def _xc_api(self, q, host):
+        a = q.get("action", [""])[0]
+        if not self._xc_auth(q.get("username", [""])[0], q.get("password", [""])[0]):
+            return self._send(200, json.dumps({"user_info": {"auth": 0}}), "application/json")
+        body = {"": epg.xc_login(host), "get_live_categories": epg.xc_categories(),
+                "get_live_streams": epg.xc_live_streams(host)}.get(a, [])
+        self._send(200, json.dumps(body), "application/json")
 
     def _stream(self, c):
         clip = os.path.join(MEDIA, c["clip"] + ".ts")

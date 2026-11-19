@@ -17,7 +17,7 @@ Auth for every call: `X-API-Key: <key>` (401 with a missing or wrong key). JWT: 
 | 2 | Lists are DRF-paginated `{count,next,previous,results}` | Only when `page` or `page_size` is present. `GET /api/channels/channels/` and `…?search=x` with **no** page params return a **bare array** of every match. Always send `page` + `page_size`. `page_size` is honoured up to at least 500 (100000 returned all 10 rows). `next` is an absolute URL built from the request Host header (never trust its host). |
 | 3 | Redirect profile "does not open a provider connection" (§3.5) | Before answering 302, Dispatcharr runs `validate_stream_url`: a server-side **HEAD** to the provider URL (redirects followed), and if that is not 2xx a **GET with `stream=True`** (reads the first chunk). So a Redirect channel play costs the provider a HEAD, and sometimes a short GET. Observed in the stream-server log: one `HEAD /ch/redirect-one.ts` per play request. The 302 `Location` is the original profile URL, no credentials, no body. PLAN §3.5 step 2 and the "M0 verifies" note should be reworded. |
 | 4 | Effective stream profile at sync | `effective_stream_profile_id` is **null** for a channel on the server default; it is not resolved server-side. Resolve it client-side: `channel.stream_profile_id ?? stream_settings.default_stream_profile` (see below). |
-| 5 | Catch-up from M3U tags | Dispatcharr's M3U ingest reads only `tv_archive="1"` and `tv_archive_duration="N"` for `is_catchup`/`catchup_days` (XC accounts: `tv_archive`, `tv_archive_duration` from `get_live_streams`). `catchup="default"` / `catchup-days` / `catchup-source` attributes on a plain M3U are **ignored**. The channel's `is_catchup` is rolled up from its active streams. |
+| 5 | Catch-up from M3U tags | Dispatcharr's M3U ingest reads only `tv_archive="1"` and `tv_archive_duration="N"` for `is_catchup`/`catchup_days` (XC accounts: `tv_archive`, `tv_archive_duration` from `get_live_streams`). `catchup="default"` / `catchup-days` / `catchup-source` attributes on a plain M3U are **ignored**. The channel's `is_catchup` is rolled up from its active streams. **Playback additionally requires an XC-type M3U account**: a plain-M3U catch-up stream gets a 201 session but `GET playback_url` returns 400 `Cannot build timeshift URL` (source: `apps/timeshift/views.py::_prepare_catchup_stream_attempt` skips any stream whose account is not `account_type == "XC"` or whose `custom_properties.stream_id` is missing). |
 | 6 | `POST …/{id}/position/` `{…}` | Body is `{"position_secs": <number>}`. Returns 404 `{"error":"No active playback for this session"}` until the player has made its first GET on `playback_url`; it cannot be called right after create. |
 | 7 | Programme ids are strings | Observed integers for XMLTV EPG in grid, current-programs and search. Keep the string-tolerant decode (dummy EPG ids may still be strings). |
 | 8 | Grid associates programmes to channels | `/api/epg/grid/` rows carry **only `tvg_id`** (no channel id/uuid). Several channels sharing one `tvg_id` receive the same rows; join on `tvg_id` client-side. |
@@ -95,6 +95,16 @@ epg_source,epg_name,epg_icon_url,channels[{id,name,channel_number,channel_group,
 | `POST /api/catchup/sessions/{id}/position/` | `{position_secs}` | 404 until playback has started [`catchup_session_position_no_playback`] |
 | `DELETE /api/catchup/sessions/{id}/` | — | 204 (404 for a missing or foreign session) |
 
+**What playback needs (resolved).** An XC account (`account_type: "XC"`, `username`, `password`, `server_url`) whose
+`get_live_streams` marks the stream `tv_archive: 1` with `tv_archive_duration`, and a provider that serves
+`GET {server}/timeshift/{user}/{pass}/{minutes}/{YYYY-MM-DD:HH-MM}/{stream_id}.ts` (Dispatcharr tries this PATH layout
+first; the query form `/streaming/timeshift.php?username&password&stream&start&duration` is used when the client came in
+via `timeshift.php`). The start is converted to the provider's timezone from the default profile's `server_info.timezone`
+(returned by the XC login), and `minutes` = requested duration plus a ~5 minute lag buffer (60 requested, 65 sent). The
+local synthetic server implements all of this (see dev-setup). A verified run: session create 201, then
+`ffprobe` of the `playback_url` returned h264/aac 1080p and the provider log showed
+`/timeshift/testuser/testpass/65/2026-11-18:17-00/101.ts`.
+
 Catch-up is on by default (`system_settings.catchup_enabled` unset = true; per-user
 `custom_properties.catchup_enabled == false` disables it). Sessions expire if the first playback GET does not
 happen within the handshake window, and idle after 10 minutes.
@@ -137,7 +147,7 @@ VOD item bodies, logo image bytes.
 
 ## Local test server data
 
-10 channels from the synthetic playlist (`tools/fixtures/streams/channels.json`): `Catchup One` has
+13 channels (10 from the synthetic playlist, 3 from the synthetic Xtream account `XC Catchup`, `XC News`, `XC Sports`) (`tools/fixtures/streams/channels.json`): `XC Catchup` (Xtream account, plays) and `Catchup One` (plain M3U, `is_catchup` true but not playable, see above) have
 `is_catchup: true, catchup_days: 3`; `Redirect One` has `stream_profile_id: 4` (Redirect); the rest use the
 default profile. The EPG spans 60 h back to 48 h ahead in hourly slots, regenerated relative to "now" each time
 the XMLTV is fetched, so fixture timestamps in `tools/fixtures/dispatcharr/` are frozen at capture time

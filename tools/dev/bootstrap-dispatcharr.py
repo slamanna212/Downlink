@@ -15,7 +15,8 @@ BASE = os.environ.get("DISPATCHARR_URL", "http://localhost:9191").rstrip("/")
 STREAM_PORT = os.environ.get("STREAM_PORT", "8088")
 ADMIN_USER = "downlink-admin"
 CONTAINER = os.environ.get("DISPATCHARR_CONTAINER", "dispatcharr-test")
-M3U_NAME, EPG_NAME = "Synthetic Playlist", "Synthetic EPG"
+M3U_NAME, EPG_NAME, XC_NAME = "Synthetic Playlist", "Synthetic EPG", "Synthetic Xtream"
+XC_USER, XC_PASS = "testuser", "testpass"  # synthetic Xtream creds served by tools/fixtures/streams/serve.py
 
 def log(*a): print("[bootstrap]", *a, flush=True)
 
@@ -105,6 +106,15 @@ def main():
         api.patch(f"/api/m3u/accounts/{accts[M3U_NAME]['id']}/", {"server_url": playlist})
     acct = accts[M3U_NAME]
 
+    # --- Xtream account (catch-up needs an XC-type account: Dispatcharr builds /timeshift/ URLs from XC creds)
+    if XC_NAME not in accts:
+        a = api.post("/api/m3u/accounts/", {"name": XC_NAME, "server_url": f"http://{host_for_container}", "account_type": "XC",
+                                            "username": XC_USER, "password": XC_PASS, "max_streams": 0, "is_active": True,
+                                            "refresh_interval": 0, "auto_enable_new_groups_live": True,
+                                            "enable_vod": False})
+        log("created Xtream account", a["id"]); accts[XC_NAME] = a
+    xc_acct = accts[XC_NAME]
+
     # --- EPG source
     srcs = {s["name"]: s for s in api.results("/api/epg/sources/")}
     if EPG_NAME not in srcs:
@@ -117,14 +127,16 @@ def main():
 
     # --- wait for streams; refresh the account if needed
     def streams():
-        return [s for s in api.results("/api/channels/streams/") if s.get("m3u_account") == acct["id"]]
+        ids = (acct["id"], xc_acct["id"])
+        return [s for s in api.results("/api/channels/streams/") if s.get("m3u_account") in ids]
     for attempt in range(60):
         ss = streams()
-        if len(ss) >= 10: break
-        if attempt in (5, 25): api.post(f"/api/m3u/refresh/{acct['id']}/")
+        if len(ss) >= 13: break
+        if attempt in (5, 25):
+            api.post(f"/api/m3u/refresh/{acct['id']}/"); api.post(f"/api/m3u/refresh/{xc_acct['id']}/")
         time.sleep(2)
     else:
-        sys.exit(f"M3U streams did not appear (have {len(streams())})")
+        sys.exit(f"streams did not appear (have {len(streams())})")
     log("streams:", len(ss))
 
     # --- channels
@@ -139,7 +151,7 @@ def main():
     # --- wait for EPG data then assign
     for attempt in range(60):
         eds = api.results(f"/api/epg/epgdata/?epg_source={epg['id']}")
-        if len(eds) >= 10: break
+        if len(eds) >= 13: break
         if attempt == 10: api.post("/api/epg/import/", {"id": epg["id"]}, ok=(200, 201, 202, 400))
         time.sleep(2)
     else:

@@ -1,8 +1,8 @@
 {
-  "session_id": "KLwgN47ouBFJGcfIbClJwA",
-  "playback_url": "/proxy/catchup/652170b5-923e-414f-ab8a-7c9da7973da2?session_id=KLwgN47ouBFJGcfIbClJwA",
-  "expires_at": 1795103546,
-  "channel_uuid": "652170b5-923e-414f-ab8a-7c9da7973da2",
-  "start": "2026-11-18T13:00:00Z",
+  "session_id": "Nqa87snUR97QuTaJ_MqEFA",
+  "playback_url": "/proxy/catchup/87c53314-7f86-44bc-9fab-303e34c25df9?session_id=Nqa87snUR97QuTaJ_MqEFA",
+  "expires_at": 1795117195,
+  "channel_uuid": "87c53314-7f86-44bc-9fab-303e34c25df9",
+  "start": "2026-11-18T17:00:00Z",
   "duration": 60
 }

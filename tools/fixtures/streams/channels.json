@@ -1,12 +1,126 @@
 [
-  {"slug": "channel-one",   "name": "Channel One",         "number": 1, "group": "Test Entertainment", "tvg_id": "channel-one.test",   "clip": "h264_aac_1080p30", "mode": "ffmpeg"},
-  {"slug": "test-news",     "name": "Test News",           "number": 2, "group": "Test News",          "tvg_id": "test-news.test",     "clip": "hevc_ac3_1080p30", "mode": "ffmpeg"},
-  {"slug": "test-sports",   "name": "Test Sports 1080i",   "number": 3, "group": "Test Sports",        "tvg_id": "test-sports.test",   "clip": "h264_1080i_tff",   "mode": "ffmpeg"},
-  {"slug": "broken-clock",  "name": "Broken Clock",        "number": 4, "group": "Test Lab",           "tvg_id": "broken-clock.test",  "clip": "broken_timestamps","mode": "raw"},
-  {"slug": "flaky-drop",    "name": "Flaky Drop",          "number": 5, "group": "Test Lab",           "tvg_id": "flaky-drop.test",    "clip": "h264_aac_1080p30", "mode": "ffmpeg", "drop_after": 15},
-  {"slug": "hdr-demo",      "name": "HDR Demo",            "number": 6, "group": "Test Lab",           "tvg_id": "hdr-demo.test",      "clip": "hevc_hdr10",       "mode": "ffmpeg"},
-  {"slug": "catchup-one",   "name": "Catchup One",         "number": 7, "group": "Test Entertainment", "tvg_id": "catchup-one.test",   "clip": "h264_aac_1080p30", "mode": "ffmpeg", "catchup_days": 3},
-  {"slug": "redirect-one",  "name": "Redirect One",        "number": 8, "group": "Test Lab",           "tvg_id": "redirect-one.test",  "clip": "h264_aac_1080p30", "mode": "ffmpeg", "redirect": true},
-  {"slug": "test-movies",   "name": "Test Movies",         "number": 9, "group": "Test Movies",        "tvg_id": "test-movies.test",   "clip": "h264_aac_1080p30", "mode": "ffmpeg"},
-  {"slug": "test-kids",     "name": "Test Kids",           "number": 10, "group": "Test Kids",         "tvg_id": "test-kids.test",     "clip": "h264_aac_1080p30", "mode": "ffmpeg"}
+ {
+  "slug": "channel-one",
+  "name": "Channel One",
+  "number": 1,
+  "group": "Test Entertainment",
+  "tvg_id": "channel-one.test",
+  "clip": "h264_aac_1080p30",
+  "mode": "ffmpeg"
+ },
+ {
+  "slug": "test-news",
+  "name": "Test News",
+  "number": 2,
+  "group": "Test News",
+  "tvg_id": "test-news.test",
+  "clip": "hevc_ac3_1080p30",
+  "mode": "ffmpeg"
+ },
+ {
+  "slug": "test-sports",
+  "name": "Test Sports 1080i",
+  "number": 3,
+  "group": "Test Sports",
+  "tvg_id": "test-sports.test",
+  "clip": "h264_1080i_tff",
+  "mode": "ffmpeg"
+ },
+ {
+  "slug": "broken-clock",
+  "name": "Broken Clock",
+  "number": 4,
+  "group": "Test Lab",
+  "tvg_id": "broken-clock.test",
+  "clip": "broken_timestamps",
+  "mode": "raw"
+ },
+ {
+  "slug": "flaky-drop",
+  "name": "Flaky Drop",
+  "number": 5,
+  "group": "Test Lab",
+  "tvg_id": "flaky-drop.test",
+  "clip": "h264_aac_1080p30",
+  "mode": "ffmpeg",
+  "drop_after": 15
+ },
+ {
+  "slug": "hdr-demo",
+  "name": "HDR Demo",
+  "number": 6,
+  "group": "Test Lab",
+  "tvg_id": "hdr-demo.test",
+  "clip": "hevc_hdr10",
+  "mode": "ffmpeg"
+ },
+ {
+  "slug": "catchup-one",
+  "name": "Catchup One",
+  "number": 7,
+  "group": "Test Entertainment",
+  "tvg_id": "catchup-one.test",
+  "clip": "h264_aac_1080p30",
+  "mode": "ffmpeg",
+  "catchup_days": 3
+ },
+ {
+  "slug": "redirect-one",
+  "name": "Redirect One",
+  "number": 8,
+  "group": "Test Lab",
+  "tvg_id": "redirect-one.test",
+  "clip": "h264_aac_1080p30",
+  "mode": "ffmpeg",
+  "redirect": true
+ },
+ {
+  "slug": "test-movies",
+  "name": "Test Movies",
+  "number": 9,
+  "group": "Test Movies",
+  "tvg_id": "test-movies.test",
+  "clip": "h264_aac_1080p30",
+  "mode": "ffmpeg"
+ },
+ {
+  "slug": "test-kids",
+  "name": "Test Kids",
+  "number": 10,
+  "group": "Test Kids",
+  "tvg_id": "test-kids.test",
+  "clip": "h264_aac_1080p30",
+  "mode": "ffmpeg"
+ },
+ {
+  "slug": "xc-catchup",
+  "name": "XC Catchup",
+  "number": 101,
+  "group": "Test Xtream",
+  "tvg_id": "xc-catchup.test",
+  "clip": "h264_aac_1080p30",
+  "mode": "ffmpeg",
+  "xc_id": 101,
+  "catchup_days": 3
+ },
+ {
+  "slug": "xc-news",
+  "name": "XC News",
+  "number": 102,
+  "group": "Test Xtream",
+  "tvg_id": "xc-news.test",
+  "clip": "hevc_ac3_1080p30",
+  "mode": "ffmpeg",
+  "xc_id": 102
+ },
+ {
+  "slug": "xc-sports",
+  "name": "XC Sports",
+  "number": 103,
+  "group": "Test Xtream",
+  "tvg_id": "xc-sports.test",
+  "clip": "h264_1080i_tff",
+  "mode": "ffmpeg",
+  "xc_id": 103
+ }
 ]

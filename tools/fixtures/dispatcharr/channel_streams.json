@@ -9,7 +9,7 @@
     "local_file": null,
     "current_viewers": 0,
     "updated_at": "2026-11-19T15:49:56.295213Z",
-    "last_seen": "2026-11-19T15:49:56.294001Z",
+    "last_seen": "2026-11-19T19:38:13.580465Z",
     "is_stale": false,
     "is_adult": false,
     "stream_profile_id": null,
@@ -37,7 +37,7 @@
       "audio_channels": "mono",
       "ffmpeg_output_bitrate": 6553.0
     },
-    "stream_stats_updated_at": "2026-11-19T15:50:55.613538Z",
+    "stream_stats_updated_at": "2026-11-19T19:22:58.655919Z",
     "stream_id": null,
     "stream_chno": 1.0,
     "is_catchup": false,

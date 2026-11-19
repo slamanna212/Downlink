@@ -1,15 +1,15 @@
 {
   "count": 10,
-  "next": "https://dispatcharr.test/api/epg/programs/search/?airing_at=2026-11-19T15%3A51%3A25Z&page=2&page_size=5",
+  "next": "https://dispatcharr.test/api/epg/programs/search/?airing_at=2026-11-19T19%3A38%3A55Z&page=2&page_size=5",
   "previous": null,
   "results": [
     {
-      "id": 25,
+      "id": 780,
       "title": "Sine Wave Cinema",
       "sub_title": "Episode 1",
       "description": "Synthetic programme 60 on Channel One.",
-      "start_time": "2026-11-19T15:00:00Z",
-      "end_time": "2026-11-19T16:00:00Z",
+      "start_time": "2026-11-19T19:00:00Z",
+      "end_time": "2026-11-19T20:00:00Z",
       "tvg_id": "channel-one.test",
       "custom_properties": {
         "new": true,
@@ -43,12 +43,12 @@
       ]
     },
     {
-      "id": 97,
+      "id": 851,
       "title": "Late Night Noise",
       "sub_title": "Episode 1",
       "description": "Synthetic programme 60 on Test News.",
-      "start_time": "2026-11-19T15:00:00Z",
-      "end_time": "2026-11-19T16:00:00Z",
+      "start_time": "2026-11-19T19:00:00Z",
+      "end_time": "2026-11-19T20:00:00Z",
       "tvg_id": "test-news.test",
       "custom_properties": {
         "new": true,
@@ -82,12 +82,12 @@
       ]
     },
     {
-      "id": 169,
+      "id": 922,
       "title": "Test Pattern Theatre",
       "sub_title": "Episode 1",
       "description": "Synthetic programme 60 on Test Sports 1080i.",
-      "start_time": "2026-11-19T15:00:00Z",
-      "end_time": "2026-11-19T16:00:00Z",
+      "start_time": "2026-11-19T19:00:00Z",
+      "end_time": "2026-11-19T20:00:00Z",
       "tvg_id": "test-sports.test",
       "custom_properties": {
         "new": true,
@@ -121,52 +121,13 @@
       ]
     },
     {
-      "id": 277,
-      "title": "Pattern Playhouse",
+      "id": 993,
+      "title": "Bitrate Briefing",
       "sub_title": "Episode 1",
-      "description": "Synthetic programme 60 on Catchup One.",
-      "start_time": "2026-11-19T15:00:00Z",
-      "end_time": "2026-11-19T16:00:00Z",
-      "tvg_id": "catchup-one.test",
-      "custom_properties": {
-        "new": true,
-        "season": 1,
-        "episode": 1,
-        "categories": [
-          "Test Entertainment"
-        ],
-        "onscreen_episode": "S01E01"
-      },
-      "epg_source": "Synthetic EPG",
-      "epg_name": "Catchup One",
-      "epg_icon_url": null,
-      "channels": [
-        {
-          "id": 7,
-          "name": "Catchup One",
-          "channel_number": 7.0,
-          "channel_group": "Test Entertainment",
-          "tvg_id": "catchup-one.test"
-        }
-      ],
-      "streams": [
-        {
-          "id": 7,
-          "name": "Catchup One",
-          "channel_group": "Test Entertainment",
-          "tvg_id": "catchup-one.test",
-          "m3u_account": "Synthetic Playlist"
-        }
-      ]
-    },
-    {
-      "id": 349,
-      "title": "The Synthetic Hour",
-      "sub_title": "Episode 1",
-      "description": "Synthetic programme 60 on HDR Demo.",
-      "start_time": "2026-11-19T15:00:00Z",
-      "end_time": "2026-11-19T16:00:00Z",
-      "tvg_id": "hdr-demo.test",
+      "description": "Synthetic programme 60 on Broken Clock.",
+      "start_time": "2026-11-19T19:00:00Z",
+      "end_time": "2026-11-19T20:00:00Z",
+      "tvg_id": "broken-clock.test",
       "custom_properties": {
         "new": true,
         "season": 1,
@@ -177,23 +138,62 @@
         "onscreen_episode": "S01E01"
       },
       "epg_source": "Synthetic EPG",
-      "epg_name": "HDR Demo",
+      "epg_name": "Broken Clock",
       "epg_icon_url": null,
       "channels": [
         {
-          "id": 6,
-          "name": "HDR Demo",
-          "channel_number": 6.0,
+          "id": 4,
+          "name": "Broken Clock",
+          "channel_number": 4.0,
           "channel_group": "Test Lab",
-          "tvg_id": "hdr-demo.test"
+          "tvg_id": "broken-clock.test"
         }
       ],
       "streams": [
         {
-          "id": 6,
-          "name": "HDR Demo",
+          "id": 4,
+          "name": "Broken Clock",
           "channel_group": "Test Lab",
-          "tvg_id": "hdr-demo.test",
+          "tvg_id": "broken-clock.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 1064,
+      "title": "Morning Test Show",
+      "sub_title": "Episode 1",
+      "description": "Synthetic programme 60 on Flaky Drop.",
+      "start_time": "2026-11-19T19:00:00Z",
+      "end_time": "2026-11-19T20:00:00Z",
+      "tvg_id": "flaky-drop.test",
+      "custom_properties": {
+        "new": true,
+        "season": 1,
+        "episode": 1,
+        "categories": [
+          "Test Lab"
+        ],
+        "onscreen_episode": "S01E01"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Flaky Drop",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 5,
+          "name": "Flaky Drop",
+          "channel_number": 5.0,
+          "channel_group": "Test Lab",
+          "tvg_id": "flaky-drop.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 5,
+          "name": "Flaky Drop",
+          "channel_group": "Test Lab",
+          "tvg_id": "flaky-drop.test",
           "m3u_account": "Synthetic Playlist"
         }
       ]

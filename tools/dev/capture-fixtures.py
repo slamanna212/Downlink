@@ -81,7 +81,8 @@ def main():
     save("channels_by_group", call("GET", "/api/channels/channels/?page=1&page_size=500&channel_group=Test%20Lab")[1])
     byname = {ch["name"]: ch for ch in chans["results"]}
     save("channel_streams", call("GET", f"/api/channels/channels/{byname['Channel One']['id']}/streams/")[1])
-    save("channel_streams_catchup", call("GET", f"/api/channels/channels/{byname['Catchup One']['id']}/streams/")[1])
+    save("channel_streams_catchup_m3u", call("GET", f"/api/channels/channels/{byname['Catchup One']['id']}/streams/")[1])
+    save("channel_streams_catchup", call("GET", f"/api/channels/channels/{byname['XC Catchup']['id']}/streams/")[1])
     save("channel_redirect", byname["Redirect One"])
     save("channels_groups", call("GET", "/api/channels/groups/")[1])
     save("channels_profiles", call("GET", "/api/channels/profiles/")[1])
@@ -97,7 +98,7 @@ def main():
     save("epg_programs_search_airing", call("GET", f"/api/epg/programs/search/?airing_at={iso(now)}&page_size=5")[1])
     save("epg_programs_search_window", call("GET", f"/api/epg/programs/search/?start_after={iso(now)}&start_before={iso(now + dt.timedelta(hours=3))}&channel=news&page_size=5")[1])
     # catch-up (API only: no stream request)
-    cu = byname["Catchup One"]["uuid"]
+    cu = byname["XC Catchup"]["uuid"]
     start = (now - dt.timedelta(hours=26)).replace(minute=0, second=0, microsecond=0)
     code, sess = call("POST", "/api/catchup/sessions/", {"channel_uuid": cu, "start": iso(start), "duration": 60})
     save("catchup_session_create", sess)
