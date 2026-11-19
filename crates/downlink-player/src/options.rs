@@ -30,15 +30,171 @@ impl RenderBackend {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Deinterlace {
+    #[default]
+    Auto,
+    On,
+    Off,
+}
+
+impl Deinterlace {
+    pub fn mpv_value(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::On => "yes",
+            Self::Off => "no",
+        }
+    }
+}
+
+/// Audio output mode (PLAN §4.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum AudioMode {
+    Stereo,
+    #[default]
+    Surround,
+    Passthrough,
+}
+
+/// mpv options for an audio mode. Passthrough only applies when the device reports support;
+/// use [`effective_audio_mode`] first.
+pub fn audio_mode_options(mode: AudioMode) -> Opts {
+    match mode {
+        AudioMode::Stereo => vec![kv("audio-channels", "stereo"), kv("audio-spdif", "")],
+        AudioMode::Surround => vec![kv("audio-channels", "auto-safe"), kv("audio-spdif", "")],
+        AudioMode::Passthrough => vec![
+            kv("audio-channels", "auto"),
+            kv("audio-spdif", "ac3,eac3,dts"),
+        ],
+    }
+}
+
+/// Heuristic from the mpv device name (`alsa/hdmi:...`, `coreaudio/...`, `wasapi/...`): digital
+/// outputs that can carry AC-3/E-AC-3/DTS bitstreams.
+pub fn device_supports_passthrough(device_name: &str) -> bool {
+    let n = device_name.to_ascii_lowercase();
+    [
+        "hdmi",
+        "iec958",
+        "spdif",
+        "digital",
+        "displayport",
+        "optical",
+    ]
+    .iter()
+    .any(|k| n.contains(k))
+}
+
+/// Passthrough is only honoured when the chosen device supports it; otherwise Surround.
+pub fn effective_audio_mode(requested: AudioMode, device_name: Option<&str>) -> AudioMode {
+    match (requested, device_name) {
+        (AudioMode::Passthrough, Some(d)) if device_supports_passthrough(d) => {
+            AudioMode::Passthrough
+        }
+        (AudioMode::Passthrough, _) => AudioMode::Surround,
+        (m, _) => m,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtitleSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SubtitleBackground {
+    None,
+    #[default]
+    Dim,
+    Solid,
+}
+
+/// Subtitle styling is limited to size, colour and background (PLAN §4.8).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct SubtitleStyle {
+    pub size: SubtitleSize,
+    /// `#RRGGBB`; anything else falls back to white.
+    pub color: String,
+    pub background: SubtitleBackground,
+}
+
+impl Default for SubtitleStyle {
+    fn default() -> Self {
+        Self {
+            size: SubtitleSize::default(),
+            color: "#FFFFFF".to_owned(),
+            background: SubtitleBackground::default(),
+        }
+    }
+}
+
+fn valid_hex_rgb(c: &str) -> bool {
+    c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|h| h.is_ascii_hexdigit())
+}
+
+pub fn subtitle_options(style: &SubtitleStyle) -> Opts {
+    let size = match style.size {
+        SubtitleSize::Small => "36",
+        SubtitleSize::Medium => "46",
+        SubtitleSize::Large => "62",
+    };
+    let color = if valid_hex_rgb(&style.color) {
+        style.color.as_str()
+    } else {
+        "#FFFFFF"
+    };
+    let (border, back) = match style.background {
+        SubtitleBackground::None => ("outline-and-shadow", "#00000000"),
+        SubtitleBackground::Dim => ("background-box", "#99000000"),
+        SubtitleBackground::Solid => ("background-box", "#FF000000"),
+    };
+    vec![
+        kv("sub-font-size", size),
+        kv("sub-color", color),
+        kv("sub-border-style", border),
+        kv("sub-back-color", back),
+    ]
+}
+
+/// Values accepted for the per-user `hwdec` override (PLAN §4.7).
+pub const HWDEC_ALLOWED: &[&str] = &[
+    "auto-safe",
+    "d3d11va",
+    "videotoolbox",
+    "vaapi",
+    "nvdec",
+    "vulkan",
+    "no",
+];
+
+pub fn valid_hwdec(v: &str) -> bool {
+    HWDEC_ALLOWED.contains(&v)
+}
+
 /// User-tunable playback preferences.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 pub struct Preferences {
     pub alang: String,
     pub slang: String,
     /// "Live buffer" setting, seconds. Clamped to 1..=10.
     pub live_buffer_secs: u32,
-    /// `hwdec` value, default `auto-safe`.
+    /// `hwdec` value, default `auto-safe`; invalid values fall back to it.
     pub hwdec: String,
+    pub deinterlace: Deinterlace,
+    pub audio_mode: AudioMode,
+    /// mpv audio device name; `None` = auto.
+    pub audio_device: Option<String>,
+    pub subtitle: SubtitleStyle,
 }
 
 impl Default for Preferences {
@@ -48,6 +204,10 @@ impl Default for Preferences {
             slang: String::new(),
             live_buffer_secs: 2,
             hwdec: "auto-safe".to_owned(),
+            deinterlace: Deinterlace::Auto,
+            audio_mode: AudioMode::Surround,
+            audio_device: None,
+            subtitle: SubtitleStyle::default(),
         }
     }
 }
@@ -55,6 +215,37 @@ impl Default for Preferences {
 impl Preferences {
     pub fn live_buffer_secs_clamped(&self) -> u32 {
         self.live_buffer_secs.clamp(1, 10)
+    }
+
+    pub fn hwdec_effective(&self) -> &str {
+        if valid_hwdec(&self.hwdec) {
+            &self.hwdec
+        } else {
+            "auto-safe"
+        }
+    }
+
+    pub fn audio_mode_effective(&self) -> AudioMode {
+        effective_audio_mode(self.audio_mode, self.audio_device.as_deref())
+    }
+
+    /// The options that can be changed on a running instance (everything but `vo` etc.).
+    pub fn live_options(&self) -> Opts {
+        let mut o = vec![
+            kv("hwdec", self.hwdec_effective()),
+            kv("deinterlace", self.deinterlace.mpv_value()),
+            kv("alang", self.alang.clone()),
+            kv("slang", self.slang.clone()),
+            kv(
+                "audio-device",
+                self.audio_device
+                    .clone()
+                    .unwrap_or_else(|| "auto".to_owned()),
+            ),
+        ];
+        o.extend(audio_mode_options(self.audio_mode_effective()));
+        o.extend(subtitle_options(&self.subtitle));
+        o
     }
 }
 
@@ -81,7 +272,7 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
             ));
         }
     }
-    o.push(kv("hwdec", prefs.hwdec.clone()));
+    o.push(kv("hwdec", prefs.hwdec_effective()));
     o.push(kv("video-sync", "audio"));
     o.push(kv("keep-open", "no"));
     o.push(kv("idle", "yes"));
@@ -97,7 +288,12 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
         "stream-lavf-o",
         "reconnect=1,reconnect_streamed=1,reconnect_delay_max=2",
     ));
-    o.push(kv("deinterlace", "auto"));
+    o.push(kv("deinterlace", prefs.deinterlace.mpv_value()));
+    o.extend(audio_mode_options(prefs.audio_mode_effective()));
+    o.extend(subtitle_options(&prefs.subtitle));
+    if let Some(d) = &prefs.audio_device {
+        o.push(kv("audio-device", d.clone()));
+    }
     if !prefs.alang.is_empty() {
         o.push(kv("alang", prefs.alang.clone()));
     }
@@ -255,6 +451,79 @@ mod tests {
         let s = loadfile_options(Profile::Seekable, &Preferences::default(), &[], Some(12.5));
         assert!(!s.contains("http-header-fields"));
         assert!(s.contains("start=%6%12.500"));
+    }
+
+    #[test]
+    fn passthrough_only_when_device_supports_it() {
+        assert_eq!(
+            effective_audio_mode(AudioMode::Passthrough, Some("alsa/hdmi:CARD=PCH,DEV=0")),
+            AudioMode::Passthrough
+        );
+        assert_eq!(
+            effective_audio_mode(AudioMode::Passthrough, Some("alsa/pipewire")),
+            AudioMode::Surround
+        );
+        assert_eq!(
+            effective_audio_mode(AudioMode::Passthrough, None),
+            AudioMode::Surround
+        );
+        assert_eq!(
+            effective_audio_mode(AudioMode::Stereo, None),
+            AudioMode::Stereo
+        );
+        let o = audio_mode_options(AudioMode::Passthrough);
+        assert!(has(&o, "audio-spdif", "ac3,eac3,dts"));
+        assert!(has(
+            &audio_mode_options(AudioMode::Stereo),
+            "audio-channels",
+            "stereo"
+        ));
+    }
+
+    #[test]
+    fn deinterlace_mapping_and_base() {
+        assert_eq!(Deinterlace::On.mpv_value(), "yes");
+        let p = Preferences {
+            deinterlace: Deinterlace::Off,
+            ..Preferences::default()
+        };
+        assert!(has(
+            &base_options(&p, RenderBackend::RenderApi),
+            "deinterlace",
+            "no"
+        ));
+    }
+
+    #[test]
+    fn subtitle_style_maps_and_validates_colour() {
+        let st = SubtitleStyle {
+            size: SubtitleSize::Large,
+            color: "javascript".into(),
+            background: SubtitleBackground::Solid,
+        };
+        let o = subtitle_options(&st);
+        assert!(has(&o, "sub-font-size", "62"));
+        assert!(has(&o, "sub-color", "#FFFFFF"));
+        assert!(has(&o, "sub-border-style", "background-box"));
+        let none = subtitle_options(&SubtitleStyle {
+            background: SubtitleBackground::None,
+            ..SubtitleStyle::default()
+        });
+        assert!(has(&none, "sub-border-style", "outline-and-shadow"));
+    }
+
+    #[test]
+    fn hwdec_override_is_validated() {
+        let p = Preferences {
+            hwdec: "vaapi".into(),
+            ..Preferences::default()
+        };
+        assert_eq!(p.hwdec_effective(), "vaapi");
+        let bad = Preferences {
+            hwdec: "rm -rf".into(),
+            ..Preferences::default()
+        };
+        assert_eq!(bad.hwdec_effective(), "auto-safe");
     }
 
     #[test]

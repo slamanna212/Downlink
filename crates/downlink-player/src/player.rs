@@ -27,6 +27,134 @@ pub struct PlayRequest {
     pub start_secs: Option<f64>,
     /// `Caps::FAILOVER` present on the source.
     pub failover_capable: bool,
+    pub mode: PlayMode,
+    /// Index of the stream within the channel's failover list (0 = primary), for the info panel.
+    pub source_index: u32,
+}
+
+/// What kind of session this is (drives UI chrome, not mpv options; those follow [`Profile`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum PlayMode {
+    #[default]
+    Live,
+    Catchup,
+    Vod,
+}
+
+/// What a long buffering state is waiting on (shown after 3 s, PLAN §4.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WaitingOn {
+    Connection,
+    FirstData,
+    FirstKeyframe,
+}
+
+pub const WAITING_AFTER: Duration = Duration::from_secs(3);
+
+/// Pure rule for [`WaitingOn`]: only after `WAITING_AFTER` in a connecting/buffering state.
+pub fn waiting_on(
+    state: SessionState,
+    in_state: Duration,
+    file_loaded: bool,
+    first_frame_seen: bool,
+) -> Option<WaitingOn> {
+    if in_state < WAITING_AFTER {
+        return None;
+    }
+    match state {
+        SessionState::Connecting => Some(WaitingOn::Connection),
+        SessionState::Buffering if !first_frame_seen && file_loaded => {
+            Some(WaitingOn::FirstKeyframe)
+        }
+        SessionState::Buffering if !first_frame_seen => Some(WaitingOn::Connection),
+        SessionState::Buffering => Some(WaitingOn::FirstData),
+        _ => None,
+    }
+}
+
+/// One audio/video/subtitle track.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Track {
+    pub id: i64,
+    pub kind: String,
+    pub lang: Option<String>,
+    pub title: Option<String>,
+    pub codec: Option<String>,
+    pub selected: bool,
+}
+
+/// Parse mpv's `track-list` JSON.
+pub fn parse_tracks(json: &str) -> Vec<Track> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let Some(arr) = v.as_array() else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|t| {
+            let str_of = |k: &str| t.get(k).and_then(|x| x.as_str()).map(str::to_owned);
+            Some(Track {
+                id: t.get("id")?.as_i64()?,
+                kind: str_of("type")?,
+                lang: str_of("lang"),
+                title: str_of("title"),
+                codec: str_of("codec"),
+                selected: t.get("selected").and_then(|x| x.as_bool()).unwrap_or(false),
+            })
+        })
+        .collect()
+}
+
+/// An output device from `audio-device-list`.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDevice {
+    pub name: String,
+    pub description: String,
+    pub supports_passthrough: bool,
+}
+
+pub fn parse_audio_devices(json: &str) -> Vec<AudioDevice> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let Some(arr) = v.as_array() else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|d| {
+            let name = d.get("name")?.as_str()?.to_owned();
+            let description = d
+                .get("description")
+                .and_then(|x| x.as_str())
+                .unwrap_or(&name)
+                .to_owned();
+            Some(AudioDevice {
+                supports_passthrough: crate::options::device_supports_passthrough(&name),
+                name,
+                description,
+            })
+        })
+        .collect()
+}
+
+/// Payload of `session://stats` (1 Hz, only while the info panel is open).
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StatsSnapshot {
+    pub resolution: Option<String>,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub bitrate_kbps: Option<u32>,
+    pub dropped_frames: Option<i64>,
+    pub buffer_secs: Option<f64>,
+    pub deinterlace: Option<String>,
+    pub hwdec_current: Option<String>,
+    pub source_index: u32,
 }
 
 impl fmt::Debug for PlayRequest {
@@ -78,10 +206,20 @@ pub struct PlayerSnapshot {
     /// Time from `loadfile` to the first frame of the current session, in milliseconds.
     pub first_frame_ms: Option<u64>,
     pub error: Option<String>,
+    pub mode: Option<PlayMode>,
+    /// Seconds of media buffered ahead (`demuxer-cache-time` minus position).
+    pub buffered_secs: Option<f64>,
+    pub volume: Option<f64>,
+    pub muted: bool,
+    pub tracks: Vec<Track>,
+    /// Set after 3 s of connecting/buffering.
+    pub waiting_on: Option<WaitingOn>,
 }
 
 #[derive(Debug, Clone)]
 pub enum PlayerEvent {
+    /// 1 Hz while enabled with [`Player::set_stats_enabled`].
+    Stats(StatsSnapshot),
     /// Throttled to <= 10 Hz.
     State(PlayerSnapshot),
     /// The retry policy wants the channel's stream list (then call [`Player::play_alternate`]).
@@ -94,6 +232,10 @@ pub type EventSink = Arc<dyn Fn(PlayerEvent) + Send + Sync>;
 
 #[derive(Default)]
 struct Stats {
+    cache_time: Option<f64>,
+    volume: Option<f64>,
+    muted: bool,
+    tracks: Vec<Track>,
     position: Option<f64>,
     duration: Option<f64>,
     hwdec: Option<String>,
@@ -118,6 +260,9 @@ struct Shared {
     paused: bool,
     throttle: Throttle,
     outbox: Vec<PlayerEvent>,
+    state_since: Instant,
+    file_loaded: bool,
+    last_stats: Option<Instant>,
 }
 
 struct Inner {
@@ -126,6 +271,7 @@ struct Inner {
     shared: Mutex<Shared>,
     cv: Condvar,
     stop: AtomicBool,
+    stats_enabled: AtomicBool,
     sink: EventSink,
     epoch: Instant,
     source: LoadSource,
@@ -163,6 +309,10 @@ const OBSERVED: &[(&str, i32)] = &[
     ("dheight", ffi::FORMAT_INT64),
     ("estimated-vf-fps", ffi::FORMAT_DOUBLE),
     ("vo-drop-frame-count", ffi::FORMAT_INT64),
+    ("demuxer-cache-time", ffi::FORMAT_DOUBLE),
+    ("volume", ffi::FORMAT_DOUBLE),
+    ("mute", ffi::FORMAT_FLAG),
+    ("track-list", ffi::FORMAT_STRING),
 ];
 
 impl Player {
@@ -203,9 +353,13 @@ impl Player {
                 paused: false,
                 throttle: Throttle::new(Duration::from_millis(100)),
                 outbox: Vec::new(),
+                state_since: Instant::now(),
+                file_loaded: false,
+                last_stats: None,
             }),
             cv: Condvar::new(),
             stop: AtomicBool::new(false),
+            stats_enabled: AtomicBool::new(false),
             sink,
             epoch: Instant::now(),
             source: loaded.source.clone(),
@@ -230,10 +384,49 @@ impl Player {
         &self.inner.source
     }
 
+    /// Update preferences. Everything that can change on a running instance is applied now
+    /// (hwdec, deinterlace, languages, audio device and mode, subtitle style); the live buffer
+    /// applies from the next `play`.
     pub fn set_preferences(&self, prefs: Preferences) {
+        for (k, v) in prefs.live_options() {
+            if let Err(e) = self.inner.engine.set_property(&k, &v) {
+                tracing::warn!("preference `{k}` not applied: {e}");
+            }
+        }
         if let Ok(mut p) = self.inner.prefs.lock() {
             *p = prefs;
         }
+    }
+
+    pub fn preferences(&self) -> Preferences {
+        match self.inner.prefs.lock() {
+            Ok(p) => p.clone(),
+            Err(p) => p.into_inner().clone(),
+        }
+    }
+
+    /// Output devices (`audio-device-list`).
+    pub fn audio_devices(&self) -> Vec<AudioDevice> {
+        self.inner
+            .engine
+            .get_property("audio-device-list")
+            .map(|j| parse_audio_devices(&j))
+            .unwrap_or_default()
+    }
+
+    /// Choose an output device (`None` = auto) and re-evaluate the audio mode for it. Returns
+    /// the mode actually in effect (passthrough falls back to surround on unsupported devices).
+    pub fn set_audio_device(&self, name: Option<String>) -> crate::options::AudioMode {
+        let mut prefs = self.preferences();
+        prefs.audio_device = name;
+        let mode = prefs.audio_mode_effective();
+        self.set_preferences(prefs);
+        mode
+    }
+
+    /// Turn the 1 Hz `session://stats` stream on or off (only on while the info panel is open).
+    pub fn set_stats_enabled(&self, on: bool) {
+        self.inner.stats_enabled.store(on, Ordering::SeqCst);
     }
 
     fn lock(&self) -> MutexGuard<'_, Shared> {
@@ -257,6 +450,7 @@ impl Player {
         s.retry_at = None;
         s.cache_buffering = false;
         s.paused = false;
+        s.file_loaded = false;
         s.stats = Stats::default();
         go(
             &self.inner,
@@ -435,12 +629,27 @@ fn snapshot(s: &Shared) -> PlayerSnapshot {
         dropped_frames: s.stats.dropped,
         first_frame_ms: s.first_frame_ms,
         error: s.error.clone(),
+        mode: s.request.as_ref().map(|r| r.mode),
+        buffered_secs: match (s.stats.cache_time, s.stats.position) {
+            (Some(c), Some(p)) => Some((c - p).max(0.0)),
+            _ => None,
+        },
+        volume: s.stats.volume,
+        muted: s.stats.muted,
+        tracks: s.stats.tracks.clone(),
+        waiting_on: waiting_on(
+            s.sm.state(),
+            s.state_since.elapsed(),
+            s.file_loaded,
+            s.first_frame_ms.is_some(),
+        ),
     }
 }
 
 fn go(inner: &Inner, s: &mut Shared, to: SessionState, note: Option<String>) -> bool {
     let ok = s.sm.transition(to, note, unix_ms()).is_ok();
     if ok {
+        s.state_since = Instant::now();
         s.throttle.mark_dirty();
         inner.cv.notify_all();
     }
@@ -496,11 +705,13 @@ fn handle_event(inner: &Inner, ev: EngineEvent) {
     match ev {
         EngineEvent::StartFile => {
             if s.request.is_some() {
+                s.file_loaded = false;
                 go(inner, &mut s, SessionState::Connecting, None);
             }
         }
         EngineEvent::FileLoaded => {
             if s.request.is_some() {
+                s.file_loaded = true;
                 go(
                     inner,
                     &mut s,
@@ -601,6 +812,30 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
             };
             s.throttle.mark_dirty();
         }
+        ("demuxer-cache-time", v) => {
+            s.stats.cache_time = if let PropValue::Double(d) = v {
+                Some(d)
+            } else {
+                None
+            };
+            s.throttle.mark_dirty();
+        }
+        ("volume", PropValue::Double(v)) => {
+            s.stats.volume = Some(v);
+            s.throttle.mark_dirty();
+        }
+        ("mute", PropValue::Flag(m)) => {
+            s.stats.muted = m;
+            s.throttle.mark_dirty();
+        }
+        ("track-list", v) => {
+            s.stats.tracks = if let PropValue::Str(j) = v {
+                parse_tracks(&j)
+            } else {
+                Vec::new()
+            };
+            s.throttle.mark_dirty();
+        }
         ("hwdec-current", v) => {
             s.stats.hwdec = if let PropValue::Str(t) = v {
                 Some(t)
@@ -675,9 +910,49 @@ fn tick(inner: &Inner) {
     {
         on_failure(inner, &mut s, FailureCause::NoFrameTimeout);
     }
+    if matches!(
+        s.sm.state(),
+        SessionState::Connecting | SessionState::Buffering
+    ) && s.state_since.elapsed() >= WAITING_AFTER
+        && s.state_since.elapsed() < WAITING_AFTER + Duration::from_millis(250)
+    {
+        // Crossed the 3 s mark: let the UI say what it is waiting on.
+        s.throttle.mark_dirty();
+    }
+    if inner.stats_enabled.load(Ordering::SeqCst)
+        && s.last_stats
+            .is_none_or(|t| now.duration_since(t) >= Duration::from_secs(1))
+    {
+        s.last_stats = Some(now);
+        let stats = collect_stats(inner, &s);
+        s.outbox.push(PlayerEvent::Stats(stats));
+    }
     if s.throttle.poll(now.duration_since(inner.epoch)) {
         let snap = snapshot(&s);
         s.outbox.push(PlayerEvent::State(snap));
+    }
+}
+
+fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
+    let e = &inner.engine;
+    let num = |name: &str| e.get_property(name).and_then(|v| v.parse::<f64>().ok());
+    let bitrate = match (num("video-bitrate"), num("audio-bitrate")) {
+        (None, None) => None,
+        (v, a) => Some(((v.unwrap_or(0.0) + a.unwrap_or(0.0)) / 1000.0).round() as u32),
+    };
+    StatsSnapshot {
+        resolution: match (s.stats.width, s.stats.height) {
+            (Some(w), Some(h)) => Some(format!("{w}x{h}")),
+            _ => None,
+        },
+        video_codec: s.stats.codec.clone(),
+        audio_codec: e.get_property("audio-codec-name"),
+        bitrate_kbps: bitrate,
+        dropped_frames: s.stats.dropped,
+        buffer_secs: num("demuxer-cache-duration"),
+        deinterlace: e.get_property("deinterlace"),
+        hwdec_current: s.stats.hwdec.clone(),
+        source_index: s.request.as_ref().map_or(0, |r| r.source_index),
     }
 }
 
@@ -712,6 +987,8 @@ mod tests {
             profile: Profile::Live,
             start_secs: None,
             failover_capable: true,
+            mode: PlayMode::Live,
+            source_index: 0,
         };
         let d = format!("{r:?}");
         assert!(
@@ -726,6 +1003,54 @@ mod tests {
     fn log_scrubbing_removes_urls() {
         let s = scrub_urls("Opening http://h/live/u/p/1.ts failed: 403");
         assert_eq!(s, "Opening <url> failed: 403");
+    }
+
+    #[test]
+    fn waiting_on_rules() {
+        let t = Duration::from_secs;
+        assert_eq!(
+            waiting_on(SessionState::Connecting, t(2), false, false),
+            None
+        );
+        assert_eq!(
+            waiting_on(SessionState::Connecting, t(3), false, false),
+            Some(WaitingOn::Connection)
+        );
+        assert_eq!(
+            waiting_on(SessionState::Buffering, t(4), true, false),
+            Some(WaitingOn::FirstKeyframe)
+        );
+        assert_eq!(
+            waiting_on(SessionState::Buffering, t(4), false, false),
+            Some(WaitingOn::Connection)
+        );
+        assert_eq!(
+            waiting_on(SessionState::Buffering, t(4), true, true),
+            Some(WaitingOn::FirstData)
+        );
+        assert_eq!(waiting_on(SessionState::Playing, t(10), true, true), None);
+    }
+
+    #[test]
+    fn parses_track_list() {
+        let j = r#"[{"id":1,"type":"video","codec":"h264","selected":true},
+                    {"id":2,"type":"audio","lang":"eng","title":"Main","codec":"ac3","selected":true},
+                    {"id":3,"type":"sub","lang":"fra","selected":false}]"#;
+        let t = parse_tracks(j);
+        assert_eq!(t.len(), 3);
+        assert_eq!(t[1].lang.as_deref(), Some("eng"));
+        assert!(!t[2].selected);
+        assert!(parse_tracks("not json").is_empty());
+    }
+
+    #[test]
+    fn parses_audio_devices() {
+        let j = r#"[{"name":"auto","description":"Autoselect device"},
+                    {"name":"alsa/hdmi:CARD=PCH,DEV=0","description":"HDMI"}]"#;
+        let d = parse_audio_devices(j);
+        assert_eq!(d.len(), 2);
+        assert!(!d[0].supports_passthrough);
+        assert!(d[1].supports_passthrough);
     }
 
     #[test]

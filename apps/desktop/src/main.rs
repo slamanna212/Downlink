@@ -65,6 +65,8 @@ async fn play_url(
         profile: profile.unwrap_or(Profile::Live),
         start_secs,
         failover_capable: false,
+        mode: downlink_player::PlayMode::Live,
+        source_index: 0,
     })?)
 }
 
@@ -96,6 +98,37 @@ async fn set_video_bounds(
         s.set_bounds(SurfaceBounds { x, y, w, h, scale });
         s.set_visible(visible);
     }
+    Ok(())
+}
+
+#[tauri::command]
+async fn set_preferences(
+    state: State<'_, AppState>,
+    preferences: Preferences,
+) -> Result<(), CmdError> {
+    player(&state)?.set_preferences(preferences);
+    Ok(())
+}
+
+#[tauri::command]
+async fn audio_devices(
+    state: State<'_, AppState>,
+) -> Result<Vec<downlink_player::AudioDevice>, CmdError> {
+    Ok(player(&state)?.audio_devices())
+}
+
+/// Returns the audio mode in effect (passthrough falls back to surround on unsupported devices).
+#[tauri::command]
+async fn set_audio_device(
+    state: State<'_, AppState>,
+    name: Option<String>,
+) -> Result<downlink_player::AudioMode, CmdError> {
+    Ok(player(&state)?.set_audio_device(name))
+}
+
+#[tauri::command]
+async fn set_stats_enabled(state: State<'_, AppState>, enabled: bool) -> Result<(), CmdError> {
+    player(&state)?.set_stats_enabled(enabled);
     Ok(())
 }
 
@@ -153,6 +186,8 @@ fn run_seek_test(
         profile: Profile::Seekable,
         start_secs: None,
         failover_capable: false,
+        mode: downlink_player::PlayMode::Live,
+        source_index: 0,
     });
     p.wait_for(|s| s == SessionState::Playing, Duration::from_secs(12));
     std::thread::sleep(Duration::from_secs(3));
@@ -194,6 +229,8 @@ fn run_zap_bench(
             profile: Profile::Live,
             start_secs: None,
             failover_capable: false,
+            mode: downlink_player::PlayMode::Live,
+            source_index: 0,
         });
         if let Err(e) = r {
             tracing::error!("zap {i}: {e}");
@@ -281,6 +318,9 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             let sink: downlink_player::EventSink = Arc::new(move |e| match e {
                 PlayerEvent::State(s) => {
                     let _ = emit_handle.emit("player://state", s);
+                }
+                PlayerEvent::Stats(st) => {
+                    let _ = emit_handle.emit("session://stats", st);
                 }
                 PlayerEvent::FailoverNeeded {
                     session,
@@ -431,6 +471,8 @@ fn spawn_autorun(app: AppHandle, p: Arc<Player>, surface: Option<Arc<Surface>>, 
                 profile: Profile::Live,
                 start_secs: None,
                 failover_capable: false,
+                mode: downlink_player::PlayMode::Live,
+                source_index: 0,
             });
             p.wait_for(|s| s == SessionState::Playing, Duration::from_secs(12));
             for fs in [true, false, true, false] {
@@ -459,6 +501,8 @@ fn spawn_autorun(app: AppHandle, p: Arc<Player>, surface: Option<Arc<Surface>>, 
                 profile: Profile::Live,
                 start_secs: None,
                 failover_capable: false,
+                mode: downlink_player::PlayMode::Live,
+                source_index: 0,
             });
             p.wait_for(|s| s == SessionState::Playing, Duration::from_secs(12));
             std::thread::sleep(Duration::from_secs(2));
@@ -541,6 +585,10 @@ fn main() {
             player_command,
             set_video_bounds,
             player_snapshot,
+            set_preferences,
+            audio_devices,
+            set_audio_device,
+            set_stats_enabled,
             player_diagnostics,
             zap_bench
         ])

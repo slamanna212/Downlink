@@ -16,8 +16,11 @@ pub mod surface;
 pub use engine::{Engine, RenderContext};
 pub use error::PlayerError;
 pub use loader::{ENV_MPV_PATH, LoadSource, LoadedMpv, load};
-pub use options::{Preferences, Profile, RenderBackend};
-pub use player::{EventSink, PlayRequest, Player, PlayerCommand, PlayerEvent, PlayerSnapshot};
+pub use options::{AudioMode, Deinterlace, Preferences, Profile, RenderBackend, SubtitleStyle};
+pub use player::{
+    AudioDevice, EventSink, PlayMode, PlayRequest, Player, PlayerCommand, PlayerEvent,
+    PlayerSnapshot, StatsSnapshot, Track, WaitingOn,
+};
 pub use retry::{FailureCause, RetryDecision, RetryPolicy};
 pub use state::{SessionState, StateMachine, Transition};
 pub use surface::{MainThreadDispatch, SurfaceBounds, VideoSurface};
