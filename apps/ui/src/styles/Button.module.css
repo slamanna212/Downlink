@@ -1,0 +1,97 @@
+/* Downlink — Button + ActionIcon states. Wired in theme.ts (components.Button/ActionIcon.classNames).
+   Variants: filled (primary) | default (secondary) | subtle | live | danger | overlay.
+   Every variant must keep all states: rest, hover, pressed, focus-visible, disabled, loading.
+   Requires postcss-preset-mantine (nesting). */
+
+.root {
+  font-weight: 600;
+  transition: background-color 120ms var(--dl-ease), color 120ms var(--dl-ease), border-color 120ms var(--dl-ease);
+
+  &:active:not([data-disabled]) { transform: none; } /* pressed darkens, never moves */
+
+  &:focus-visible,
+  &[data-focused] { outline: none; box-shadow: var(--dl-focus-ring); }
+
+  &[data-disabled],
+  &:disabled {
+    background: var(--dl-surface-2);
+    color: var(--dl-text-disabled);
+    border-color: transparent;
+    cursor: not-allowed;
+  }
+}
+
+/* Primary */
+.root[data-variant='filled'] {
+  background: var(--dl-accent);
+  color: var(--dl-on-accent);
+  &:hover { background: var(--dl-accent-hover); }
+  &:active { background: var(--dl-accent-pressed); }
+  &:focus-visible,
+  &[data-focused] { box-shadow: 0 0 0 2px var(--dl-surface-0), 0 0 0 4px var(--dl-accent); }
+}
+
+/* Secondary */
+.root[data-variant='default'] {
+  background: var(--dl-surface-3);
+  color: var(--dl-text);
+  border: 1px solid var(--dl-hairline-strong);
+  &:hover { background: var(--dl-surface-3-hover); }
+  &:active { background: var(--dl-surface-3-pressed); }
+}
+
+/* Subtle */
+.root[data-variant='subtle'] {
+  background: transparent;
+  color: var(--dl-text-dim);
+  &:hover { background: var(--dl-hover); color: var(--dl-text); }
+  &:active { background: var(--dl-pressed); color: var(--dl-text); }
+  &[data-disabled] { background: transparent; }
+}
+
+/* Live — Go live, Record. Always render a 7px --dl-live dot in leftSection. */
+.root[data-variant='live'] {
+  background: var(--dl-live-tint);
+  color: var(--dl-live-text);
+  &:hover { background: var(--dl-live-tint-hover); }
+  &:active { background: var(--dl-live-tint-pressed); }
+}
+
+/* Destructive — never the default Enter target, never filled */
+.root[data-variant='danger'] {
+  background: transparent;
+  color: var(--dl-live-text);
+  border: 1px solid var(--dl-danger-border);
+  &:hover { background: var(--dl-danger-hover); }
+  &:active { background: var(--dl-danger-pressed); }
+  &[data-disabled] { background: transparent; border-color: var(--dl-hairline); }
+}
+
+/* Overlay — anything on video */
+.root[data-variant='overlay'] {
+  background: var(--dl-video-btn);
+  color: var(--dl-on-video);
+  &:hover { background: var(--dl-video-btn-hover); }
+  &:active { background: var(--dl-video-btn-pressed); }
+  &:focus-visible,
+  &[data-focused] { box-shadow: var(--dl-focus-ring-video); }
+  &[data-disabled] { background: rgb(255 255 255 / 0.06); color: rgb(243 246 249 / 0.38); }
+}
+:global([data-allow-blur='true']) .root[data-variant='overlay'] { backdrop-filter: blur(12px); }
+
+/* Toggled ActionIcon (aria-pressed / data-active): accent tint, never a filled accent square */
+.root[aria-pressed='true'],
+.root[data-active] {
+  background: var(--dl-accent-tint);
+  color: var(--dl-accent-text);
+}
+
+/* 10-foot: <html data-density="tv"> promotes md to tv size */
+:global([data-density='tv']) .root[data-size='md'] {
+  --button-height: 56px;
+  --button-padding-x: 24px;
+  --button-fz: 18px;
+  --ai-size: 56px;
+}
+:global([data-density='tv']) .root:focus-visible,
+:global([data-density='tv']) .root[data-focused] { box-shadow: var(--dl-focus-ring-tv); }
