@@ -226,7 +226,8 @@
 
 /* Favourite toggle: bare star in the row (accent when set), revealed on hover/focus when off. */
 .end button { opacity: 0; }
-.end button[aria-pressed='true'] { opacity: 1; background: transparent; }
+.end button[aria-pressed='true'] { opacity: 1; background: transparent; color: var(--dl-text-2); }
+.end button[aria-pressed='true']:hover { background: var(--dl-hover); }
 .row:hover .end button,
 .row:focus-visible .end button,
 .row[data-focused] .end button,

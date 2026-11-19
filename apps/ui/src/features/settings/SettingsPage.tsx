@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal, NavLink, SegmentedControl, Select, Slider, Switch, Text } from '@mantine/core';
-import { IconPalette, IconPlayerPlay, IconPlugConnected, IconStethoscope } from '@tabler/icons-react';
-import { invoke } from '../../api/ipc';
+import { IconPalette, IconPlayerPlay, IconPlugConnected, IconRefresh, IconStethoscope } from '@tabler/icons-react';
+import { invoke, listen } from '../../api/ipc';
 import { useSettings, useSources } from '../../api/queries';
-import type { DensitySetting, HwdecSetting, Source } from '../../api/types';
+import type { AudioOutput, Deinterlace, DensitySetting, HwdecSetting, Source, UpdateChannel } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { Icon, type TablerIcon } from '../../components/Icon/Icon';
 import { SettingRow } from '../../components/SettingRow/SettingRow';
@@ -21,6 +21,7 @@ const SECTIONS: { id: string; label: MessageKey; icon: TablerIcon }[] = [
   { id: 'sources', label: 'settings.sources', icon: IconPlugConnected },
   { id: 'playback', label: 'settings.playback', icon: IconPlayerPlay },
   { id: 'appearance', label: 'settings.appearance', icon: IconPalette },
+  { id: 'updates', label: 'settings.updates', icon: IconRefresh },
   { id: 'about', label: 'settings.about', icon: IconStethoscope },
 ];
 
@@ -121,7 +122,9 @@ function PlaybackSection() {
   const { data } = useSettings();
   const patch = useSettingsPatch();
   const diag = useQuery({ queryKey: ['diagnostics', 'hwdec'], queryFn: () => invoke('get_diagnostics', {}) });
+  const devices = useQuery({ queryKey: ['audioDevices'], queryFn: () => invoke('list_audio_devices', {}) });
   const [buffer, setBuffer] = useState<number | null>(null);
+  const [subSize, setSubSize] = useState<number | null>(null);
   if (!data) return <SkeletonList rows={3} label={t('loading.generic')} />;
   const shown = buffer ?? data.liveBufferSecs;
   const current = diag.data?.hwdecCurrent;
@@ -154,6 +157,114 @@ function PlaybackSection() {
           />
           <span className={classes.value}>{shown} s</span>
         </div>
+      </SettingRow>
+      <SettingRow label={t('settings.audioDevice')} help={t('settings.audioDevice.help')}>
+        <Select
+          w="100%"
+          aria-label={t('settings.audioDevice')}
+          data={(devices.data ?? []).map((d) => ({ value: d.id, label: d.name }))}
+          value={data.audioDevice ?? 'default'}
+          allowDeselect={false}
+          onChange={(v) => patch.mutate({ audioDevice: v === 'default' ? null : v })}
+        />
+      </SettingRow>
+      <SettingRow label={t('settings.audioOutput')} help={t('settings.audioOutput.help')} wide>
+        <SegmentedControl
+          aria-label={t('settings.audioOutput')}
+          value={data.audioOutput}
+          onChange={(v) => patch.mutate({ audioOutput: v as AudioOutput })}
+          data={[
+            { value: 'stereo', label: t('settings.audioOutput.stereo') },
+            { value: 'surround', label: t('settings.audioOutput.surround') },
+            { value: 'passthrough', label: t('settings.audioOutput.passthrough') },
+          ]}
+        />
+      </SettingRow>
+      <SettingRow label={t('settings.deinterlace')} help={t('settings.deinterlace.help')} wide>
+        <SegmentedControl
+          aria-label={t('settings.deinterlace')}
+          value={data.deinterlace}
+          onChange={(v) => patch.mutate({ deinterlace: v as Deinterlace })}
+          data={[
+            { value: 'auto', label: t('settings.deinterlace.auto') },
+            { value: 'yes', label: t('settings.deinterlace.yes') },
+            { value: 'no', label: t('settings.deinterlace.no') },
+          ]}
+        />
+      </SettingRow>
+      <SettingRow label={t('settings.subtitleSize')} help={t('settings.subtitleSize.help')}>
+        <div className={classes.sliderRow}>
+          <Slider
+            min={50}
+            max={150}
+            step={10}
+            value={subSize ?? data.subtitleSize}
+            label={null}
+            aria-label={t('settings.subtitleSize')}
+            onChange={setSubSize}
+            onChangeEnd={(v) => {
+              patch.mutate({ subtitleSize: v });
+              setSubSize(null);
+            }}
+          />
+          <span className={classes.value}>{subSize ?? data.subtitleSize}%</span>
+        </div>
+      </SettingRow>
+      <SettingRow label={t('settings.subtitleBackground')} help={t('settings.subtitleBackground.help')} wide>
+        <Switch
+          aria-label={t('settings.subtitleBackground')}
+          checked={data.subtitleBackground}
+          onChange={(e) => patch.mutate({ subtitleBackground: e.currentTarget.checked })}
+        />
+      </SettingRow>
+    </Section>
+  );
+}
+
+function UpdatesSection() {
+  const qc = useQueryClient();
+  const status = useQuery({ queryKey: ['update'], queryFn: () => invoke('get_update_status', {}), staleTime: Infinity });
+  useEffect(() => {
+    let off: (() => void) | null = null;
+    let cancelled = false;
+    void listen('update://status', (s) => qc.setQueryData(['update'], s)).then((u) => (cancelled ? u() : (off = u)));
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, [qc]);
+  const setChannel = useMutation({
+    mutationFn: (channel: UpdateChannel) => invoke('set_update_channel', { channel }),
+    onSuccess: (s) => qc.setQueryData(['update'], s),
+  });
+  const check = useMutation({
+    mutationFn: () => invoke('check_for_updates', {}),
+    onSuccess: (s) => qc.setQueryData(['update'], s),
+  });
+  const s = status.data;
+  if (!s) return <SkeletonList rows={2} label={t('loading.generic')} />;
+  const help = s.available
+    ? t('settings.updates.available', { available: s.available })
+    : s.lastChecked
+      ? t('settings.updates.upToDate', { time: formatUpdated(s.lastChecked) })
+      : t('settings.updates.never');
+  return (
+    <Section title={t('settings.updates')} help={t('settings.updates.help')}>
+      <SettingRow label={t('settings.updates.channel')} help={t('settings.updates.channel.help')} wide>
+        <SegmentedControl
+          aria-label={t('settings.updates.channel')}
+          value={s.channel}
+          onChange={(v) => setChannel.mutate(v as UpdateChannel)}
+          data={[
+            { value: 'stable', label: t('settings.updates.stable') },
+            { value: 'dev', label: t('settings.updates.dev') },
+          ]}
+        />
+      </SettingRow>
+      <SettingRow label={t('settings.updates.status')} help={`${t('settings.updates.current', { current: s.current })} ${help}`} wide>
+        <DLButton variant="default" loading={check.isPending} onClick={() => check.mutate()}>
+          {t('settings.updates.check')}
+        </DLButton>
       </SettingRow>
     </Section>
   );
@@ -247,6 +358,7 @@ export function SettingsPage() {
           {section === 'sources' && <SourcesSection />}
           {section === 'playback' && <PlaybackSection />}
           {section === 'appearance' && <AppearanceSection />}
+          {section === 'updates' && <UpdatesSection />}
           {section === 'about' && <AboutSection />}
         </div>
       </div>

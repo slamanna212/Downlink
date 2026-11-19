@@ -1,12 +1,12 @@
 import {
   IconHome,
-  IconLayoutList,
+  IconListDetails,
+  IconLayoutNavbar,
   IconMovie,
   IconSearch,
   IconSettings,
-  IconTimeline,
   IconDeviceTv,
-  IconCircleDot,
+  IconCircle,
 } from '@tabler/icons-react';
 import type { Caps } from '../api/types';
 import type { TablerIcon } from '../components/Icon/Icon';
@@ -26,11 +26,11 @@ export interface NavEntry {
 export const PRIMARY_NAV: NavEntry[] = [
   { id: 'search', to: '/search', label: 'nav.search', icon: IconSearch, hint: '#mod' },
   { id: 'home', to: '/', label: 'nav.home', icon: IconHome },
-  { id: 'channels', to: '/channels', label: 'nav.channels', icon: IconLayoutList, hint: 'L' },
-  { id: 'guide', to: '/guide', label: 'nav.guide', icon: IconTimeline, hint: 'G' },
+  { id: 'channels', to: '/channels', label: 'nav.channels', icon: IconListDetails, hint: 'L' },
+  { id: 'guide', to: '/guide', label: 'nav.guide', icon: IconLayoutNavbar, hint: 'G' },
   { id: 'movies', to: '/movies', label: 'nav.movies', icon: IconMovie, requires: (c) => c.vod },
   { id: 'series', to: '/series', label: 'nav.series', icon: IconDeviceTv, requires: (c) => c.vod },
-  { id: 'recordings', to: '/recordings', label: 'nav.recordings', icon: IconCircleDot, requires: (c) => c.dvr },
+  { id: 'recordings', to: '/recordings', label: 'nav.recordings', icon: IconCircle, requires: (c) => c.dvr },
 ];
 
 export const SETTINGS_NAV: NavEntry = { id: 'settings', to: '/settings', label: 'nav.settings', icon: IconSettings };

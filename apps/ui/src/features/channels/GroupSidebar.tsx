@@ -42,7 +42,7 @@ export function GroupSidebar({ groups, total, favourites, selection, onSelect }:
   const entries: { key: string; label: string; count: number; sel: GroupSelection }[] = [
     { key: 'favourites', label: t('channels.favourites'), count: favourites, sel: { kind: 'favourites' } },
     { key: 'all', label: t('channels.all'), count: total, sel: { kind: 'all' } },
-    ...groups.map((g) => ({ key: `g${g.id}`, label: g.name, count: g.channelCount, sel: { kind: 'group', id: g.id } as GroupSelection })),
+    ...groups.map((g) => ({ key: `g${g.id}`, label: g.name, count: g.count, sel: { kind: 'group', id: g.id } as GroupSelection })),
   ];
   return (
     <nav className={classes.sidebar} aria-label={t('channels.groups')}>

@@ -54,3 +54,6 @@ export function useNowNextWindow(ids: number[], windowKey: string) {
 
 export const useSettings = () =>
   useQuery({ queryKey: ['settings'], queryFn: () => invoke('get_settings', {}), staleTime: Infinity });
+
+export const useCounts = () =>
+  useQuery({ queryKey: ['catalog', 'counts'], queryFn: () => invoke('get_counts', {}) });

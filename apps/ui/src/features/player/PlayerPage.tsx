@@ -16,9 +16,9 @@ import {
   IconVolumeOff,
   IconX,
 } from '@tabler/icons-react';
-import { inTauri, invoke } from '../../api/ipc';
+import { inTauri, invoke, listen } from '../../api/ipc';
 import { useChannels, useNowNextWindow, useSources } from '../../api/queries';
-import type { AppError, Channel, PlayerState } from '../../api/types';
+import type { AppError, Channel, PlayerState, SessionStats } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
@@ -81,15 +81,39 @@ function ZapPill({ channel, title, until }: { channel: Channel; title: string | 
   );
 }
 
+function useSessionStats(enabled: boolean): SessionStats | null {
+  const [stats, setStats] = useState<SessionStats | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let off: (() => void) | null = null;
+    let cancelled = false;
+    void listen('session://stats', setStats).then((u) => (cancelled ? u() : (off = u)));
+    void invoke('set_stats_enabled', { enabled: true }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+      off?.();
+      void invoke('set_stats_enabled', { enabled: false }).catch(() => undefined);
+    };
+  }, [enabled]);
+  return enabled ? stats : null;
+}
+
 function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerState; sourceName: string; channel: Channel | undefined; onClose: () => void }) {
   const diag = useQuery({ queryKey: ['diagnostics', 'session'], queryFn: () => invoke('get_diagnostics', {}), refetchInterval: 1000 });
+  const stats = useSessionStats(true);
+  const dash = '–';
   const rows: [string, string][] = [
     [t('player.info.source'), sourceName],
-    [t('player.info.channel'), channel ? `${channel.number ?? ''} ${channel.name}`.trim() : '–'],
+    [t('player.info.channel'), channel ? `${channel.number ?? ''} ${channel.name}`.trim() : dash],
+    [t('player.info.stream'), stats?.sourceIndex != null ? t('player.info.streamOf', { n: stats.sourceIndex, total: stats.sourceCount ?? stats.sourceIndex }) : dash],
+    [t('player.info.video'), stats?.resolution ? `${stats.resolution} · ${stats.videoCodec ?? dash}` : player.width && player.height ? `${player.width}×${player.height} · ${player.videoCodec ?? dash}` : dash],
+    [t('player.info.deinterlace'), stats?.deinterlace ?? dash],
+    [t('player.info.audio'), stats?.audioCodec ?? dash],
+    [t('player.info.bitrate'), stats?.bitrateKbps != null ? `${(stats.bitrateKbps / 1000).toFixed(1)} Mb/s` : dash],
+    [t('player.info.dropped'), stats?.droppedFrames != null ? String(stats.droppedFrames) : dash],
+    [t('player.info.decoder'), stats?.hwdecCurrent ?? player.hwdecCurrent ?? dash],
+    [t('player.info.buffer'), stats?.bufferSecs != null ? `${stats.bufferSecs.toFixed(1)} s` : dash],
     [t('player.info.state'), player.state],
-    [t('player.info.video'), player.width && player.height ? `${player.width}×${player.height} · ${player.videoCodec ?? '–'}` : '–'],
-    [t('player.info.decoder'), player.hwdecCurrent ?? '–'],
-    [t('player.info.volume'), player.muted ? `${player.volume}% · muted` : `${player.volume}%`],
   ];
   const trans = (diag.data?.transitions ?? []).slice(-3);
   return (
@@ -147,6 +171,8 @@ function ErrorOverlay({ error, onRetry }: { error: AppError | null; onRetry: () 
   );
 }
 
+let pendingStop: ReturnType<typeof setTimeout> | null = null;
+
 export function PlayerPage() {
   const navigate = useNavigate();
   const player = usePlayerStore((s) => s.player);
@@ -174,15 +200,22 @@ export function PlayerPage() {
   const paused = player.state === 'Paused';
   const barHidden = idle && !paused && !failed && !infoOpen;
 
-  // Sessions are stopped when leaving the player (CLAUDE rule 6).
-  useEffect(
-    () => () => {
-      void invoke('player_command', { command: { kind: 'stop' } }).catch(() => undefined);
-      setFullscreen(false);
-      void invoke('set_fullscreen', { enabled: false }).catch(() => undefined);
-    },
-    [setFullscreen],
-  );
+  // Sessions are stopped when leaving the player (CLAUDE rule 6). The stop is deferred one tick and
+  // cancelled by a re-mount, so React StrictMode's simulated unmount/mount does not kill playback.
+  useEffect(() => {
+    if (pendingStop) {
+      clearTimeout(pendingStop);
+      pendingStop = null;
+    }
+    return () => {
+      pendingStop = setTimeout(() => {
+        pendingStop = null;
+        void invoke('player_command', { command: { kind: 'stop' } }).catch(() => undefined);
+        useUiStore.getState().setFullscreen(false);
+        void invoke('set_fullscreen', { enabled: false }).catch(() => undefined);
+      }, 0);
+    };
+  }, []);
 
   const cmd = useCallback(
     (command: Parameters<typeof invoke<'player_command'>>[1]['command']) => void invoke('player_command', { command }),

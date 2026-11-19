@@ -6,7 +6,7 @@ import { Center, SegmentedControl, Text, TextInput, VisuallyHidden } from '@mant
 import { IconLayoutList, IconList, IconSearch } from '@tabler/icons-react';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { invoke } from '../../api/ipc';
-import { useCaps, useChannels, useGroups, useNowNextWindow } from '../../api/queries';
+import { useCaps, useChannels, useCounts, useGroups, useNowNextWindow } from '../../api/queries';
 import { dl } from '../../theme';
 import { Icon } from '../../components/Icon/Icon';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
@@ -43,7 +43,7 @@ export function ChannelsPage() {
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   const groups = useGroups();
-  const everything = useChannels({});
+  const counts = useCounts();
   const list = useChannels({
     groupId: selection.kind === 'group' ? selection.id : null,
     favouritesOnly: selection.kind === 'favourites',
@@ -73,7 +73,7 @@ export function ChannelsPage() {
 
   const favourite = useMutation({
     mutationFn: (v: { channelId: number; favourite: boolean }) => invoke('set_favourite', v),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog', 'channels'] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog'] }),
   });
 
   // Scroll the row into the virtual window, then give it DOM focus once it is mounted (retries a few frames).
@@ -160,8 +160,8 @@ export function ChannelsPage() {
       </div>
     );
 
-  const total = everything.data?.length ?? 0;
-  const favCount = (everything.data ?? []).filter((c) => c.isFavourite).length;
+  const total = counts.data?.all ?? 0;
+  const favCount = counts.data?.favourites ?? 0;
   const title =
     selection.kind === 'all'
       ? t('channels.all')

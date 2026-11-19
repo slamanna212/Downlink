@@ -45,7 +45,8 @@ export interface Group {
   id: number;
   sourceId: number;
   name: string;
-  channelCount: number;
+  /** Channels in the group (computed by Rust). */
+  count: number;
 }
 
 export type EpgMatch = 'id' | 'name' | 'display' | 'manual' | 'none';
@@ -157,11 +158,58 @@ export type DensitySetting = 'compact' | 'comfortable' | 'tv';
 export type HwdecSetting = 'auto-safe' | 'auto' | 'no' | 'vaapi' | 'nvdec' | 'd3d11va' | 'videotoolbox';
 
 /** Machine-local playback/diagnostic settings owned by Rust. */
+export type AudioOutput = 'stereo' | 'surround' | 'passthrough';
+export type Deinterlace = 'auto' | 'yes' | 'no';
+
 export interface AppSettings {
   /** 1..10 seconds. */
   liveBufferSecs: number;
   hwdec: HwdecSetting;
   debugLogging: boolean;
+  /** Null = system default. */
+  audioDevice: string | null;
+  audioOutput: AudioOutput;
+  deinterlace: Deinterlace;
+  /** Percent, 50..150. */
+  subtitleSize: number;
+  subtitleBackground: boolean;
+}
+
+export interface AudioDevice {
+  id: string;
+  name: string;
+}
+
+/** `session://stats`, 1 Hz, only while the info panel is open (`set_stats_enabled`). */
+export interface SessionStats {
+  /** e.g. "1920x1080". */
+  resolution: string | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  bitrateKbps: number | null;
+  droppedFrames: number | null;
+  bufferSecs: number | null;
+  deinterlace: string | null;
+  hwdecCurrent: string | null;
+  /** 1-based index of the stream in use and how many the channel has. */
+  sourceIndex: number | null;
+  sourceCount: number | null;
+}
+
+export interface Counts {
+  all: number;
+  favourites: number;
+}
+
+export type UpdateChannel = 'stable' | 'dev';
+
+export interface UpdateStatus {
+  channel: UpdateChannel;
+  current: string;
+  /** Newer version, if any. */
+  available?: string | null;
+  /** UTC seconds. */
+  lastChecked?: number | null;
 }
 
 export interface AddSourceInput {

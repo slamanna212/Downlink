@@ -6,6 +6,11 @@ import type {
   AddSourceInput,
   AppError,
   AppSettings,
+  AudioDevice,
+  Counts,
+  SessionStats,
+  UpdateChannel,
+  UpdateStatus,
   CatalogUpdated,
   Diagnostics,
   TaskProgress,
@@ -42,6 +47,12 @@ export interface Commands {
   set_settings: { args: { patch: Partial<AppSettings> }; result: AppSettings };
   set_video_bounds: { args: VideoBounds; result: null };
   set_fullscreen: { args: { enabled: boolean }; result: null };
+  set_stats_enabled: { args: { enabled: boolean }; result: null };
+  get_counts: { args: Record<string, never>; result: Counts };
+  list_audio_devices: { args: Record<string, never>; result: AudioDevice[] };
+  get_update_status: { args: Record<string, never>; result: UpdateStatus };
+  set_update_channel: { args: { channel: UpdateChannel }; result: UpdateStatus };
+  check_for_updates: { args: Record<string, never>; result: UpdateStatus };
 }
 export type CommandName = keyof Commands;
 
@@ -50,6 +61,8 @@ export interface Events {
   'catalog://updated': CatalogUpdated;
   'player://state': PlayerState;
   'task://progress': TaskProgress;
+  'session://stats': SessionStats;
+  'update://status': UpdateStatus;
 }
 export type EventName = keyof Events;
 

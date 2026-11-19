@@ -7,6 +7,7 @@ import {
   type AppError,
   type AppSettings,
   type Channel,
+  type UpdateStatus,
   type Group,
   type NowNext,
   type PlayerState,
@@ -38,7 +39,7 @@ export function mockSources(empty: boolean, status: Source['status'] = 'connecte
 }
 
 export function mockGroups(): Group[] {
-  return GROUP_NAMES.map((name, i) => ({ id: i + 1, sourceId: 1, name, channelCount: 0 }));
+  return GROUP_NAMES.map((name, i) => ({ id: i + 1, sourceId: 1, name, count: 0 }));
 }
 
 /** Inline SVG stand-in for a `dlimg://` logo so the real-logo plate renders in the browser. */
@@ -97,7 +98,12 @@ export function createMockBackend(): Backend {
   const sources = mockSources(mode === 'empty', mode === 'offline' ? 'offline' : 'connected');
   const channels = mode === 'empty' ? [] : mockChannels();
   const groups = mockGroups();
-  let settings: AppSettings = { liveBufferSecs: 2, hwdec: 'auto-safe', debugLogging: false };
+  let settings: AppSettings = {
+    liveBufferSecs: 2, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
+    deinterlace: 'auto', subtitleSize: 100, subtitleBackground: true,
+  };
+  let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, lastChecked: null };
+  let statsTimer: ReturnType<typeof setInterval> | null = null;
   let player = idleState();
   const transitions: Transition[] = [];
   const handlers = new Map<EventName, Set<(p: never) => void>>();
@@ -113,7 +119,7 @@ export function createMockBackend(): Backend {
     player = next;
     emit('player://state', player);
   };
-  const withCounts = () => groups.map((g) => ({ ...g, channelCount: channels.filter((c) => c.groupId === g.id).length }));
+  const withCounts = () => groups.map((g) => ({ ...g, count: channels.filter((c) => c.groupId === g.id).length }));
   const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   const sync = async (sourceId: number) => {
@@ -217,6 +223,35 @@ export function createMockBackend(): Backend {
       return settings;
     },
     set_video_bounds: () => null,
+    set_stats_enabled: ({ enabled }) => {
+      if (statsTimer) clearInterval(statsTimer);
+      statsTimer = null;
+      if (enabled) {
+        const tick = () =>
+          emit('session://stats', {
+            resolution: '1920x1080', videoCodec: 'H.264 High', audioCodec: 'E-AC-3 5.1', bitrateKbps: 8400 + Math.round(Math.random() * 400),
+            droppedFrames: 0, bufferSecs: 2 + Math.round(Math.random() * 20) / 10, deinterlace: 'bwdif · on', hwdecCurrent: 'vaapi',
+            sourceIndex: 1, sourceCount: 3,
+          });
+        tick();
+        statsTimer = setInterval(tick, 1000);
+      }
+      return null;
+    },
+    get_counts: () => ({ all: channels.length, favourites: channels.filter((c) => c.isFavourite).length }),
+    list_audio_devices: () => [{ id: 'default', name: 'System default' }, { id: 'hdmi-1', name: 'Demo TV (HDMI)' }, { id: 'usb-1', name: 'Demo headset (USB)' }],
+    get_update_status: () => update,
+    set_update_channel: ({ channel }) => {
+      update = { ...update, channel, available: null };
+      emit('update://status', update);
+      return update;
+    },
+    check_for_updates: async () => {
+      await wait(600);
+      update = { ...update, lastChecked: nowSec(), available: update.channel === 'dev' ? '0.1.0-dev.4' : null };
+      emit('update://status', update);
+      return update;
+    },
     set_fullscreen: () => null,
   };
 
