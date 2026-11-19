@@ -83,7 +83,7 @@ export function toAppError(e: unknown): AppError {
 const tauriBackend: Backend = {
   async invoke(cmd, args) {
     try {
-      return await tauriInvoke(cmd, args);
+      return (await tauriInvoke(cmd, args as Record<string, unknown>)) as never;
     } catch (e) {
       throw toAppError(e);
     }
