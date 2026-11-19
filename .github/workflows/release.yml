@@ -1,0 +1,406 @@
+# Release pipeline (PLAN §10). See docs/release.md.
+#   push to main  -> dev channel: pre-release vX.Y.Z-dev.<shortsha> + rolling `dev` release holding latest.json
+#   push tag vX.Y.Z -> stable channel
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancel a release mid-flight; later dev builds queue behind it.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10" # lockfileVersion 9.0 is readable by pnpm 9 and 10
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      channel: ${{ steps.meta.outputs.channel }}
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git-cliff needs history and tags
+
+      - id: meta
+        name: Compute channel, version and tag
+        run: |
+          base="$(jq -r .version apps/desktop/tauri.conf.json)"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            channel=stable
+            tag="$GITHUB_REF_NAME"
+            version="${tag#v}"
+            if [[ "$version" != "$base" ]]; then
+              echo "::error::tag $tag does not match tauri.conf.json version $base (run tools/release/bump-version.sh)"
+              exit 1
+            fi
+          else
+            channel=dev
+            version="${base}-dev.${GITHUB_SHA::7}"
+            tag="v${version}"
+          fi
+          {
+            echo "channel=$channel"
+            echo "tag=$tag"
+            echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: Generate release notes (git-cliff)
+        run: |
+          if [[ "${{ steps.meta.outputs.channel }}" == stable ]]; then
+            git cliff --current --strip header -o notes.md
+          else
+            git cliff --unreleased --strip header -o notes.md
+          fi
+          [ -s notes.md ] || echo "No user-visible changes." > notes.md
+
+      - id: create
+        name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          CHANNEL: ${{ steps.meta.outputs.channel }}
+        run: |
+          # A re-run of the same commit replaces its own draft/release.
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          flags=(--draft --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md)
+          [[ "$CHANNEL" == dev ]] && flags+=(--prerelease)
+          gh release create "$TAG" "${flags[@]}"
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+                 --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -n1)"
+          echo "release_id=$id" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # macOS libmpv must be universal: collect on both architectures, merge in build-macos.
+  mpv-macos:
+    name: libmpv (macOS ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: macos-latest, arch: arm64 }
+          - { runner: macos-15-intel, arch: x86_64 }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect libmpv dylib tree
+        env:
+          ARCH_DIR: ${{ matrix.arch }}
+        run: ./tools/mpv/macos.sh collect
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mpv-macos-${{ matrix.arch }}
+          path: tools/mpv/out/macos/${{ matrix.arch }}
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Build (Windows NSIS)
+    needs: prepare
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage libmpv (tools/mpv/windows.ps1 -> tools/mpv/out/windows/mpv)
+        shell: pwsh
+        env:
+          MPV_TAG: ${{ vars.MPV_TAG }}
+          MPV_SHA256: ${{ vars.MPV_SHA256 }}
+        run: ./tools/mpv/windows.ps1
+
+      - uses: ./.github/actions/setup-build
+        with:
+          channel-version: ${{ needs.prepare.outputs.version }}
+          overlay: windows
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: cargo tauri
+          args: --bundles nsis --config ${{ github.workspace }}/release-config.json
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          uploadUpdaterJson: false
+
+  # ---------------------------------------------------------------------------
+  build-macos:
+    name: Build (macOS universal)
+    needs: [prepare, mpv-macos]
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mpv-macos-arm64
+          path: tools/mpv/out/macos/arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: mpv-macos-x86_64
+          path: tools/mpv/out/macos/x86_64
+      - name: Merge libmpv into universal Frameworks
+        run: ./tools/mpv/macos.sh merge
+
+      - uses: ./.github/actions/setup-build
+        with:
+          channel-version: ${{ needs.prepare.outputs.version }}
+          overlay: macos
+          rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: cargo tauri
+          args: --target universal-apple-darwin --bundles app,dmg --config ${{ github.workspace }}/release-config.json
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          uploadUpdaterJson: false
+
+  # ---------------------------------------------------------------------------
+  build-linux:
+    name: Build (Linux AppImage, deb, rpm)
+    needs: prepare
+    runs-on: ubuntu-22.04 # glibc baseline (PLAN §4.10)
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libmpv-dev pkg-config build-essential patchelf file
+
+      - name: Stage libmpv (tools/mpv/linux.sh -> tools/mpv/out/linux/lib)
+        env:
+          # Repo variable LIBMPV_SRC pins the exact libmpv.so.2 to bundle (see tools/mpv/PINNED.md).
+          # Fallback: whatever libmpv.so.2 the runner's linker cache knows about.
+          LIBMPV_SRC_VAR: ${{ vars.LIBMPV_SRC }}
+        run: |
+          src="${LIBMPV_SRC_VAR:-$(ldconfig -p | awk '/libmpv\.so\.2 /{print $NF; exit}')}"
+          if [ -z "$src" ]; then
+            echo "::error::no libmpv.so.2 found; set repo variable LIBMPV_SRC (PINNED.md)"; exit 1
+          fi
+          LIBMPV_SRC="$src" ./tools/mpv/linux.sh
+
+      - uses: ./.github/actions/setup-build
+        with:
+          channel-version: ${{ needs.prepare.outputs.version }}
+          overlay: linux
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NO_STRIP: "true"
+        with:
+          projectPath: apps/desktop
+          tauriScript: cargo tauri
+          args: --bundles appimage,deb,rpm --config ${{ github.workspace }}/release-config.json
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          uploadUpdaterJson: false
+
+      # Tauri signs only AppImage / NSIS / app.tar.gz. The updater also needs .sig files for deb and rpm.
+      - name: Sign deb and rpm, write SHA256SUMS, upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          bundle=target/release/bundle
+          mkdir -p out
+          cp "$bundle"/appimage/*.AppImage "$bundle"/deb/*.deb "$bundle"/rpm/*.rpm out/
+          cd out
+          for f in *.deb *.rpm; do
+            cargo tauri signer sign "$f"   # reads key + password from the TAURI_SIGNING_* env vars
+          done
+          sha256sum -- *.AppImage *.deb *.rpm > SHA256SUMS-linux-x86_64.txt
+          gh release upload "$TAG" -- *.deb.sig *.rpm.sig SHA256SUMS-linux-x86_64.txt --clobber
+
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish (latest.json, copies, attestation)
+    needs: [prepare, build-windows, build-macos, build-linux]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      CHANNEL: ${{ needs.prepare.outputs.channel }}
+      RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release assets
+        run: |
+          mkdir assets
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate \
+            --jq '.[] | [.id, .name] | @tsv' |
+          while IFS=$'\t' read -r id name; do
+            gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "assets/$name"
+          done
+          ls -l assets
+
+      - name: Build latest.json
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq .body > notes.md
+          python3 tools/release/make-latest-json.py \
+            --version "$VERSION" --repo "$GITHUB_REPOSITORY" --tag "$TAG" \
+            --assets assets --notes notes.md --out latest.json
+
+      - name: Unversioned asset copies (stable only)
+        if: needs.prepare.outputs.channel == 'stable'
+        run: ./tools/release/unversioned-copies.sh assets
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            assets/*.exe
+            assets/*.dmg
+            assets/*.tar.gz
+            assets/*.AppImage
+            assets/*.deb
+            assets/*.rpm
+
+      - name: Upload copies and latest.json to the release
+        run: |
+          shopt -s nullglob
+          if [[ "$CHANNEL" == stable ]]; then
+            gh release upload "$TAG" assets/Downlink_x64-setup.exe assets/Downlink_universal.dmg \
+              assets/Downlink_amd64.AppImage assets/Downlink_amd64.deb assets/Downlink-x86_64.rpm --clobber
+          fi
+          gh release upload "$TAG" latest.json --clobber
+
+      - name: Publish release
+        run: |
+          if [[ "$CHANNEL" == stable ]]; then
+            gh release edit "$TAG" --draft=false --prerelease=false --latest
+          else
+            gh release edit "$TAG" --draft=false --prerelease --latest=false
+          fi
+
+      # Rolling `dev` release: always holds the newest dev latest.json (endpoint .../releases/download/dev/latest.json).
+      - name: Update rolling dev release
+        if: needs.prepare.outputs.channel == 'dev'
+        run: |
+          git tag -f dev "$GITHUB_SHA"
+          git push -f origin refs/tags/dev
+          if ! gh release view dev >/dev/null 2>&1; then
+            gh release create dev --prerelease --latest=false --target "$GITHUB_SHA" \
+              --title "Dev channel (rolling)" \
+              --notes "Rolling pointer for the dev update channel. Holds the newest dev latest.json. Install builds from the vX.Y.Z-dev.<sha> pre-releases."
+          fi
+          gh release upload dev latest.json --clobber
+
+  # ---------------------------------------------------------------------------
+  # PLAN §4.10: run each artefact on a clean machine with no mpv and assert the bundled libmpv works.
+  # Requires the desktop app's `--self-test` flag (docs/release.md, "Desktop app requirements").
+  smoke:
+    name: Smoke (${{ matrix.os }})
+    needs: [prepare, publish]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: Self-test output path
+        shell: bash
+        run: echo "DOWNLINK_SELF_TEST_OUT=$RUNNER_TEMP/self-test.json" >> "$GITHUB_ENV"
+
+      - name: Linux (AppImage and deb)
+        if: runner.os == 'Linux'
+        run: |
+          if command -v mpv; then echo "::error::mpv present on clean machine"; exit 1; fi
+          if ldconfig -p | grep -q libmpv; then echo "::error::libmpv present on clean machine"; exit 1; fi
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --pattern '*_amd64.AppImage' --pattern '*_amd64.deb' --dir dl
+          chmod +x dl/*.AppImage
+          # AppImage: bundled libmpv only
+          env -u LD_LIBRARY_PATH -u DOWNLINK_MPV_PATH \
+            timeout 120 xvfb-run -a dl/*.AppImage --appimage-extract-and-run --self-test
+          cat "$DOWNLINK_SELF_TEST_OUT"
+          # deb: installs without pulling in libmpv, runs from the private dir
+          sudo apt-get install -y ./dl/*_amd64.deb
+          if ldconfig -p | grep -q 'libmpv\.so'; then echo "::error::deb pulled in a system libmpv"; exit 1; fi
+          pkg="$(dpkg-deb -f dl/*_amd64.deb Package)"
+          bin="$(dpkg -L "$pkg" | grep '^/usr/bin/' | head -n1)"
+          env -u LD_LIBRARY_PATH -u DOWNLINK_MPV_PATH timeout 120 xvfb-run -a "$bin" --self-test
+          cat "$DOWNLINK_SELF_TEST_OUT"
+
+      - name: Windows (NSIS)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Get-Command mpv -ErrorAction SilentlyContinue) { throw 'mpv present on clean machine' }
+          gh release download $env:TAG -R $env:GITHUB_REPOSITORY --pattern '*_x64-setup.exe' --dir dl
+          $installer = (Get-ChildItem dl -Filter *_x64-setup.exe)[0].FullName
+          Start-Process $installer -ArgumentList '/S' -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Downlink" -Filter *.exe |
+            Where-Object { $_.Name -notmatch 'uninstall' } | Select-Object -First 1
+          if (-not $exe) { throw 'installed executable not found' }
+          $p = Start-Process $exe.FullName -ArgumentList '--self-test' -Wait -PassThru
+          if (Test-Path $env:DOWNLINK_SELF_TEST_OUT) { Get-Content $env:DOWNLINK_SELF_TEST_OUT }
+          if ($p.ExitCode -ne 0) { throw "self-test failed ($($p.ExitCode))" }
+
+      - name: macOS (dmg)
+        if: runner.os == 'macOS'
+        run: |
+          if command -v mpv; then echo "::error::mpv present on clean machine"; exit 1; fi
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --pattern '*_universal.dmg' --dir dl
+          hdiutil attach dl/*_universal.dmg -mountpoint /Volumes/Downlink -nobrowse -quiet
+          cp -R /Volumes/Downlink/Downlink.app /Applications/
+          hdiutil detach /Volumes/Downlink -quiet
+          app=/Applications/Downlink.app
+          for lib in "$app"/Contents/Frameworks/libmpv*.dylib; do
+            archs="$(lipo -archs "$lib")"
+            echo "$lib: $archs"
+            [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || { echo "::error::$lib is not universal"; exit 1; }
+          done
+          codesign --verify --deep --strict "$app"
+          exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+          timeout 120 "$app/Contents/MacOS/$exe" --self-test
+          cat "$DOWNLINK_SELF_TEST_OUT"

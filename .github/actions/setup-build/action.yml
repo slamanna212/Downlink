@@ -1,0 +1,51 @@
+name: Setup Tauri build
+description: Toolchains, UI build and the merged release tauri config shared by every release build job.
+inputs:
+  channel-version:
+    description: Version to embed in the build (X.Y.Z or X.Y.Z-dev.<sha>); overrides tauri.conf.json at build time.
+    required: true
+  overlay:
+    description: windows | macos | linux. Merges apps/desktop/tauri.release.<overlay>.conf.json (libmpv bundle paths).
+    required: true
+  rust-targets:
+    description: Extra rustup targets, comma separated.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        target: ${{ inputs.rust-targets }}
+        cache-workspaces: ". -> target"
+
+    - uses: pnpm/action-setup@v4
+      with:
+        version: "10"
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: pnpm
+
+    - name: Install tauri-cli
+      shell: bash
+      run: cargo install tauri-cli --version "^2" --locked
+
+    - name: Build UI
+      shell: bash
+      run: |
+        pnpm install --frozen-lockfile
+        pnpm -C apps/ui build
+
+    - name: Write merged release config
+      shell: bash
+      env:
+        VERSION: ${{ inputs.channel-version }}
+        OVERLAY: ${{ inputs.overlay }}
+      run: |
+        overlay="apps/desktop/tauri.release.${OVERLAY}.conf.json"
+        [ -f "$overlay" ] || { echo "::error::missing $overlay (see docs/release.md, tauri.conf.json requirements)"; exit 1; }
+        jq -n --arg v "$VERSION" '{version: $v}' > "$RUNNER_TEMP/version.json"
+        # Deep merge: overlay first, then the version override.
+        jq -s '.[0] * .[1]' "$overlay" "$RUNNER_TEMP/version.json" > release-config.json
+        cat release-config.json
