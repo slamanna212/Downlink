@@ -79,6 +79,12 @@ unsafe extern "C" fn get_proc_address(ctx: *mut c_void, name: *const c_char) -> 
     loader.proc_address(name)
 }
 
+/// Dev-only: log a centre-pixel readback of the GLArea every 60 frames (`DOWNLINK_DEBUG_READBACK`).
+fn debug_readback() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("DOWNLINK_DEBUG_READBACK").is_some())
+}
+
 struct GtkState {
     overlay: gtk::Overlay,
     glarea: gtk::GLArea,
@@ -254,6 +260,33 @@ impl VideoSurface for LinuxSurface {
                         tracing::warn!("mpv render failed: {e}");
                     }
                     rc.report_swap();
+                    if debug_readback() {
+                        let n = frames.load(Ordering::Relaxed);
+                        if n % 60 == 0 {
+                            let name = c"glReadPixels";
+                            let p = loader_keepalive.proc_address(name.as_ptr());
+                            if !p.is_null() {
+                                type ReadPixels = unsafe extern "C" fn(i32, i32, i32, i32, u32, u32, *mut c_void);
+                                // SAFETY: glReadPixels(x, y, w, h, format=GL_RGBA, type=GL_UNSIGNED_BYTE, data).
+                                let f = unsafe { std::mem::transmute::<*mut c_void, ReadPixels>(p) };
+                                let bind = loader_keepalive.proc_address(c"glBindFramebuffer".as_ptr());
+                                if !bind.is_null() {
+                                    // SAFETY: glBindFramebuffer(GL_FRAMEBUFFER, fbo) with the context current.
+                                    let b = unsafe {
+                                        std::mem::transmute::<*mut c_void, unsafe extern "C" fn(u32, u32)>(bind)
+                                    };
+                                    // SAFETY: as above.
+                                    unsafe { b(0x8D40, fbo as u32) };
+                                }
+                                let (rw, rh) = (w.max(1), h.max(1));
+                                let mut px = vec![0u8; (rw * rh * 4) as usize];
+                                // SAFETY: GL context current; `px` holds one RGBA pixel.
+                                unsafe { f(0, 0, rw, rh, 0x1908, 0x1401, px.as_mut_ptr().cast()) };
+                                let sum = px.chunks(4).filter(|p| p[0] > 8 || p[1] > 8 || p[2] > 8).count();
+                                tracing::info!("GLArea fbo {fbo} {w}x{h} frame {n} non-black pixels {sum} of {} (alpha0 px {})", px.len() / 4, px.chunks(4).filter(|p| p[3] == 0).count());
+                            }
+                        }
+                    }
                     frames.fetch_add(1, Ordering::Relaxed);
                 }
                 glib::Propagation::Stop

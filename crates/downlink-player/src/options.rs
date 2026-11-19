@@ -89,6 +89,10 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
     o.push(kv("input-default-bindings", "no"));
     o.push(kv("input-vo-keyboard", "no"));
     o.push(kv("terminal", "no"));
+    // Never let the ytdl hook re-request a stream URL after a failure (CLAUDE.md rule 4), and
+    // never run user scripts.
+    o.push(kv("ytdl", "no"));
+    o.push(kv("load-scripts", "no"));
     o.push(kv(
         "stream-lavf-o",
         "reconnect=1,reconnect_streamed=1,reconnect_delay_max=2",
@@ -171,6 +175,7 @@ mod tests {
         assert!(has(&o, "idle", "yes"));
         assert!(has(&o, "keep-open", "no"));
         assert!(has(&o, "terminal", "no"));
+        assert!(has(&o, "ytdl", "no"));
         assert!(has(
             &o,
             "stream-lavf-o",

@@ -129,6 +129,42 @@ struct ZapReport {
     render_fps: Option<f64>,
     hwdec_current: Option<String>,
     diagnostics: Vec<(String, String)>,
+    seek: Option<SeekReport>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct SeekReport {
+    before_secs: Option<f64>,
+    after_secs: Option<f64>,
+    state_after: Option<SessionState>,
+}
+
+/// Play `url` with the seekable profile, seek +`secs`, report positions.
+fn run_seek_test(
+    p: &Arc<Player>,
+    url: &str,
+    headers: &[(String, String)],
+    secs: f64,
+) -> SeekReport {
+    let _ = p.play(PlayRequest {
+        url: url.to_owned(),
+        headers: headers.to_vec(),
+        profile: Profile::Seekable,
+        start_secs: None,
+        failover_capable: false,
+    });
+    p.wait_for(|s| s == SessionState::Playing, Duration::from_secs(12));
+    std::thread::sleep(Duration::from_secs(3));
+    let before = p.snapshot().position_secs;
+    let _ = p.command(PlayerCommand::SeekRelative { secs });
+    std::thread::sleep(Duration::from_secs(3));
+    let after = p.snapshot();
+    SeekReport {
+        before_secs: before,
+        after_secs: after.position_secs,
+        state_after: after.state,
+    }
 }
 
 fn percentile(sorted: &[u64], p: f64) -> Option<u64> {
@@ -146,6 +182,7 @@ fn run_zap_bench(
     urls: &[String],
     count: u32,
     dwell_ms: u64,
+    headers: &[(String, String)],
 ) -> ZapReport {
     let mut results = Vec::new();
     for i in 0..count {
@@ -153,7 +190,7 @@ fn run_zap_bench(
         let t0 = Instant::now();
         let r = p.play(PlayRequest {
             url,
-            headers: Vec::new(),
+            headers: headers.to_vec(),
             profile: Profile::Live,
             start_secs: None,
             failover_capable: false,
@@ -195,6 +232,7 @@ fn run_zap_bench(
         render_fps,
         hwdec_current: snap.hwdec_current,
         diagnostics: p.diagnostics(),
+        seek: None,
     }
 }
 
@@ -215,7 +253,7 @@ async fn zap_bench(
     let surface = state.surface.clone();
     let dwell = dwell_ms.unwrap_or(1500);
     tauri::async_runtime::spawn_blocking(move || {
-        run_zap_bench(&p, surface.as_ref(), &urls, count, dwell)
+        run_zap_bench(&p, surface.as_ref(), &urls, count, dwell, &[])
     })
     .await
     .map_err(|e| CmdError {
@@ -269,7 +307,12 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     let dispatch: MainThreadDispatch = Arc::new(move |f| {
                         let _ = disp_handle.run_on_main_thread(f);
                     });
-                    match attach_surface(&handle, &p, dispatch) {
+                    let attach = if std::env::var_os("DOWNLINK_SPIKE_NO_SURFACE").is_some() {
+                        Err("surface disabled by DOWNLINK_SPIKE_NO_SURFACE".to_owned())
+                    } else {
+                        attach_surface(&handle, &p, dispatch)
+                    };
+                    match attach {
                         Ok(s) => state.surface = Some(Arc::new(s)),
                         Err(e) => {
                             tracing::error!("video surface unavailable: {e}");
@@ -351,7 +394,25 @@ fn spawn_autorun(app: AppHandle, p: Arc<Player>, surface: Option<Arc<Surface>>, 
         if urls.is_empty() {
             return;
         }
-        let report = run_zap_bench(&p, surface.as_ref(), &urls, count, 1500);
+        let headers: Vec<(String, String)> = std::env::var("DOWNLINK_SPIKE_HEADER")
+            .ok()
+            .and_then(|h| {
+                h.split_once(": ")
+                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            })
+            .into_iter()
+            .collect();
+        let seek_secs: Option<f64> = std::env::var("DOWNLINK_SPIKE_SEEK")
+            .ok()
+            .and_then(|v| v.parse().ok());
+        let mut report = if count == 0 {
+            run_zap_bench(&p, surface.as_ref(), &urls, 0, 0, &headers)
+        } else {
+            run_zap_bench(&p, surface.as_ref(), &urls, count, 1500, &headers)
+        };
+        if let Some(secs) = seek_secs {
+            report.seek = Some(run_seek_test(&p, &urls[0], &headers, secs));
+        }
         match serde_json::to_string_pretty(&report) {
             Ok(j) => match out {
                 Some(path) => {
@@ -361,10 +422,108 @@ fn spawn_autorun(app: AppHandle, p: Arc<Player>, surface: Option<Arc<Surface>>, 
             },
             Err(e) => tracing::error!("report: {e}"),
         }
+        if std::env::var_os("DOWNLINK_SPIKE_FULLSCREEN").is_some()
+            && let Some(win) = app.get_webview_window("main")
+        {
+            let _ = p.play(PlayRequest {
+                url: urls[0].clone(),
+                headers: Vec::new(),
+                profile: Profile::Live,
+                start_secs: None,
+                failover_capable: false,
+            });
+            p.wait_for(|s| s == SessionState::Playing, Duration::from_secs(12));
+            for fs in [true, false, true, false] {
+                let _ = win.set_fullscreen(fs);
+                std::thread::sleep(Duration::from_secs(2));
+                let c0 = surface.as_ref().map_or(0, |s| s.render_count());
+                std::thread::sleep(Duration::from_secs(2));
+                let c1 = surface.as_ref().map_or(0, |s| s.render_count());
+                let size = win
+                    .inner_size()
+                    .map(|s| format!("{}x{}", s.width, s.height))
+                    .unwrap_or_default();
+                println!(
+                    "fullscreen={fs} is_fullscreen={:?} inner={size} render_fps={:.1} state={:?}",
+                    win.is_fullscreen().ok(),
+                    (c1 - c0) as f64 / 2.0,
+                    p.snapshot().state
+                );
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if let Ok(path) = std::env::var("DOWNLINK_SPIKE_SHOT") {
+            let _ = p.play(PlayRequest {
+                url: urls[0].clone(),
+                headers: Vec::new(),
+                profile: Profile::Live,
+                start_secs: None,
+                failover_capable: false,
+            });
+            p.wait_for(|s| s == SessionState::Playing, Duration::from_secs(12));
+            std::thread::sleep(Duration::from_secs(2));
+            let a = app.clone();
+            let _ = app.run_on_main_thread(move || dump_window(&a, &path));
+            std::thread::sleep(Duration::from_secs(2));
+        }
         if quit {
             let _ = p.stop();
             app.exit(0);
         }
+    });
+}
+
+/// Dev-only (spike): dump (a) the GLArea contents and (b) the webview snapshot as raw BGRA files
+/// (`<path>.glarea.argb`, `<path>.webview.argb`, with `.txt` sizes) to check compositing inputs.
+#[cfg(target_os = "linux")]
+fn dump_window(app: &AppHandle, path: &str) {
+    use gtk::prelude::*;
+    fn find_glarea(w: &gtk::Widget) -> Option<gtk::Widget> {
+        if w.type_().name() == "GtkGLArea" {
+            return Some(w.clone());
+        }
+        let c = w.clone().downcast::<gtk::Container>().ok()?;
+        c.children().iter().find_map(find_glarea)
+    }
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    if let Ok(gw) = win.gtk_window()
+        && let Some(gl) = find_glarea(gw.upcast_ref())
+    {
+        let (w, h) = (gl.allocated_width(), gl.allocated_height());
+        if let Ok(surface) = gtk::cairo::ImageSurface::create(gtk::cairo::Format::ARgb32, w, h)
+            && let Ok(cr) = gtk::cairo::Context::new(&surface)
+        {
+            gl.draw(&cr);
+            drop(cr);
+            surface.flush();
+            if let Ok(d) = surface.take_data() {
+                let _ = std::fs::write(format!("{path}.glarea.argb"), &*d);
+                let _ = std::fs::write(format!("{path}.glarea.txt"), format!("{w}x{h}"));
+            }
+        }
+    }
+    let path = path.to_owned();
+    let _ = win.with_webview(move |wv| {
+        use webkit2gtk::WebViewExt;
+        let view = wv.inner();
+        view.snapshot(
+            webkit2gtk::SnapshotRegion::Visible,
+            webkit2gtk::SnapshotOptions::NONE,
+            None::<&gtk::gio::Cancellable>,
+            move |res| {
+                if let Ok(surf) = res
+                    && let Ok(mut img) = gtk::cairo::ImageSurface::try_from(surf)
+                {
+                    let (w, h) = (img.width(), img.height());
+                    if let Ok(d) = img.data() {
+                        let _ = std::fs::write(format!("{path}.webview.argb"), &*d);
+                        let _ = std::fs::write(format!("{path}.webview.txt"), format!("{w}x{h}"));
+                    }
+                }
+            },
+        );
     });
 }
 

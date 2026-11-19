@@ -56,14 +56,21 @@
   function report() {
     if (pending) return;
     pending = true;
-    requestAnimationFrame(() => {
+    // One rAF debounce (PLAN §2.2); the timeout is a spike-only fallback for when the compositor
+    // withholds frame callbacks (hidden/occluded window), where rAF never fires.
+    let done = false;
+    const run = () => {
+      if (done) return;
+      done = true;
       pending = false;
       const r = $('video').getBoundingClientRect();
       const s = window.devicePixelRatio || 1;
       const b = { x: Math.round(r.left * s), y: Math.round(r.top * s), w: Math.round(r.width * s), h: Math.round(r.height * s), scale: s, visible: true };
       $('rect').textContent = `rect: ${b.x},${b.y} ${b.w}x${b.h} @${s}x`;
       invoke('set_video_bounds', b).catch((e) => log('bounds: ' + JSON.stringify(e)));
-    });
+    };
+    requestAnimationFrame(run);
+    setTimeout(run, 120);
   }
   new ResizeObserver(report).observe($('video'));
   window.addEventListener('resize', report);
@@ -87,7 +94,7 @@
       `hwdec   ${snap.hwdecCurrent ?? '-'}\n` +
       `pos     ${snap.positionSecs ? snap.positionSecs.toFixed(1) : '-'}s  dropped ${snap.droppedFrames ?? '-'}\n` +
       `1st frm ${snap.firstFrameMs ?? '-'} ms\n` +
-      `webview ${webFps.toFixed(0)} fps (rAF)\n` +
+      `webview ${webFps.toFixed(0)} fps (rAF)  vis=${document.visibilityState} focus=${document.hasFocus()}\n` +
       (snap.error ? `error   ${snap.error}\n` : '');
   }, 250);
 

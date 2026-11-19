@@ -395,7 +395,7 @@ impl RenderContext {
             fbo,
             w,
             h,
-            internal_format: 0,
+            internal_format: 0x8058, // GL_RGBA8: GtkGLArea FBOs are RGBA8
         };
         let mut flip: c_int = c_int::from(flip_y);
         let mut params = [
