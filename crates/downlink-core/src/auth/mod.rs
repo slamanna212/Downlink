@@ -143,6 +143,34 @@ impl SecretStore for MemorySecretStore {
     }
 }
 
+/// Supplies the per-request auth header for a source: the API key from the keychain, or a JWT
+/// access token from a live client (JWT sources). Lets play-plan resolution work for both.
+#[async_trait::async_trait]
+pub trait AuthProvider: Send + Sync {
+    async fn auth_header(&self, source: &crate::store::SourceRow)
+    -> Result<(String, SecretString)>;
+}
+
+/// API-key auth read straight from the keychain (`source.secret_ref`).
+pub struct ApiKeyAuth<'a>(pub &'a dyn SecretStore);
+
+#[async_trait::async_trait]
+impl AuthProvider for ApiKeyAuth<'_> {
+    async fn auth_header(
+        &self,
+        source: &crate::store::SourceRow,
+    ) -> Result<(String, SecretString)> {
+        let secret = match source.secret_ref.as_deref() {
+            Some(r) => self.0.get(r)?,
+            None => None,
+        };
+        let secret = secret.ok_or_else(|| {
+            AppError::auth("The saved credentials for this source were not found. Sign in again.")
+        })?;
+        Ok(("X-API-Key".to_owned(), secret))
+    }
+}
+
 /// Store a secret in the keychain and return the reference to persist in SQLite.
 pub fn put_source_secret(
     secrets: &dyn SecretStore,

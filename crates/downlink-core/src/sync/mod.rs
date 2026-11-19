@@ -4,7 +4,7 @@
 use crate::catalog::{self, DropReason};
 use crate::error::Result;
 use crate::normalise;
-use crate::source::{AccountInfo, Source, UserLevel, all_channels};
+use crate::source::{AccountInfo, Source, StreamMode, UserLevel, all_channels};
 use crate::store::{SourceUpdate, Store};
 
 pub fn now_utc() -> i64 {
@@ -102,8 +102,11 @@ async fn run(
             None => {}
         }
         let redirect = match &profiles {
-            Some(p) => p.is_redirect(c.stream_profile_id),
-            None => previous.get(&c.ext_id).copied().unwrap_or(false),
+            Some(p) => p.mode(c.stream_profile_id),
+            None => previous
+                .get(&c.ext_id)
+                .copied()
+                .unwrap_or(StreamMode::Unknown),
         };
         rows.push(normalise::channel_row(c, redirect));
     }

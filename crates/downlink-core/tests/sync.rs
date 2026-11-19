@@ -2,9 +2,10 @@
 //! End-to-end sync against a mock Dispatcharr: connect -> channels -> guide -> play plan, plus the
 //! network-discipline test (PLAN §11.4.4): a guide-browsing session makes zero stream requests.
 
-use downlink_core::auth::{MemorySecretStore, SecretStore, SecretString};
+use downlink_core::auth::{ApiKeyAuth, MemorySecretStore, SecretStore, SecretString};
 use downlink_core::catalog::{self, ChannelFilter};
 use downlink_core::source::SourceId;
+use downlink_core::source::StreamMode;
 use downlink_core::source::dispatcharr::{ClientOptions, Credentials, DispatcharrClient};
 use downlink_core::store::{NewSource, Store};
 use downlink_core::{epg, sync};
@@ -138,15 +139,16 @@ async fn full_sync_filters_normalises_and_flags_redirect() {
     );
 
     // Effective stream profile: ch2 -> Redirect(4); ch1 null -> default Proxy(3).
-    assert!(
+    assert_eq!(
         store
             .channel_by_ext(sid, "2")
             .await
             .unwrap()
             .unwrap()
-            .stream_redirect
+            .stream_redirect,
+        StreamMode::Redirect
     );
-    assert!(!one.stream_redirect);
+    assert_eq!(one.stream_redirect, StreamMode::Proxy);
 
     // Catalog default view hides adult + radio.
     let v = catalog::list_channels(&store, &ChannelFilter::default(), 50, 0)
@@ -178,7 +180,7 @@ async fn full_sync_filters_normalises_and_flags_redirect() {
     assert_eq!(nn.next.unwrap().title.as_deref(), Some("Midday News"));
 
     // Play plan resolves from SQLite alone.
-    let plan = catalog::resolve_play_plan(&store, &secrets, one.id)
+    let plan = catalog::resolve_play_plan(&store, &ApiKeyAuth(&secrets), one.id)
         .await
         .unwrap();
     assert!(
@@ -234,13 +236,14 @@ async fn profile_failure_keeps_stored_redirect_flags() {
     sync::sync_channels(&client, &store, sid, None)
         .await
         .unwrap();
-    assert!(
+    assert_eq!(
         store
             .channel_by_ext(sid, "2")
             .await
             .unwrap()
             .unwrap()
-            .stream_redirect
+            .stream_redirect,
+        StreamMode::Redirect
     );
 }
 
@@ -301,7 +304,7 @@ async fn network_discipline_zero_stream_endpoint_requests() {
         .await
         .unwrap()
     {
-        let plan = catalog::resolve_play_plan(&store, &secrets, c.id)
+        let plan = catalog::resolve_play_plan(&store, &ApiKeyAuth(&secrets), c.id)
             .await
             .unwrap();
         let _ = plan.redacted();
@@ -316,6 +319,34 @@ async fn network_discipline_zero_stream_endpoint_requests() {
                 && !p.starts_with("/proxy/vod/")
                 && !p.starts_with("/proxy/catchup/"),
             "stream endpoint requested: {p}"
+        );
+    }
+}
+
+/// Unreadable profiles + a brand-new channel => Unknown (never Proxy); existing flags are kept.
+#[tokio::test]
+async fn profile_failure_marks_new_channels_unknown() {
+    let server = MockServer::start().await;
+    mount_all(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/api/core/streamprofiles/"))
+        .respond_with(ResponseTemplate::new(403))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let (store, sid, client, _) = setup(&server).await;
+    sync::sync_channels(&client, &store, sid, None)
+        .await
+        .unwrap();
+    for ext in ["1", "2", "6"] {
+        assert_eq!(
+            store
+                .channel_by_ext(sid, ext)
+                .await
+                .unwrap()
+                .unwrap()
+                .stream_redirect,
+            StreamMode::Unknown
         );
     }
 }

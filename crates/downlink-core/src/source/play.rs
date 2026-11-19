@@ -49,15 +49,43 @@ pub struct PlayPlan {
     /// Redirect-profile channel: resolve with [`resolve_redirect`] at play time, then give mpv the
     /// `Location` and no headers (see [`PlayPlan::with_location`]).
     pub needs_redirect_resolve: bool,
+    /// The channel's stream profile is unknown (played like Redirect, fail safe).
+    pub unknown_profile: bool,
 }
 
 impl PlayPlan {
+    /// Play-time resolution for Redirect/Unknown channels (CLAUDE.md rule 5):
+    /// - 3xx: mpv gets the `Location` with no headers.
+    /// - 2xx: the channel was really a proxy. The response is dropped at once and the original
+    ///   URL plus header go to mpv. One extra client registration happened; logged at info when
+    ///   the profile was unknown.
+    pub async fn resolve_at_play(self, insecure_tls: bool) -> Result<PlayPlan> {
+        if !self.needs_redirect_resolve {
+            return Ok(self);
+        }
+        match probe_redirect(&self.url, &self.headers, insecure_tls).await? {
+            RedirectOutcome::Redirect(loc) => Ok(self.with_location(&loc)),
+            RedirectOutcome::Direct => {
+                if self.unknown_profile {
+                    tracing::info!(
+                        "stream profile was unknown; one extra client registration was made to find out"
+                    );
+                }
+                let mut p = self;
+                p.needs_redirect_resolve = false;
+                p.unknown_profile = false;
+                Ok(p)
+            }
+        }
+    }
+
     /// Replace the URL with a resolved redirect `Location`: no auth headers go to the provider.
     pub fn with_location(mut self, loc: &Location) -> Self {
         self.redact.add(loc.expose());
         self.url = loc.expose().to_owned();
         self.headers.clear();
         self.needs_redirect_resolve = false;
+        self.unknown_profile = false;
         self
     }
 
@@ -124,14 +152,21 @@ fn retry_after(h: &HeaderMap) -> Option<u64> {
     h.get(RETRY_AFTER)?.to_str().ok()?.trim().parse().ok()
 }
 
-/// Issue the play request for a redirect-profile channel with redirects **disabled** and return
-/// the `Location` (PLAN §3.5 step 2). A redirect profile answers 302 with no body, so no provider
-/// connection is opened. Use only at an actual play; never as a probe.
-pub async fn resolve_redirect(
+/// What a play-time probe of a Redirect/Unknown channel found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RedirectOutcome {
+    Redirect(Location),
+    /// 2xx: the endpoint serves the stream itself (proxy). The response was dropped unread.
+    Direct,
+}
+
+/// Issue the play request with redirects **disabled** (PLAN §3.5 step 2). Use only at an actual
+/// play; never as a probe.
+pub async fn probe_redirect(
     url: &str,
     headers: &[(String, SecretString)],
     insecure_tls: bool,
-) -> Result<Location> {
+) -> Result<RedirectOutcome> {
     let client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .danger_accept_invalid_certs(insecure_tls)
@@ -157,15 +192,13 @@ pub async fn resolve_redirect(
         // Resolve relative redirects against the request URL.
         let base = reqwest::Url::parse(url)?;
         let abs = base.join(loc)?;
-        return Ok(Location(abs.to_string()));
+        return Ok(RedirectOutcome::Redirect(Location(abs.to_string())));
     }
     let ra = retry_after(resp.headers());
-    // Dropping `resp` here closes the connection without reading a body.
+    // Dropping `resp` closes the connection without reading a body.
     drop(resp);
     if status.is_success() {
-        return Err(AppError::stream(
-            "This channel did not redirect as expected. Its stream profile may have changed; refresh the channel list.",
-        ));
+        return Ok(RedirectOutcome::Direct);
     }
     match status.as_u16() {
         401 | 403 => Err(AppError::from_status(status.as_u16(), ra, "this channel")),
@@ -180,5 +213,19 @@ pub async fn resolve_redirect(
             AppError::stream(format!("The server could not start this channel ({s})."))
                 .with_retry_after(ra),
         ),
+    }
+}
+
+/// Strict variant: a 2xx is an error (the channel did not redirect).
+pub async fn resolve_redirect(
+    url: &str,
+    headers: &[(String, SecretString)],
+    insecure_tls: bool,
+) -> Result<Location> {
+    match probe_redirect(url, headers, insecure_tls).await? {
+        RedirectOutcome::Redirect(l) => Ok(l),
+        RedirectOutcome::Direct => Err(AppError::stream(
+            "This channel did not redirect as expected. Its stream profile may have changed; refresh the channel list.",
+        )),
     }
 }

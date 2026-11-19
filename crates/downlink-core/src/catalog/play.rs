@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use crate::auth::{SecretStore, SecretString};
+use crate::auth::{AuthProvider, SecretString};
 use crate::error::{AppError, Result};
 use crate::redact::RedactionSet;
 use crate::source::dispatcharr::{build_live_plan, normalise_base_url};
@@ -12,7 +12,7 @@ use crate::store::Store;
 
 pub async fn resolve_play_plan(
     store: &Store,
-    secrets: &dyn SecretStore,
+    auth: &dyn AuthProvider,
     channel_id: i64,
 ) -> Result<PlayPlan> {
     let ch = store
@@ -30,23 +30,15 @@ pub async fn resolve_play_plan(
                 .as_deref()
                 .ok_or_else(|| AppError::local("This source has no server address."))?;
             let base = normalise_base_url(base)?;
-            let secret = match src.secret_ref.as_deref() {
-                Some(r) => secrets.get(r)?,
-                None => None,
-            };
-            let secret = secret.ok_or_else(|| {
-                AppError::auth(
-                    "The saved credentials for this source were not found. Sign in again.",
-                )
-            })?;
+            let (hname, secret) = auth.auth_header(&src).await?;
             let key = ChannelKey {
                 ext_id: ch.ext_id.clone(),
                 uuid: ch.uuid.clone(),
-                stream_redirect: ch.stream_redirect,
+                stream_mode: ch.stream_redirect,
             };
             let mut set = RedactionSet::new();
             set.add(secret.expose());
-            build_live_plan(&base, &key, Some(("X-API-Key".to_owned(), secret)), set)
+            build_live_plan(&base, &key, Some((hname, secret)), set)
         }
         Some(SourceKind::M3u) => {
             let url = ch
@@ -75,6 +67,7 @@ pub async fn resolve_play_plan(
                 session: None,
                 redact: set,
                 needs_redirect_resolve: false,
+                unknown_profile: false,
             })
         }
         _ => Err(AppError::stream(

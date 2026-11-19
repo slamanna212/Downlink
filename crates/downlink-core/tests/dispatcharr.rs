@@ -4,8 +4,8 @@
 use downlink_core::auth::SecretString;
 use downlink_core::source::dispatcharr::{ClientOptions, Credentials, DispatcharrClient};
 use downlink_core::source::{
-    Caps, ChannelKey, Page, Programme, SessionId, Source, SourceId, TimeWindow, all_channels,
-    resolve_redirect,
+    Caps, ChannelKey, Page, Programme, SessionId, Source, SourceId, StreamMode, TimeWindow,
+    all_channels, resolve_redirect,
 };
 use downlink_core::{AppError, ErrorCode};
 use wiremock::matchers::{body_json, header, method, path, query_param};
@@ -224,9 +224,15 @@ async fn endpoint_stream_profiles_and_redirect_detection() {
     let info = client(&server).profile_info().await.unwrap();
     assert_eq!(info.default_id, Some(3));
     assert!(info.redirect_ids.contains(&4) && !info.redirect_ids.contains(&3));
-    assert!(info.is_redirect(Some(4)));
-    assert!(
-        !info.is_redirect(None),
+    assert_eq!(info.mode(Some(4)), StreamMode::Redirect);
+    assert_eq!(
+        info.mode(Some(999)),
+        StreamMode::Unknown,
+        "unlisted profile is never assumed Proxy"
+    );
+    assert_eq!(
+        info.mode(None),
+        StreamMode::Proxy,
         "null profile falls back to default (Proxy)"
     );
 }
@@ -334,7 +340,7 @@ async fn endpoint_catchup_create_position_delete() {
     let key = ChannelKey {
         ext_id: "1".into(),
         uuid: Some(UUID1.into()),
-        stream_redirect: false,
+        stream_mode: StreamMode::Proxy,
     };
     let plan = c.catchup(key, &programme()).await.unwrap();
     assert_eq!(plan.profile, downlink_core::source::PlayProfile::Seekable);
@@ -405,7 +411,7 @@ async fn catchup_4xx_becomes_a_plain_stream_sentence() {
     let key = ChannelKey {
         ext_id: "1".into(),
         uuid: Some(UUID1.into()),
-        stream_redirect: false,
+        stream_mode: StreamMode::Proxy,
     };
     let e = client(&server)
         .catchup(key, &programme())
@@ -555,7 +561,7 @@ async fn building_plans_makes_no_requests_at_all() {
     let key = ChannelKey {
         ext_id: "1".into(),
         uuid: Some(UUID1.into()),
-        stream_redirect: false,
+        stream_mode: StreamMode::Proxy,
     };
     let plan = c.live_plan(&key).await.unwrap();
     assert_eq!(
@@ -575,7 +581,7 @@ async fn proxy_channel_play_goes_straight_to_the_player_with_the_header() {
     let key = ChannelKey {
         ext_id: "1".into(),
         uuid: Some(UUID1.into()),
-        stream_redirect: false,
+        stream_mode: StreamMode::Proxy,
     };
     let plan = client(&server).play(key).await.unwrap();
     assert!(plan.url.contains("/proxy/ts/stream/"));
@@ -602,7 +608,7 @@ async fn redirect_channel_resolves_location_without_following_and_drops_headers(
     let key = ChannelKey {
         ext_id: "2".into(),
         uuid: Some(UUID2.into()),
-        stream_redirect: true,
+        stream_mode: StreamMode::Redirect,
     };
     let plan = client(&server).play(key).await.unwrap();
     assert_eq!(
@@ -675,4 +681,59 @@ async fn resolve_redirect_function_variants() {
         resolve_redirect(&url, &h, false).await.unwrap_err().code,
         ErrorCode::Auth
     );
+}
+
+#[tokio::test]
+async fn unknown_profile_302_hands_location_without_headers() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/proxy/ts/stream/{UUID2}")))
+        .respond_with(
+            ResponseTemplate::new(302).insert_header("Location", "http://provider.test/x/1.ts"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let key = ChannelKey {
+        ext_id: "2".into(),
+        uuid: Some(UUID2.into()),
+        stream_mode: StreamMode::Unknown,
+    };
+    let plan = client(&server).play(key).await.unwrap();
+    assert_eq!(plan.url, "http://provider.test/x/1.ts");
+    assert!(plan.headers.is_empty() && !plan.needs_redirect_resolve);
+}
+
+#[tokio::test]
+async fn unknown_profile_200_falls_back_to_original_url_with_header() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path(format!("/proxy/ts/stream/{UUID2}")))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0u8; 16]))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let key = ChannelKey {
+        ext_id: "2".into(),
+        uuid: Some(UUID2.into()),
+        stream_mode: StreamMode::Unknown,
+    };
+    let plan = client(&server).play(key).await.unwrap();
+    assert_eq!(
+        plan.url,
+        format!("{}/proxy/ts/stream/{UUID2}", server.uri())
+    );
+    assert_eq!(
+        plan.headers[0].1.expose(),
+        KEY,
+        "header kept: it is our own server"
+    );
+    assert!(!plan.needs_redirect_resolve && !plan.unknown_profile);
+}
+
+#[test]
+fn unknown_is_never_defaulted_to_proxy() {
+    assert_eq!(StreamMode::default(), StreamMode::Unknown);
+    let info = downlink_core::source::ProfileInfo::default();
+    assert_eq!(info.mode(None), StreamMode::Unknown);
 }

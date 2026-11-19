@@ -13,7 +13,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{AppError, Result};
 
 pub use play::{
-    Location, PlayPlan, PlayProfile, RedactedPlan, SessionId, Surface, resolve_redirect,
+    Location, PlayPlan, PlayProfile, RedactedPlan, RedirectOutcome, SessionId, Surface,
+    probe_redirect, resolve_redirect,
 };
 
 /// Local row id of a configured source (`source.id`).
@@ -213,22 +214,39 @@ pub struct ChannelKey {
     pub ext_id: String,
     pub uuid: Option<String>,
     /// Effective stream profile is Redirect (PLAN §3.5).
-    pub stream_redirect: bool,
+    pub stream_mode: StreamMode,
+}
+
+/// How a channel's stream endpoint answers (PLAN §3.5). Tri-state so that "we do not know" can
+/// never be mistaken for "proxy": `Unknown` is played like `Redirect` (fail safe, never leak the
+/// key to a provider).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, sqlx::Type)]
+#[repr(i64)]
+pub enum StreamMode {
+    Proxy = 0,
+    Redirect = 1,
+    #[default]
+    Unknown = 2,
 }
 
 /// Stream profiles relevant to redirect detection.
 #[derive(Debug, Clone, Default)]
 pub struct ProfileInfo {
     pub redirect_ids: HashSet<i64>,
+    /// Every profile id the server listed (redirect or not).
+    pub known_ids: HashSet<i64>,
     pub default_id: Option<i64>,
 }
 
 impl ProfileInfo {
-    /// Effective profile = the channel's own, else the server default.
-    pub fn is_redirect(&self, channel_profile: Option<i64>) -> bool {
-        channel_profile
-            .or(self.default_id)
-            .is_some_and(|id| self.redirect_ids.contains(&id))
+    /// Effective profile = the channel's own, else the server default. A profile we cannot find
+    /// in the server's list is `Unknown`.
+    pub fn mode(&self, channel_profile: Option<i64>) -> StreamMode {
+        match channel_profile.or(self.default_id) {
+            Some(id) if self.redirect_ids.contains(&id) => StreamMode::Redirect,
+            Some(id) if self.known_ids.contains(&id) => StreamMode::Proxy,
+            _ => StreamMode::Unknown,
+        }
     }
 }
 

@@ -169,7 +169,12 @@ async fn run(cli: Cli) -> Result<(), AppError> {
         }
         Cmd::PlayPlan { channel } => {
             let c = find(&ctx, channel).await?;
-            let plan = catalog::resolve_play_plan(&ctx.store, &ctx.secrets, c.id).await?;
+            let plan = catalog::resolve_play_plan(
+                &ctx.store,
+                &downlink_core::auth::ApiKeyAuth(&ctx.secrets),
+                c.id,
+            )
+            .await?;
             println!("{}", serde_json::to_string_pretty(&plan.redacted())?);
         }
     }

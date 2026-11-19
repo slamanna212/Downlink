@@ -23,8 +23,8 @@ use tokio::sync::Semaphore;
 use self::dto::*;
 use super::{
     AccountInfo, Caps, ChannelKey, ChannelPage, Page, PlayPlan, PlayProfile, ProfileInfo,
-    Programme, SessionId, Source, SourceChannel, SourceGroup, SourceId, SourceKind, Surface,
-    TimeWindow, resolve_redirect,
+    Programme, SessionId, Source, SourceChannel, SourceGroup, SourceId, SourceKind, StreamMode,
+    Surface, TimeWindow,
 };
 use crate::auth::SecretString;
 use crate::error::{AppError, Result};
@@ -674,8 +674,10 @@ impl DispatcharrClient {
             .map(|p| p.id)
             .collect();
         let default_id = self.settings().await.default_stream_profile;
+        let known_ids: HashSet<i64> = profiles.iter().map(|p| p.id).collect();
         Ok(ProfileInfo {
             redirect_ids,
+            known_ids,
             default_id,
         })
     }
@@ -961,7 +963,8 @@ pub fn build_live_plan(
         profile: PlayProfile::Live,
         session: None,
         redact,
-        needs_redirect_resolve: ch.stream_redirect,
+        needs_redirect_resolve: ch.stream_mode != StreamMode::Proxy,
+        unknown_profile: ch.stream_mode == StreamMode::Unknown,
     })
 }
 
@@ -993,12 +996,9 @@ impl Source for DispatcharrClient {
 
     async fn play(&self, ch: ChannelKey) -> Result<PlayPlan> {
         let plan = self.live_plan(&ch).await?;
-        if !plan.needs_redirect_resolve {
-            return Ok(plan);
-        }
-        // Redirect profile: resolve in Rust with redirects disabled; mpv gets the Location, no key.
-        let loc = resolve_redirect(&plan.url, &plan.headers, self.insecure_tls).await?;
-        Ok(plan.with_location(&loc))
+        // Redirect and Unknown profiles: resolve in Rust with redirects disabled; mpv gets the
+        // Location and no key. A 2xx (profile was really Proxy) hands back the original plan.
+        plan.resolve_at_play(self.insecure_tls).await
     }
 
     async fn catchup(&self, ch: ChannelKey, p: &Programme) -> Result<PlayPlan> {
@@ -1020,6 +1020,7 @@ impl Source for DispatcharrClient {
             session: Some(s.id),
             redact,
             needs_redirect_resolve: false,
+            unknown_profile: false,
         })
     }
 
@@ -1046,6 +1047,7 @@ impl Source for DispatcharrClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::StreamMode;
 
     #[test]
     fn versions() {
@@ -1079,7 +1081,7 @@ mod tests {
         let key = ChannelKey {
             ext_id: "1".into(),
             uuid: Some("u-1".into()),
-            stream_redirect: true,
+            stream_mode: StreamMode::Redirect,
         };
         let plan = build_live_plan(
             &base,
@@ -1100,7 +1102,7 @@ mod tests {
         let key = ChannelKey {
             ext_id: "1".into(),
             uuid: None,
-            stream_redirect: false,
+            stream_mode: StreamMode::Proxy,
         };
         assert!(build_live_plan(&base, &key, None, RedactionSet::new()).is_err());
     }

@@ -4,6 +4,7 @@ use sqlx::FromRow;
 
 use super::Store;
 use crate::error::Result;
+use crate::source::StreamMode;
 
 /// A channel as written by sync. `group_ext_id` is resolved to a row id by the store.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -21,7 +22,7 @@ pub struct ChannelUpsert {
     pub is_drm: bool,
     pub catchup_days: i64,
     pub catchup_template: Option<String>,
-    pub stream_redirect: bool,
+    pub stream_redirect: StreamMode,
     pub play_url: Option<String>,
     pub play_headers: Option<String>,
     pub epg_match: Option<String>,
@@ -47,7 +48,7 @@ pub struct ChannelRow {
     pub is_drm: bool,
     pub catchup_days: i64,
     pub catchup_template: Option<String>,
-    pub stream_redirect: bool,
+    pub stream_redirect: StreamMode,
     pub play_url: Option<String>,
     pub play_headers: Option<String>,
     pub epg_match: Option<String>,
@@ -254,12 +255,13 @@ impl Store {
 impl Store {
     /// `ext_id -> stream_redirect` as currently stored (used to keep the last known value when
     /// profile metadata cannot be fetched).
-    pub async fn redirect_flags(&self, source_id: i64) -> Result<HashMap<String, bool>> {
-        let rows: Vec<(String, bool)> =
-            sqlx::query_as("SELECT ext_id, stream_redirect FROM channel WHERE source_id = ?")
-                .bind(source_id)
-                .fetch_all(self.pool())
-                .await?;
+    pub async fn redirect_flags(&self, source_id: i64) -> Result<HashMap<String, StreamMode>> {
+        let rows: Vec<(String, StreamMode)> = sqlx::query_as::<_, (String, StreamMode)>(
+            "SELECT ext_id, stream_redirect FROM channel WHERE source_id = ?",
+        )
+        .bind(source_id)
+        .fetch_all(self.pool())
+        .await?;
         Ok(rows.into_iter().collect())
     }
 }

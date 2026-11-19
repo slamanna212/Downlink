@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::auth::{MemorySecretStore, SecretStore, SecretString};
+use crate::auth::{ApiKeyAuth, MemorySecretStore, SecretStore, SecretString};
+use crate::source::StreamMode;
 use crate::store::{ChannelUpsert, NewSource};
 
 async fn seeded(kind: &str) -> (Store, i64, HashMap<String, i64>) {
@@ -41,6 +42,7 @@ fn ch(ext: &str, name: &str, number: f64, group: &str) -> ChannelUpsert {
         group_ext_id: Some(group.into()),
         tvg_id: Some(format!("{ext}.test")),
         sort_key: Some(name.to_lowercase()),
+        stream_redirect: StreamMode::Proxy,
         ..Default::default()
     }
 }
@@ -54,7 +56,7 @@ async fn fill() -> (Store, i64) {
     let mut drm = ch("5", "Drm Channel", 5.0, "2");
     drm.is_drm = true;
     let mut redirect = ch("2", "Channel Two", 2.5, "1");
-    redirect.stream_redirect = true;
+    redirect.stream_redirect = StreamMode::Redirect;
     store
         .sync_channels(
             sid,
@@ -243,13 +245,17 @@ async fn play_plan_from_sqlite_proxy_and_redirect() {
         .unwrap();
 
     let one = store.channel_by_ext(sid, "1").await.unwrap().unwrap();
-    let plan = resolve_play_plan(&store, &secrets, one.id).await.unwrap();
+    let plan = resolve_play_plan(&store, &ApiKeyAuth(&secrets), one.id)
+        .await
+        .unwrap();
     assert_eq!(plan.url, "https://dispatcharr.test/proxy/ts/stream/uuid-1");
     assert_eq!(plan.headers[0].0, "X-API-Key");
     assert!(!plan.needs_redirect_resolve);
 
     let two = store.channel_by_ext(sid, "2").await.unwrap().unwrap();
-    let plan = resolve_play_plan(&store, &secrets, two.id).await.unwrap();
+    let plan = resolve_play_plan(&store, &ApiKeyAuth(&secrets), two.id)
+        .await
+        .unwrap();
     assert!(plan.needs_redirect_resolve);
     let shown = serde_json::to_string(&plan.redacted()).unwrap();
     assert!(!shown.contains("sk_test_secret_key"), "{shown}");
@@ -261,18 +267,18 @@ async fn play_plan_errors() {
     let (store, sid) = fill().await;
     let secrets = MemorySecretStore::new();
     let drm = store.channel_by_ext(sid, "5").await.unwrap().unwrap();
-    let e = resolve_play_plan(&store, &secrets, drm.id)
+    let e = resolve_play_plan(&store, &ApiKeyAuth(&secrets), drm.id)
         .await
         .unwrap_err();
     assert_eq!(e.code, crate::ErrorCode::Media);
     assert!(e.message.contains("DRM"));
     let one = store.channel_by_ext(sid, "1").await.unwrap().unwrap();
-    let e = resolve_play_plan(&store, &secrets, one.id)
+    let e = resolve_play_plan(&store, &ApiKeyAuth(&secrets), one.id)
         .await
         .unwrap_err();
     assert_eq!(e.code, crate::ErrorCode::Auth, "missing keychain entry");
     assert_eq!(
-        resolve_play_plan(&store, &secrets, 9999)
+        resolve_play_plan(&store, &ApiKeyAuth(&secrets), 9999)
             .await
             .unwrap_err()
             .code,
@@ -288,7 +294,7 @@ async fn m3u_play_plan_uses_stored_url_and_headers() {
     c.play_headers = Some(r#"{"Referer":"http://ref.test/","X-Token":"hdrsecret1"}"#.into());
     store.sync_channels(sid, &[c], &g).await.unwrap();
     let id = store.channel_by_ext(sid, "x").await.unwrap().unwrap().id;
-    let plan = resolve_play_plan(&store, &MemorySecretStore::new(), id)
+    let plan = resolve_play_plan(&store, &ApiKeyAuth(&MemorySecretStore::new()), id)
         .await
         .unwrap();
     assert_eq!(plan.headers.len(), 2);

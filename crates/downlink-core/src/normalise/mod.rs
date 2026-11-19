@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use sha2::{Digest, Sha256};
 
-use crate::source::SourceChannel;
+use crate::source::{SourceChannel, StreamMode};
 use crate::store::ChannelUpsert;
 
 static QUALITY_TAIL: LazyLock<Option<Regex>> = LazyLock::new(|| {
@@ -72,7 +72,7 @@ pub fn sort_key(name: &str) -> String {
 }
 
 /// Build the row written by sync. `stream_redirect` is the channel's *effective* profile.
-pub fn channel_row(c: &SourceChannel, stream_redirect: bool) -> ChannelUpsert {
+pub fn channel_row(c: &SourceChannel, stream_redirect: StreamMode) -> ChannelUpsert {
     let (clean, quality) = split_quality(&c.name);
     let tvg = c
         .tvg_id
@@ -168,13 +168,13 @@ mod tests {
             catchup_days: 7,
             ..Default::default()
         };
-        let r = channel_row(&c, true);
+        let r = channel_row(&c, StreamMode::Redirect);
         assert_eq!(r.name, "Channel One");
         assert_eq!(r.quality.as_deref(), Some("HD"));
         assert_eq!(r.tvg_id, None);
         assert_eq!(r.epg_match.as_deref(), Some("none"));
         assert_eq!(r.catchup_days, 7);
-        assert!(r.stream_redirect);
+        assert_eq!(r.stream_redirect, StreamMode::Redirect);
         assert_eq!(r.sort_key.as_deref(), Some("channel one"));
     }
 }
