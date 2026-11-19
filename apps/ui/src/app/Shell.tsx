@@ -64,7 +64,7 @@ export function Shell() {
   useHotkeys([
     ['G', () => void navigate('/guide')],
     ['L', () => void navigate('/channels')],
-    ['/', () => void navigate('/search')],
+    ['/', () => pathname !== '/channels' && void navigate('/search')],
     ['mod+K', () => void navigate('/search')],
   ]);
 

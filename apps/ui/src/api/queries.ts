@@ -57,3 +57,6 @@ export const useSettings = () =>
 
 export const useCounts = () =>
   useQuery({ queryKey: ['catalog', 'counts'], queryFn: () => invoke('get_counts', {}) });
+
+export const useHome = () =>
+  useQuery({ queryKey: ['catalog', 'home'], queryFn: () => invoke('get_home', {}), refetchInterval: 60_000 });
