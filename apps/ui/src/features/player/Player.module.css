@@ -270,3 +270,18 @@
   color: var(--dl-text-faint);
   background: linear-gradient(160deg, var(--dl-surface-3), var(--dl-letterbox) 70%);
 }
+
+.resume {
+  position: absolute;
+  left: 50%;
+  bottom: 14rem;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-lg);
+  padding: var(--mantine-spacing-md) var(--mantine-spacing-lg);
+}
+.resumeTitle {
+  font-size: var(--mantine-font-size-lg);
+  font-weight: 600;
+}

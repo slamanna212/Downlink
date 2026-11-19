@@ -6,12 +6,15 @@ import { Progress, Slider } from '@mantine/core';
 import {
   IconAlertTriangle,
   IconArrowLeft,
+  IconHistory,
   IconInfoCircle,
   IconMaximize,
   IconMinimize,
   IconPlayerPause,
   IconPlayerPlay,
   IconRefresh,
+  IconRewindBackward10,
+  IconRewindForward10,
   IconVolume,
   IconVolumeOff,
   IconX,
@@ -24,16 +27,17 @@ import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { Icon } from '../../components/Icon/Icon';
+import { SeekBar } from '../../components/SeekBar/SeekBar';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { appendDigit, matchChannelNumber, NUMBER_ENTRY_TIMEOUT_MS } from '../../lib/numberEntry';
-import { formatClock, formatClockSeconds, progress } from '../../lib/time';
+import { dayLabel, formatClock, formatClockSeconds, formatDuration, formatRange, progress } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
 import { createBoundsReporter, toPhysicalBounds } from '../../lib/videoBounds';
 import { useNowEpoch } from '../../lib/useNow';
 import { usePlayerStore } from '../../store/player';
 import { useUiStore } from '../../store/ui';
 import { copyDiagnostics } from '../diagnostics/copyDiagnostics';
-import { playChannel } from './actions';
+import { playChannel, restartProgramme } from './actions';
 import classes from './Player.module.css';
 
 /** Reports the element's rect in physical pixels (ResizeObserver + one rAF debounce). */
@@ -193,6 +197,7 @@ export function PlayerPage() {
   const [infoOpen, setInfoOpen] = useState(false);
   const [entry, setEntry] = useState('');
   const [entryMiss, setEntryMiss] = useState(false);
+  const [resumeDismissed, setResumeDismissed] = useState<string | null>(null);
   const entryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idle = useIdle(dl.controlsIdleMs, { events: ['mousemove', 'keydown', 'touchstart', 'click'], initialState: false });
 
@@ -228,6 +233,19 @@ export function PlayerPage() {
     setFullscreen(enabled);
     void invoke('set_fullscreen', { enabled });
   }, [fullscreen, setFullscreen]);
+  const seekBy = useCallback(
+    (delta: number) => {
+      const st = usePlayerStore.getState().player;
+      if (st.mode !== 'catchup' || !st.seekable) return;
+      cmd({ kind: 'seek', seconds: Math.max(0, Math.min((st.position ?? 0) + delta, st.duration ?? 0)) });
+    },
+    [cmd],
+  );
+  const restart = useCallback(() => {
+    const st = usePlayerStore.getState().player;
+    if (st.channelId != null) void restartProgramme(st.channelId);
+  }, []);
+  const goLive = useCallback(() => cmd({ kind: 'goLive' }), [cmd]);
   const goBack = useCallback(() => void navigate('/channels'), [navigate]);
 
   const clearEntry = useCallback(() => {
@@ -275,6 +293,10 @@ export function PlayerPage() {
       } else if (e.key === 'm' || e.key === 'M') toggleMute();
       else if (e.key === 'i' || e.key === 'I') setInfoOpen((v) => !v);
       else if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+      else if (e.key === 'ArrowLeft') seekBy(-10);
+      else if (e.key === 'ArrowRight') seekBy(10);
+      else if (e.key === 's' || e.key === 'S') restart();
+      else if (e.key === 'End') goLive();
       else if (e.key === 'Escape') {
         if (entry) clearEntry();
         else if (infoOpen) setInfoOpen(false);
@@ -284,13 +306,18 @@ export function PlayerPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [entry, infoOpen, fullscreen, commitEntry, clearEntry, togglePause, toggleMute, toggleFullscreen, goBack]);
+  }, [entry, infoOpen, fullscreen, commitEntry, clearEntry, togglePause, toggleMute, toggleFullscreen, goBack, seekBy, restart, goLive]);
 
   useEffect(() => () => { if (entryTimer.current) clearTimeout(entryTimer.current); }, []);
 
   const showStatus = ['Resolving', 'Connecting', 'Buffering'].includes(player.state);
-  const live = player.mode === 'live' || player.mode === null;
+  const catchup = player.mode === 'catchup';
+  const live = !catchup && (player.mode === 'live' || player.mode === null);
   const sourceName = sources.data?.find((s) => s.id === channel?.sourceId)?.name ?? '–';
+  const shownProg = catchup ? player.programme : prog;
+  const position = player.position ?? 0;
+  const duration = player.duration ?? 0;
+  const showResume = catchup && player.resumeAt != null && player.resumeAt > 0 && resumeDismissed !== player.programme?.id;
 
   return (
     <div ref={rootRef} className={classes.root} data-video-rect data-idle={barHidden || undefined}>
@@ -311,7 +338,7 @@ export function PlayerPage() {
         <ErrorOverlay error={player.error} onRetry={() => cmd({ kind: 'retry' })} />
       ) : (
         <div className={classes.layer}>
-          {channel && <ZapPill key={channel.id} channel={channel} title={prog?.title ?? null} until={prog?.endUtc ?? null} />}
+          {channel && <ZapPill key={channel.id} channel={channel} title={shownProg?.title ?? null} until={shownProg?.endUtc ?? null} />}
 
           {entry && (
             <div className={`${classes.entry} ${classes.glass}`} data-info={infoOpen || undefined} role="status" aria-label={t('player.numberEntry')}>
@@ -323,31 +350,67 @@ export function PlayerPage() {
 
           {infoOpen && <InfoPanel player={player} sourceName={sourceName} channel={channel} onClose={() => setInfoOpen(false)} />}
 
+          {showResume && player.resumeAt != null && (
+            <div className={`${classes.resume} ${classes.glass}`} role="dialog" aria-label={t('player.resumeTitle', { time: formatDuration(player.resumeAt) })}>
+              <span className={classes.resumeTitle}>{t('player.resumeTitle', { time: formatDuration(player.resumeAt) })}</span>
+              <div className={classes.errorActions}>
+                <DLButton
+                  variant="filled"
+                  onClick={() => {
+                    cmd({ kind: 'seek', seconds: player.resumeAt ?? 0 });
+                    setResumeDismissed(player.programme?.id ?? null);
+                  }}
+                >
+                  {t('player.resume')}
+                </DLButton>
+                <DLButton variant="default" onClick={() => setResumeDismissed(player.programme?.id ?? null)}>
+                  {t('player.startOver')}
+                </DLButton>
+              </div>
+            </div>
+          )}
+
           <div className={classes.bar} data-hidden={barHidden || undefined}>
             <div className={classes.badges}>
               {live && <StatusBadge kind="live" />}
-              {channel && <span>{channel.number} · {channel.name}</span>}
+              {catchup && <StatusBadge kind="catchup" />}
+              {channel && (
+                <span>
+                  {catchup && shownProg
+                    ? t('player.catchupMeta', { number: channel.number ?? '', channel: channel.name, day: dayLabel(shownProg.startUtc, now), range: formatRange(shownProg.startUtc, shownProg.endUtc) })
+                    : `${channel.number} · ${channel.name}`}
+                </span>
+              )}
               {channel?.quality === '4K' && <StatusBadge kind="4k" />}
               {(channel?.quality === 'HD' || channel?.quality === 'FHD') && <StatusBadge kind="hd" />}
             </div>
             <div className={classes.titleRow}>
-              <h1 className={classes.title}>{prog?.title ?? (channel ? t('player.noGuide') : '')}</h1>
-              {next && <span className={classes.next}>{t('player.next', { time: formatClock(next.startUtc), title: next.title ?? '' })}</span>}
+              <h1 className={classes.title}>{shownProg?.title ?? (channel ? t('player.noGuide') : '')}</h1>
+              {live && next && <span className={classes.next}>{t('player.next', { time: formatClock(next.startUtc), title: next.title ?? '' })}</span>}
             </div>
-            {prog && (
+            {catchup && player.seekable && duration > 0 ? (
               <div className={classes.timeline}>
-                <span>{formatClock(prog.startUtc)}</span>
-                <Progress
-                  value={progress(prog.startUtc, prog.endUtc, now) * 100}
-                  size={4}
-                  radius="xs"
-                  classNames={{ root: classes.progressRoot, section: classes.progressSection }}
-                  aria-label={prog.title ?? ''}
-                />
-                <span>{formatClock(prog.endUtc)}</span>
+                <span>{formatDuration(position)}</span>
+                <SeekBar label={t('player.seek')} position={position} duration={duration} buffered={player.buffered ?? 0} onSeek={(s) => cmd({ kind: 'seek', seconds: s })} />
+                <span>{t('player.remaining', { time: formatDuration(Math.max(0, duration - position)) })}</span>
               </div>
+            ) : (
+              shownProg && (
+                <div className={classes.timeline}>
+                  <span>{formatClock(shownProg.startUtc)}</span>
+                  <Progress
+                    value={progress(shownProg.startUtc, shownProg.endUtc, now) * 100}
+                    size={4}
+                    radius="xs"
+                    classNames={{ root: classes.progressRoot, section: classes.progressSection }}
+                    aria-label={shownProg.title ?? ''}
+                  />
+                  <span>{formatClock(shownProg.endUtc)}</span>
+                </div>
+              )
             )}
             <div className={classes.controls}>
+              {catchup && <DLIconButton label={t('player.back10')} icon={IconRewindBackward10} variant="overlay" size="lg" onClick={() => seekBy(-10)} />}
               <span className={classes.playPause}>
                 <DLIconButton
                   label={paused ? t('player.play') : t('player.pause')}
@@ -358,6 +421,17 @@ export function PlayerPage() {
                   onClick={togglePause}
                 />
               </span>
+              {catchup && <DLIconButton label={t('player.fwd10')} icon={IconRewindForward10} variant="overlay" size="lg" onClick={() => seekBy(10)} />}
+              {(live || catchup) && channel && (
+                <DLButton variant="overlay" size="lg" icon={IconHistory} keyHint="S" onClick={restart}>
+                  {t('player.restart')}
+                </DLButton>
+              )}
+              {catchup && (
+                <DLButton variant="live" size="lg" keyHint="End" onClick={goLive}>
+                  {t('player.goLive')}
+                </DLButton>
+              )}
               <DLIconButton
                 label={player.muted ? t('player.unmute') : t('player.mute')}
                 icon={player.muted ? IconVolumeOff : IconVolume}
