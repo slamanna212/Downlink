@@ -1,9 +1,10 @@
 //! The pre-warmed player: one libmpv instance reused across zaps, an event thread driving the
 //! session state machine, the failover/retry policy and the throttled `player://state` stream.
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -215,6 +216,10 @@ pub struct PlayerSnapshot {
     pub tracks: Vec<Track>,
     /// Set after 3 s of connecting/buffering.
     pub waiting_on: Option<WaitingOn>,
+    /// An automatic same-URL retry is in progress ("Reconnecting…").
+    pub reconnecting: bool,
+    /// Classification of the failure when `state` is `failed`.
+    pub failure: Option<FailureInfo>,
 }
 
 #[derive(Debug, Clone)]
@@ -230,6 +235,101 @@ pub enum PlayerEvent {
 }
 
 pub type EventSink = Arc<dyn Fn(PlayerEvent) + Send + Sync>;
+
+/// Why a session failed, for the UI's plain-language copy (PLAN §4.9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FailureKind {
+    /// The server refused because of a stream/connection limit (HTTP 429, or 503 "no stream").
+    Limit,
+    /// The stream opened but mpv has no decoder for it.
+    Codec,
+    /// The mpv instance died twice in one session.
+    Engine,
+    /// Anything else: provider failure, dead stream.
+    Stream,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FailureInfo {
+    pub kind: FailureKind,
+    pub http_status: Option<u16>,
+    pub codec: Option<String>,
+    /// Short id for bug reports (engine failures).
+    pub crash_id: Option<String>,
+}
+
+/// `HTTP error 429 Too Many Requests` in an mpv log line.
+pub fn parse_http_status(text: &str) -> Option<u16> {
+    let rest = text.split("HTTP error ").nth(1)?;
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok().filter(|c| (100..600).contains(c))
+}
+
+/// Codec name from mpv's decoder-failure lines (`Failed to initialize a decoder for codec 'hevc'`).
+pub fn parse_decoder_codec(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    let decoder_fail = lower.contains("failed to initialize a decoder")
+        || lower.contains("could not open codec")
+        || lower.contains("no decoder")
+        || lower.contains("unsupported codec")
+        || lower.contains("unknown codec")
+        || lower.contains("decoder not found");
+    if !decoder_fail {
+        return None;
+    }
+    let start = text.find('\'')? + 1;
+    let end = text[start..].find('\'')? + start;
+    let name = &text[start..end];
+    (!name.is_empty() && name.len() < 40).then(|| name.to_owned())
+}
+
+/// Pure classification of a failed session.
+pub fn classify_failure(
+    http_status: Option<u16>,
+    decoder_codec: Option<&str>,
+    tracks: &[Track],
+) -> FailureInfo {
+    if matches!(http_status, Some(429 | 503)) {
+        return FailureInfo {
+            kind: FailureKind::Limit,
+            http_status,
+            codec: None,
+            crash_id: None,
+        };
+    }
+    if let Some(c) = decoder_codec {
+        return FailureInfo {
+            kind: FailureKind::Codec,
+            http_status,
+            codec: Some(c.to_owned()),
+            crash_id: None,
+        };
+    }
+    let _ = tracks;
+    FailureInfo {
+        kind: FailureKind::Stream,
+        http_status,
+        codec: None,
+        crash_id: None,
+    }
+}
+
+/// 8 hex chars, unique enough to quote in a bug report.
+pub fn new_crash_id() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    h.write_u32(std::process::id());
+    format!("{:08x}", h.finish() as u32)
+}
+
+pub type EngineReplaced = Box<dyn Fn(Arc<Engine>) + Send + Sync>;
 
 #[derive(Default)]
 struct Stats {
@@ -265,10 +365,18 @@ struct Shared {
     file_loaded: bool,
     last_stats: Option<Instant>,
     audio_fell_back: bool,
+    last_http_status: Option<u16>,
+    decoder_codec: Option<String>,
+    /// Engine deaths in the current session (one restart is allowed).
+    engine_restarts: u32,
+    engine_failure: Option<String>,
 }
 
 struct Inner {
-    engine: Arc<Engine>,
+    engine: RwLock<Arc<Engine>>,
+    recipe: (LoadedMpv, Vec<(String, String)>),
+    replaced: Mutex<Vec<EngineReplaced>>,
+    notes: Mutex<VecDeque<String>>,
     prefs: Mutex<Preferences>,
     shared: Mutex<Shared>,
     cv: Condvar,
@@ -277,6 +385,15 @@ struct Inner {
     sink: EventSink,
     epoch: Instant,
     source: LoadSource,
+}
+
+impl Inner {
+    fn eng(&self) -> Arc<Engine> {
+        match self.engine.read() {
+            Ok(g) => g.clone(),
+            Err(p) => p.into_inner().clone(),
+        }
+    }
 }
 
 pub struct Player {
@@ -357,6 +474,7 @@ impl Player {
             opts.push(("vo".to_owned(), vo));
         }
         let engine = Arc::new(Engine::new(loaded, &opts)?);
+        let recipe = (loaded.clone(), opts.clone());
         if let Err(e) = engine.request_log_messages("warn") {
             tracing::warn!("could not request mpv log messages: {e}");
         }
@@ -364,7 +482,10 @@ impl Player {
             engine.observe(i as u64 + 1, name, *fmt)?;
         }
         let inner = Arc::new(Inner {
-            engine,
+            engine: RwLock::new(engine),
+            recipe,
+            replaced: Mutex::new(Vec::new()),
+            notes: Mutex::new(VecDeque::new()),
             prefs: Mutex::new(prefs),
             shared: Mutex::new(Shared {
                 sm: StateMachine::new(),
@@ -384,6 +505,10 @@ impl Player {
                 file_loaded: false,
                 last_stats: None,
                 audio_fell_back: false,
+                last_http_status: None,
+                decoder_codec: None,
+                engine_restarts: 0,
+                engine_failure: None,
             }),
             cv: Condvar::new(),
             stop: AtomicBool::new(false),
@@ -405,7 +530,24 @@ impl Player {
 
     /// The engine, for attaching a video surface.
     pub fn engine(&self) -> Arc<Engine> {
-        self.inner.engine.clone()
+        self.inner.eng()
+    }
+
+    /// Register a callback run (on the event thread) after the supervisor replaced a dead engine:
+    /// the video surface must be re-bound to the new instance.
+    pub fn on_engine_replaced(&self, cb: impl Fn(Arc<Engine>) + Send + Sync + 'static) {
+        if let Ok(mut v) = self.inner.replaced.lock() {
+            v.push(Box::new(cb));
+        }
+    }
+
+    /// Last 50 notable events (reconnects, HTTP classifications, decoder failures, engine
+    /// restarts) for the debug panel and the diagnostics bundle.
+    pub fn notes(&self) -> Vec<String> {
+        match self.inner.notes.lock() {
+            Ok(n) => n.iter().cloned().collect(),
+            Err(p) => p.into_inner().iter().cloned().collect(),
+        }
     }
 
     pub fn load_source(&self) -> &LoadSource {
@@ -417,7 +559,7 @@ impl Player {
     /// applies from the next `play`.
     pub fn set_preferences(&self, prefs: Preferences) {
         for (k, v) in prefs.live_options() {
-            if let Err(e) = self.inner.engine.set_property(&k, &v) {
+            if let Err(e) = self.inner.eng().set_property(&k, &v) {
                 tracing::warn!("preference `{k}` not applied: {e}");
             }
         }
@@ -436,7 +578,7 @@ impl Player {
     /// Output devices (`audio-device-list`).
     pub fn audio_devices(&self) -> Vec<AudioDevice> {
         self.inner
-            .engine
+            .eng()
             .get_property("audio-device-list")
             .map(|j| parse_audio_devices(&j))
             .unwrap_or_default()
@@ -479,6 +621,10 @@ impl Player {
         s.cache_buffering = false;
         s.paused = false;
         s.file_loaded = false;
+        s.last_http_status = None;
+        s.decoder_codec = None;
+        s.engine_restarts = 0;
+        s.engine_failure = None;
         s.stats = Stats::default();
         go(
             &self.inner,
@@ -534,13 +680,14 @@ impl Player {
         s.request = None;
         s.retry_at = None;
         s.load_started = None;
-        let r = self.inner.engine.command(&["stop"]);
+        let r = self.inner.eng().command(&["stop"]);
         go(&self.inner, &mut s, SessionState::Stopped, None);
         r
     }
 
     pub fn command(&self, cmd: PlayerCommand) -> Result<(), PlayerError> {
-        let e = &self.inner.engine;
+        let eng = self.inner.eng();
+        let e = &eng;
         match cmd {
             PlayerCommand::Pause => e.set_property("pause", "yes"),
             PlayerCommand::Resume => e.set_property("pause", "no"),
@@ -619,7 +766,7 @@ impl Player {
             .iter()
             .filter_map(|n| {
                 self.inner
-                    .engine
+                    .eng()
                     .get_property(n)
                     .map(|v| ((*n).to_owned(), v))
             })
@@ -637,7 +784,7 @@ fn seek(e: &Engine, secs: f64, mode: &str) -> Result<(), PlayerError> {
 impl Drop for Player {
     fn drop(&mut self) {
         self.inner.stop.store(true, Ordering::SeqCst);
-        self.inner.engine.wakeup();
+        self.inner.eng().wakeup();
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -675,6 +822,31 @@ fn snapshot(s: &Shared) -> PlayerSnapshot {
         volume: s.stats.volume,
         muted: s.stats.muted,
         tracks: s.stats.tracks.clone(),
+        reconnecting: s.policy.attempts() > 1
+            && matches!(
+                s.sm.state(),
+                SessionState::Resolving | SessionState::Connecting | SessionState::Buffering
+            ),
+        failure: (s.sm.state() == SessionState::Failed).then(|| {
+            if let Some(id) = &s.engine_failure {
+                FailureInfo {
+                    kind: FailureKind::Engine,
+                    http_status: None,
+                    codec: None,
+                    crash_id: Some(id.clone()),
+                }
+            } else {
+                let mut f = classify_failure(
+                    s.last_http_status,
+                    s.decoder_codec.as_deref(),
+                    &s.stats.tracks,
+                );
+                if f.kind == FailureKind::Codec && f.codec.is_none() {
+                    f.codec = s.stats.codec.clone();
+                }
+                f
+            }
+        }),
         waiting_on: waiting_on(
             s.sm.state(),
             s.state_since.elapsed(),
@@ -707,7 +879,7 @@ fn load_current(inner: &Inner, s: &mut Shared) -> Result<(), PlayerError> {
     s.load_started = Some(Instant::now());
     s.first_frame_ms = None;
     inner
-        .engine
+        .eng()
         .command(&["loadfile", &req.url, "replace", "-1", &opts])
 }
 
@@ -722,8 +894,16 @@ fn on_failure(inner: &Inner, s: &mut Shared, cause: FailureCause) {
                 Some(format!("retry {attempt}: {}", cause.describe())),
             );
             s.retry_at = Some(Instant::now() + after);
+            note(
+                inner,
+                format!("reconnecting (attempt {attempt}): {}", cause.describe()),
+            );
         }
         RetryDecision::AskForStreamList { last_error } => {
+            note(
+                inner,
+                format!("reconnect failed, asking for the next stream: {last_error}"),
+            );
             s.error = Some(last_error.clone());
             go(inner, s, SessionState::Failed, Some(last_error.clone()));
             s.outbox.push(PlayerEvent::FailoverNeeded {
@@ -732,6 +912,7 @@ fn on_failure(inner: &Inner, s: &mut Shared, cause: FailureCause) {
             });
         }
         RetryDecision::GiveUp { last_error } => {
+            note(inner, format!("giving up: {last_error}"));
             s.error = Some(last_error.clone());
             go(inner, s, SessionState::Failed, Some(last_error));
         }
@@ -805,10 +986,18 @@ fn handle_event(inner: &Inner, ev: EngineEvent) {
         EngineEvent::Property { name, value } => handle_property(inner, &mut s, &name, value),
         EngineEvent::Log { level, text, .. } => {
             let text = scrub_urls(text.trim_end());
+            if let Some(code) = parse_http_status(&text) {
+                s.last_http_status = Some(code);
+                note(inner, format!("server answered HTTP {code}"));
+            }
+            if let Some(codec) = parse_decoder_codec(&text) {
+                note(inner, format!("no decoder for codec {codec}"));
+                s.decoder_codec = Some(codec);
+            }
             if is_audio_open_failure(&text) && !s.audio_fell_back {
                 // No usable audio device (VM, headless): stop retrying it on every loadfile.
                 s.audio_fell_back = true;
-                match inner.engine.set_property("ao", "null") {
+                match inner.eng().set_property("ao", "null") {
                     Ok(()) => tracing::warn!(
                         "no audio device available; continuing without sound (ao=null)"
                     ),
@@ -988,8 +1177,19 @@ fn tick(inner: &Inner) {
     }
 }
 
+fn note(inner: &Inner, msg: String) {
+    tracing::debug!(target: "player", "{msg}");
+    if let Ok(mut n) = inner.notes.lock() {
+        if n.len() >= 50 {
+            n.pop_front();
+        }
+        n.push_back(format!("{} {msg}", unix_ms()));
+    }
+}
+
 fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
-    let e = &inner.engine;
+    let eng = inner.eng();
+    let e = &eng;
     let num = |name: &str| e.get_property(name).and_then(|v| v.parse::<f64>().ok());
     let bitrate = match (num("video-bitrate"), num("audio-bitrate")) {
         (None, None) => None,
@@ -1020,14 +1220,100 @@ fn flush(inner: &Inner) {
 
 fn event_loop(inner: &Arc<Inner>) {
     while !inner.stop.load(Ordering::SeqCst) {
-        let ev = inner.engine.wait_event(0.05);
+        let ev = inner.eng().wait_event(0.05);
         if ev == EngineEvent::Shutdown {
-            break;
+            if inner.stop.load(Ordering::SeqCst) {
+                break;
+            }
+            supervise_engine_death(inner);
+            flush(inner);
+            continue;
         }
         handle_event(inner, ev);
         tick(inner);
         flush(inner);
     }
+}
+
+/// The mpv instance shut down on its own. First death in a session: build a new engine, tell the
+/// surface to rebind, replay the request. Second death: fail with an engine error and a crash id.
+/// (A hard crash inside libmpv takes the whole process; only a clean shutdown is recoverable.)
+fn supervise_engine_death(inner: &Arc<Inner>) {
+    let crash_id = new_crash_id();
+    let (restart, replay) = {
+        let mut s = lock(inner);
+        s.engine_restarts += 1;
+        (s.engine_restarts == 1, s.request.is_some())
+    };
+    note(
+        inner,
+        format!("engine died (crash id {crash_id}, restart allowed: {restart})"),
+    );
+    tracing::error!("mpv engine shut down unexpectedly (crash id {crash_id})");
+    if restart {
+        match rebuild_engine(inner) {
+            Ok(()) => {
+                let mut s = lock(inner);
+                note(inner, format!("engine restarted (crash id {crash_id})"));
+                if replay {
+                    go(
+                        inner,
+                        &mut s,
+                        SessionState::Connecting,
+                        Some("engine restarted".into()),
+                    );
+                    if let Err(e) = load_current(inner, &mut s) {
+                        let msg = e.to_string();
+                        s.error = Some(msg.clone());
+                        s.engine_failure = Some(crash_id);
+                        go(inner, &mut s, SessionState::Failed, Some(msg));
+                    }
+                }
+                return;
+            }
+            Err(e) => tracing::error!("engine restart failed: {e}"),
+        }
+    }
+    let mut s = lock(inner);
+    s.engine_failure = Some(crash_id.clone());
+    s.error = Some("The playback engine stopped unexpectedly.".to_owned());
+    s.request = None;
+    s.retry_at = None;
+    s.load_started = None;
+    go(
+        inner,
+        &mut s,
+        SessionState::Failed,
+        Some(format!("engine failure {crash_id}")),
+    );
+}
+
+fn rebuild_engine(inner: &Arc<Inner>) -> Result<(), PlayerError> {
+    let (loaded, opts) = &inner.recipe;
+    let engine = Arc::new(Engine::new(loaded, opts)?);
+    if let Err(e) = engine.request_log_messages("warn") {
+        tracing::warn!("could not request mpv log messages: {e}");
+    }
+    for (i, (name, fmt)) in OBSERVED.iter().enumerate() {
+        engine.observe(i as u64 + 1, name, *fmt)?;
+    }
+    let prefs = match inner.prefs.lock() {
+        Ok(p) => p.clone(),
+        Err(p) => p.into_inner().clone(),
+    };
+    for (k, v) in prefs.live_options() {
+        let _ = engine.set_property(&k, &v);
+    }
+    match inner.engine.write() {
+        Ok(mut g) => *g = engine.clone(),
+        Err(p) => *p.into_inner() = engine.clone(),
+    }
+    if let Ok(cbs) = inner.replaced.lock() {
+        for cb in cbs.iter() {
+            cb(engine.clone());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1073,6 +1359,50 @@ mod tests {
             "Could not open/initialize audio device -> no sound."
         ));
         assert!(!is_audio_open_failure("Opening audio decoder"));
+    }
+
+    #[test]
+    fn parses_http_status_and_decoder_lines() {
+        assert_eq!(
+            parse_http_status("http: HTTP error 429 Too Many Requests"),
+            Some(429)
+        );
+        assert_eq!(
+            parse_http_status("http: HTTP error 503 Service Unavailable"),
+            Some(503)
+        );
+        assert_eq!(parse_http_status("something else"), None);
+        assert_eq!(
+            parse_decoder_codec("Failed to initialize a decoder for codec 'hevc'."),
+            Some("hevc".into())
+        );
+        assert_eq!(
+            parse_decoder_codec("Opening audio decoder: [ac3] AC-3"),
+            None
+        );
+    }
+
+    #[test]
+    fn classifies_failures() {
+        assert_eq!(
+            classify_failure(Some(429), None, &[]).kind,
+            FailureKind::Limit
+        );
+        assert_eq!(
+            classify_failure(Some(503), None, &[]).kind,
+            FailureKind::Limit
+        );
+        let c = classify_failure(None, Some("av1"), &[]);
+        assert_eq!(
+            (c.kind, c.codec.as_deref()),
+            (FailureKind::Codec, Some("av1"))
+        );
+        assert_eq!(
+            classify_failure(Some(404), None, &[]).kind,
+            FailureKind::Stream
+        );
+        assert_eq!(classify_failure(None, None, &[]).kind, FailureKind::Stream);
+        assert_eq!(new_crash_id().len(), 8);
     }
 
     #[test]

@@ -14,7 +14,7 @@ pub async fn get_diagnostics(state: State<'_, AppState>) -> CmdResult<Value> {
             pb.snapshot().hwdec_current,
             pb.transitions()
                 .iter()
-                .map(|t| json!({ "at": t.at_unix_ms, "from": phase_name(t.from), "to": phase_name(t.to) }))
+                .map(|t| json!({ "at": t.at_unix_ms, "from": phase_name(t.from), "to": phase_name(t.to), "note": t.note }))
                 .collect::<Vec<_>>(),
         ),
         None => (Value::Null, None, Vec::new()),
@@ -26,6 +26,7 @@ pub async fn get_diagnostics(state: State<'_, AppState>) -> CmdResult<Value> {
         "hwdecCurrent": hwdec,
         "os": d.os,
         "transitions": transitions,
+        "playerNotes": state.playback.as_ref().map(|p| p.notes()).unwrap_or_default(),
         "logTail": d.log_tail,
     }))
 }
@@ -79,6 +80,7 @@ pub async fn export_diagnostics(app: AppHandle, state: State<'_, AppState>) -> C
                 "state": player_state,
                 "hwdecCurrent": hwdec,
                 "transitions": transitions,
+                "notes": state.playback.as_ref().map(|p| p.notes()).unwrap_or_default(),
                 // GPU / renderer / decoder facts as reported by mpv.
                 "mpv": mpv.iter().map(|(k, v)| json!({ k: v })).collect::<Vec<_>>(),
             }))

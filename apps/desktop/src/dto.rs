@@ -5,7 +5,8 @@ use downlink_core::service::ProgrammeDto;
 use downlink_core::{AppError, ErrorCode};
 use downlink_player::options::{SubtitleBackground, SubtitleSize};
 use downlink_player::{
-    AudioMode, Deinterlace, PlayMode, PlayerSnapshot, Preferences, SessionState, WaitingOn,
+    AudioMode, Deinterlace, FailureInfo, FailureKind, PlayMode, PlayerSnapshot, Preferences,
+    SessionState, WaitingOn,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -62,6 +63,8 @@ pub struct PlayerStateDto {
     pub width: Option<i64>,
     pub height: Option<i64>,
     pub waiting_on: Option<&'static str>,
+    /// Automatic retry or failover in progress: the UI shows "Reconnecting…".
+    pub reconnecting: bool,
     pub error: Option<AppError>,
     pub transitioned_at: i64,
 }
@@ -75,6 +78,8 @@ pub struct SessionInfo {
     pub title: Option<String>,
     pub resume_at: Option<f64>,
     pub failure: Option<AppError>,
+    /// A server-side failover attempt is in progress.
+    pub failover_active: bool,
     pub transitioned_at: i64,
 }
 
@@ -82,8 +87,10 @@ pub fn player_state(snap: &PlayerSnapshot, info: &SessionInfo) -> PlayerStateDto
     let state = snap.state.unwrap_or(SessionState::Idle);
     let mode = info.mode.or(snap.mode);
     let error = info.failure.clone().or_else(|| {
-        (state == SessionState::Failed)
-            .then(|| AppError::new(ErrorCode::Stream, "Source unavailable. Try again."))
+        (state == SessionState::Failed).then(|| match &snap.failure {
+            Some(f) => failure_error(f),
+            None => AppError::new(ErrorCode::Stream, "Source unavailable. Try again."),
+        })
     });
     PlayerStateDto {
         state: phase_name(state),
@@ -106,8 +113,37 @@ pub fn player_state(snap: &PlayerSnapshot, info: &SessionInfo) -> PlayerStateDto
         width: snap.width,
         height: snap.height,
         waiting_on: snap.waiting_on.map(waiting_name),
+        reconnecting: snap.reconnecting || (info.failover_active && state != SessionState::Playing),
         error,
         transitioned_at: info.transitioned_at,
+    }
+}
+
+/// PLAN §4.9 copy and detail fields for a classified failure.
+pub fn failure_error(f: &FailureInfo) -> AppError {
+    match f.kind {
+        FailureKind::Limit => {
+            let msg = if f.http_status == Some(503) {
+                "No stream is available on your server right now."
+            } else {
+                "Your server is at its stream limit."
+            };
+            AppError::new(ErrorCode::Stream, msg).with_detail("limit", None, None)
+        }
+        FailureKind::Codec => {
+            let codec = f.codec.clone().unwrap_or_else(|| "unknown".to_owned());
+            AppError::new(
+                ErrorCode::Media,
+                format!("This channel uses a format Downlink can't decode: {codec}"),
+            )
+            .with_detail("codec", Some(codec), None)
+        }
+        FailureKind::Engine => AppError::new(
+            ErrorCode::Media,
+            "The playback engine stopped unexpectedly.",
+        )
+        .with_detail("engine", None, f.crash_id.clone()),
+        FailureKind::Stream => AppError::new(ErrorCode::Stream, "Source unavailable. Try again."),
     }
 }
 
@@ -222,5 +258,69 @@ mod tests {
         let v = serde_json::to_value(player_state(&snap, &live)).unwrap_or_default();
         assert_eq!(v["seekable"], false);
         assert!(v["title"].is_null());
+    }
+
+    #[test]
+    fn failures_map_to_plain_copy_and_detail_fields() {
+        let f = |kind, http_status, codec: Option<&str>, crash: Option<&str>| FailureInfo {
+            kind,
+            http_status,
+            codec: codec.map(str::to_owned),
+            crash_id: crash.map(str::to_owned),
+        };
+        let e = failure_error(&f(FailureKind::Limit, Some(429), None, None));
+        assert_eq!(
+            (e.reason.as_deref(), e.code),
+            (Some("limit"), ErrorCode::Stream)
+        );
+        assert!(e.message.contains("stream limit"));
+        let e = failure_error(&f(FailureKind::Codec, None, Some("av1"), None));
+        assert_eq!(
+            (e.reason.as_deref(), e.codec.as_deref(), e.code),
+            (Some("codec"), Some("av1"), ErrorCode::Media)
+        );
+        assert!(e.message.contains("av1"));
+        let e = failure_error(&f(FailureKind::Engine, None, None, Some("ab12cd34")));
+        assert_eq!(
+            (e.reason.as_deref(), e.crash_id.as_deref()),
+            (Some("engine"), Some("ab12cd34"))
+        );
+        assert!(
+            failure_error(&f(FailureKind::Stream, None, None, None))
+                .reason
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn reconnecting_during_retry_or_failover() {
+        let retry = PlayerSnapshot {
+            state: Some(SessionState::Connecting),
+            reconnecting: true,
+            ..PlayerSnapshot::default()
+        };
+        let v =
+            serde_json::to_value(player_state(&retry, &SessionInfo::default())).unwrap_or_default();
+        assert_eq!(v["reconnecting"], true);
+        let fo = PlayerSnapshot {
+            state: Some(SessionState::Connecting),
+            ..PlayerSnapshot::default()
+        };
+        let info = SessionInfo {
+            failover_active: true,
+            ..SessionInfo::default()
+        };
+        assert_eq!(
+            serde_json::to_value(player_state(&fo, &info)).unwrap_or_default()["reconnecting"],
+            true
+        );
+        let playing = PlayerSnapshot {
+            state: Some(SessionState::Playing),
+            ..PlayerSnapshot::default()
+        };
+        assert_eq!(
+            serde_json::to_value(player_state(&playing, &info)).unwrap_or_default()["reconnecting"],
+            false
+        );
     }
 }

@@ -42,6 +42,8 @@ struct Active {
     failover_count: u32,
     /// VOD / recording being played, for position reports.
     media: Option<Media>,
+    /// Loopback playlist proxy for the current recording (aborted when dropped).
+    hls: Option<crate::hls_proxy::HlsProxy>,
     /// 1-based provider stream in use and how many the channel has (0 = unknown).
     source_index: u32,
     source_count: u32,
@@ -166,7 +168,11 @@ impl SinkContext {
             );
             return;
         };
-        lock(&self.active).info.failure = None;
+        {
+            let mut a = lock(&self.active);
+            a.info.failure = None;
+            a.info.failover_active = true;
+        }
         player.begin_resolving();
         match self.service.failover_next(channel, attempt).await {
             Ok(step) => {
@@ -194,6 +200,13 @@ impl SinkContext {
     }
 
     fn publish_failure(&self, player: &Player, e: AppError) {
+        // Keep a specific reason (limit, codec, engine) over core's generic "no working stream".
+        let e = player
+            .snapshot()
+            .failure
+            .filter(|f| f.kind != downlink_player::FailureKind::Stream)
+            .map_or(e, |f| crate::dto::failure_error(&f));
+        lock(&self.active).info.failover_active = false;
         lock(&self.active).info.failure = Some(e.clone());
         player.mark_failed(e.message);
         let dto = {
@@ -224,7 +237,9 @@ impl SinkContext {
                 };
                 let phase = snap.state.unwrap_or(SessionState::Idle);
                 if phase == SessionState::Playing {
-                    lock(&ctx.active).failover_count = 0;
+                    let mut a = lock(&ctx.active);
+                    a.failover_count = 0;
+                    a.info.failover_active = false;
                 }
                 ctx.extras
                     .inhibitor
@@ -312,6 +327,11 @@ impl Playback {
         self.player.snapshot()
     }
 
+    /// Notable player events (reconnects, HTTP classifications, decoder and engine failures).
+    pub fn notes(&self) -> Vec<String> {
+        self.player.notes()
+    }
+
     pub fn transitions(&self) -> Vec<downlink_player::Transition> {
         self.player.history()
     }
@@ -352,6 +372,7 @@ impl Playback {
         a.generation += 1;
         a.failover_count = 0;
         a.media = None;
+        a.hls = None;
         a.source_index = 0;
         a.source_count = 0;
         a.info = SessionInfo {
@@ -361,6 +382,7 @@ impl Playback {
             title: None,
             resume_at: None,
             failure: None,
+            failover_active: false,
             transitioned_at: now_ms(),
         };
         a.last = Some(last);
@@ -565,8 +587,15 @@ impl Playback {
             }
         };
         let start = rp.resume_secs.map(|s| s as f64);
+        let mut plan = rp.plan.clone();
+        if plan.surface == downlink_core::source::Surface::Hls
+            && let Some((local, proxy)) = crate::hls_proxy::prepare(&plan).await
+        {
+            plan.url = local;
+            lock(&self.active).hls = Some(proxy);
+        }
         self.start_media(
-            &rp.plan,
+            &plan,
             PlayMode::Recording,
             rp.title,
             start,
@@ -678,6 +707,7 @@ impl Playback {
             let mut a = lock(&self.active);
             a.generation += 1;
             a.media = None;
+            a.hls = None;
         }
         let r = self.player.stop().map_err(player_err);
         let prev = lock(&self.active).catchup.take();

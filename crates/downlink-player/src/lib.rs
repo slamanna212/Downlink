@@ -20,8 +20,8 @@ pub use loader::{
 };
 pub use options::{AudioMode, Deinterlace, Preferences, Profile, RenderBackend, SubtitleStyle};
 pub use player::{
-    AudioDevice, EventSink, PlayMode, PlayRequest, Player, PlayerCommand, PlayerEvent,
-    PlayerSnapshot, StatsSnapshot, Track, WaitingOn,
+    AudioDevice, EventSink, FailureInfo, FailureKind, PlayMode, PlayRequest, Player, PlayerCommand,
+    PlayerEvent, PlayerSnapshot, StatsSnapshot, Track, WaitingOn,
 };
 pub use retry::{FailureCause, RetryDecision, RetryPolicy};
 pub use state::{SessionState, StateMachine, Transition};

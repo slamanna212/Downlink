@@ -85,10 +85,15 @@ fn debug_readback() -> bool {
     *ON.get_or_init(|| std::env::var_os("DOWNLINK_DEBUG_READBACK").is_some())
 }
 
+type CreateFn = Rc<dyn Fn(&gtk::GLArea)>;
+type CreateSlot = Rc<RefCell<Option<CreateFn>>>;
+
 struct GtkState {
     overlay: gtk::Overlay,
     glarea: gtk::GLArea,
     render: Rc<RefCell<Option<RenderContext>>>,
+    engine_slot: Rc<RefCell<Arc<Engine>>>,
+    create: CreateSlot,
 }
 
 thread_local! {
@@ -180,13 +185,17 @@ impl VideoSurface for LinuxSurface {
         let (wl, x11, wayland) = display_pointers();
         let loader = Rc::new(GlLoader::new(wayland));
         let gl_get_integerv: Rc<RefCell<Option<GlGetIntegerv>>> = Rc::new(RefCell::new(None));
+        let engine_slot: Rc<RefCell<Arc<Engine>>> = Rc::new(RefCell::new(self.engine.clone()));
+        let create_cell: CreateSlot = Rc::new(RefCell::new(None));
 
         {
             let render = render.clone();
             let loader = loader.clone();
-            let engine = self.engine.clone();
+            let engine_slot = engine_slot.clone();
             let gl_get = gl_get_integerv.clone();
-            glarea.connect_realize(move |area| {
+            let create_slot = create_cell.clone();
+            let create: Rc<dyn Fn(&gtk::GLArea)> = Rc::new(move |area: &gtk::GLArea| {
+                let engine = engine_slot.borrow().clone();
                 area.make_current();
                 if let Some(err) = area.error() {
                     tracing::error!("GtkGLArea could not create a GL context: {err}");
@@ -227,6 +236,8 @@ impl VideoSurface for LinuxSurface {
                     Err(e) => tracing::error!("mpv_render_context_create failed: {e}"),
                 }
             });
+            *create_slot.borrow_mut() = Some(create.clone());
+            glarea.connect_realize(move |a| create(a));
         }
         {
             let render = render.clone();
@@ -306,9 +317,29 @@ impl VideoSurface for LinuxSurface {
                 overlay,
                 glarea,
                 render,
+                engine_slot,
+                create: create_cell,
             });
         });
         Ok(())
+    }
+
+    /// The supervisor replaced a dead mpv instance: free the old render context and create one
+    /// on the new engine (GL context current), then redraw.
+    fn rebind(&self, engine: Arc<Engine>) {
+        (self.dispatch)(Box::new(move || {
+            STATE.with(|s| {
+                if let Some(st) = s.borrow().as_ref() {
+                    *st.engine_slot.borrow_mut() = engine;
+                    st.glarea.make_current();
+                    *st.render.borrow_mut() = None;
+                    if let Some(create) = st.create.borrow().as_ref() {
+                        create(&st.glarea);
+                    }
+                    st.glarea.queue_render();
+                }
+            });
+        }));
     }
 
     fn set_bounds(&self, b: SurfaceBounds) {

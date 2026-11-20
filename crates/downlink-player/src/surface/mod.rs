@@ -34,6 +34,9 @@ pub trait VideoSurface {
 
     /// Create the surface under the webview. Must be called on the main thread.
     fn attach(&mut self, parent: &Self::Parent) -> Result<(), PlayerError>;
+    /// Re-bind to a replacement mpv engine after the supervisor restarted a dead one. Default:
+    /// not supported (the surface keeps rendering nothing until the app restarts).
+    fn rebind(&self, _engine: Arc<crate::engine::Engine>) {}
     fn set_bounds(&self, bounds: SurfaceBounds);
     fn set_visible(&self, visible: bool);
     /// Tear down the surface and free the render context.

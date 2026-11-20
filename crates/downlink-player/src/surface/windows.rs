@@ -68,6 +68,13 @@ impl VideoSurface for WindowsSurface {
         Ok(())
     }
 
+    fn rebind(&self, engine: Arc<Engine>) {
+        // The new mpv instance must render into the same child window.
+        if self.child != 0 {
+            let _ = engine.set_option("wid", &self.child.to_string());
+        }
+    }
+
     fn set_bounds(&self, b: SurfaceBounds) {
         let child = self.child;
         (self.dispatch)(Box::new(move || {

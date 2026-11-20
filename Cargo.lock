@@ -1348,6 +1348,7 @@ dependencies = [
  "downlink-platform",
  "downlink-player",
  "gtk",
+ "reqwest",
  "serde",
  "serde_json",
  "tauri",

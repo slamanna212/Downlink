@@ -7,6 +7,7 @@ mod deeplink;
 mod dto;
 #[cfg(feature = "e2e")]
 mod e2e;
+mod hls_proxy;
 mod logging;
 mod player_glue;
 mod protocol;
@@ -24,7 +25,7 @@ use std::sync::Arc;
 
 use downlink_core::auth::KeyringStore;
 use downlink_core::service::{Service, ServiceConfig};
-use downlink_player::{MainThreadDispatch, Player, RenderBackend};
+use downlink_player::{MainThreadDispatch, Player, RenderBackend, VideoSurface};
 use tauri::{Emitter, Manager};
 
 use crate::player_glue::{Playback, SinkContext};
@@ -221,7 +222,12 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                         let _ = dh.run_on_main_thread(f);
                     });
                     match surface::attach(&handle, &p, dispatch) {
-                        Ok(s) => surf = Some(Arc::new(s)),
+                        Ok(s) => {
+                            let s = Arc::new(s);
+                            let for_rebind = s.clone();
+                            p.on_engine_replaced(move |engine| for_rebind.rebind(engine));
+                            surf = Some(s);
+                        }
                         Err(e) => {
                             tracing::error!("video surface unavailable: {e}");
                             engine_error = Some(e);

@@ -52,6 +52,15 @@ pub struct AppError {
     /// version (PLAN §2.5). Everything else degrades.
     #[serde(default)]
     pub blocking: bool,
+    /// Optional detail for stream failures (PLAN §4.9): `limit`, `codec` or `engine`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Codec name when `reason` is `codec`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codec: Option<String>,
+    /// Short id to quote in bug reports when `reason` is `engine`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crash_id: Option<String>,
 }
 
 pub type Result<T, E = AppError> = std::result::Result<T, E>;
@@ -63,6 +72,9 @@ impl AppError {
             message: redact::redact(message.as_ref()),
             retry_after: None,
             blocking: code == ErrorCode::Auth,
+            reason: None,
+            codec: None,
+            crash_id: None,
         }
     }
 
@@ -73,6 +85,9 @@ impl AppError {
             message: secrets.redact(message.as_ref()),
             retry_after: None,
             blocking: code == ErrorCode::Auth,
+            reason: None,
+            codec: None,
+            crash_id: None,
         }
     }
 
@@ -102,6 +117,14 @@ impl AppError {
         ));
         e.blocking = true;
         e
+    }
+
+    /// Attach the §4.9 detail fields (all optional).
+    pub fn with_detail(mut self, reason: &str, codec: Option<String>, crash_id: Option<String>) -> Self {
+        self.reason = Some(reason.to_owned());
+        self.codec = codec;
+        self.crash_id = crash_id;
+        self
     }
 
     pub fn with_retry_after(mut self, secs: Option<u64>) -> Self {

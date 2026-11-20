@@ -54,10 +54,16 @@ pub fn load(bundled_dir: Option<&Path>) -> Result<LoadedMpv, PlayerError> {
 /// Env var that makes [`load_from_env`] refuse everything but the bundled engine (CI smoke test).
 pub const ENV_REQUIRE_BUNDLED: &str = "DOWNLINK_REQUIRE_BUNDLED";
 
-/// [`load`], but when `DOWNLINK_REQUIRE_BUNDLED=1` the escape hatch and the system fallback are off.
+/// [`load`], with the escape hatch and the system fallback off in release builds (or when
+/// `DOWNLINK_REQUIRE_BUNDLED=1`).
 pub fn load_from_env(bundled_dir: Option<&Path>) -> Result<LoadedMpv, PlayerError> {
-    let strict = std::env::var(ENV_REQUIRE_BUNDLED).is_ok_and(|v| v == "1");
-    load_with(bundled_dir, strict)
+    load_with(bundled_dir, strict_by_default())
+}
+
+/// Release builds never fall back to the env override or a system libmpv (CLAUDE.md rule 14);
+/// debug builds do unless `DOWNLINK_REQUIRE_BUNDLED=1`.
+pub fn strict_by_default() -> bool {
+    !cfg!(debug_assertions) || std::env::var(ENV_REQUIRE_BUNDLED).is_ok_and(|v| v == "1")
 }
 
 /// `require_bundled`: only the bundled directory is tried; no env override, no system library.
@@ -146,6 +152,14 @@ mod tests {
         // No bundled dir: strict mode must fail without trying the env override or the system.
         let r = load_with(None, true);
         assert!(matches!(r, Err(PlayerError::Load(m)) if m.contains("bundled engine required")));
+    }
+
+    #[test]
+    fn release_builds_are_strict() {
+        assert_eq!(
+            strict_by_default(),
+            !cfg!(debug_assertions) || std::env::var(ENV_REQUIRE_BUNDLED).is_ok_and(|v| v == "1")
+        );
     }
 
     #[test]
