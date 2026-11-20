@@ -27,7 +27,7 @@ jobs:
       release_exists: ${{ steps.check_release.outputs.exists }}
       prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Read package.json version
         id: v

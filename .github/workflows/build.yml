@@ -42,7 +42,7 @@ jobs:
       release_id: ${{ steps.create.outputs.release_id }}
       signed: ${{ steps.meta.outputs.signed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # git-cliff needs history and tags
 
@@ -91,7 +91,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Stage libmpv (pinned in tools/mpv/pins.env)
         shell: pwsh
@@ -125,7 +125,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install build dependencies
         if: runner.environment == 'github-hosted'
@@ -190,7 +190,7 @@ jobs:
       RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
       SIGNED: ${{ needs.prepare.outputs.signed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download release assets
         run: |

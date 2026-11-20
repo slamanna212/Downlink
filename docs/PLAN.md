@@ -1358,7 +1358,7 @@ Updater signatures (minisign) are required regardless of OS code signing.
 | Thing | Choice |
 |---|---|
 | Rust | stable, MSRV pinned in `rust-toolchain.toml` |
-| Node | 22 LTS, pnpm 10, committed lockfile |
+| Node | 24 LTS, pnpm 10, committed lockfile |
 | Tauri | 2.x stable, minor pinned |
 | React | 19.3.x |
 | Mantine | 9.x (all packages same version) |
