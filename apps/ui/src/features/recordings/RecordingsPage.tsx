@@ -22,7 +22,7 @@ type Tab = 'upcoming' | 'inProgress' | 'completed' | 'rules';
 const initials = (name: string) =>
   name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('');
 
-function Row({ r, now, tab, run, busy }: { r: Recording; now: number; tab: Exclude<Tab, 'rules'>; run: (fn: () => Promise<unknown>) => void; busy: boolean }) {
+export function RecordingRow({ r, now, tab, run, busy, demo }: { r: Recording; now: number; tab: Exclude<Tab, 'rules'>; run: (fn: () => Promise<unknown>) => void; busy: boolean; demo?: Record<string, unknown> }) {
   const navigate = useNavigate();
   const [confirming, setConfirming] = useState(false);
   const watch = () => run(async () => {
@@ -30,7 +30,7 @@ function Row({ r, now, tab, run, busy }: { r: Recording; now: number; tab: Exclu
     if (!err) void navigate('/player');
   });
   return (
-    <div className={classes.row} role="listitem">
+    <div className={classes.row} role="listitem" {...demo}>
       <span className={classes.day}>{dayLabel(r.startUtc, now)}</span>
       <span className={classes.ini} aria-hidden>{initials(r.channelName)}</span>
       <span className={classes.main}>
@@ -151,7 +151,7 @@ export function RecordingsPage() {
         <div className={classes.list} role="list" aria-label={t(`rec.tab.${tab}`)}>
           {tab === 'rules'
             ? (list as RecordingRule[]).map((r) => <RuleRow key={r.id} r={r} run={run} busy={act.isPending} />)
-            : (list as Recording[]).map((r) => <Row key={r.id} r={r} now={now} tab={tab} run={run} busy={act.isPending} />)}
+            : (list as Recording[]).map((r) => <RecordingRow key={r.id} r={r} now={now} tab={tab} run={run} busy={act.isPending} />)}
         </div>
       )}
     </div>

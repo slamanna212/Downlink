@@ -9,7 +9,7 @@ import { useCaps } from '../../api/queries';
 import type { Movie, Series, VodKind } from '../../api/types';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { Icon } from '../../components/Icon/Icon';
-import { Poster } from '../../components/Poster/Poster';
+import { PosterTile, type Tile } from '../../components/Poster/PosterTile';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { EmptySource } from '../../pages/EmptySource';
 import { useUiStore } from '../../store/ui';
@@ -22,15 +22,6 @@ const TV_SCALE = 1.25;
 const GAP = 16; // matches --mantine-spacing-lg
 const TEXT_H = 52;
 const LIMIT = 5000;
-
-interface Tile {
-  id: number;
-  title: string;
-  poster: string | null;
-  sub: string | null;
-  progress: number | null;
-  watched: boolean;
-}
 
 const movieTile = (m: Movie): Tile => ({ id: m.id, title: m.title, poster: m.poster, sub: m.year ? String(m.year) : null, progress: progressOf(m.resumeSecs, m.durationSecs), watched: m.watched });
 const seriesTile = (s: Series): Tile => ({
@@ -186,31 +177,16 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
                   {tiles.slice(v.index * cols, v.index * cols + cols).map((tile, k) => {
                     const i = v.index * cols + k;
                     return (
-                      <div
+                      <PosterTile
                         key={tile.id}
                         id={`vt-${i}`}
-                        role="gridcell"
-                        aria-selected={i === active}
-                        className={classes.tile}
-                        data-active={i === active || undefined}
-                        onClick={() => {
+                        tile={tile}
+                        active={i === active}
+                        onOpen={() => {
                           setActive(i);
                           open(i);
                         }}
-                      >
-                        <div className={classes.posterRing}>
-                          <Poster src={tile.poster} title={tile.title}>
-                            {tile.watched && <span className={classes.badge}>{t('vod.watched')}</span>}
-                            {tile.progress != null && (
-                              <span className={classes.track}>
-                                <span className={classes.fill} style={{ width: `${tile.progress * 100}%` }} />
-                              </span>
-                            )}
-                          </Poster>
-                        </div>
-                        <div className={classes.tileTitle}>{tile.title}</div>
-                        {tile.sub && <div className={classes.tileSub}>{tile.sub}</div>}
-                      </div>
+                      />
                     );
                   })}
                 </div>
