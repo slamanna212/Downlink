@@ -336,7 +336,7 @@ Dispatcharr's API is unversioned. Policy:
 | Now/next | `POST /api/epg/current-programs/` `{channel_uuids:[…]}` |
 | Programme search | `GET /api/epg/programs/search/` (params verified in M1) |
 | Logos | `GET /api/channels/logos/{id}/cache` |
-| Live play | `GET /proxy/ts/stream/{channel_uuid}` (HLS fallback: `/proxy/hls/<token>/index.m3u8`, stop with `DELETE /api/proxy/hls/sessions/<token>/`) |
+| Live play | `GET /proxy/ts/stream/{channel_uuid}` (opt-in HLS: `…?output_format=hls` → `/proxy/hls/<token>/index.m3u8`, stop with `DELETE /api/proxy/hls/sessions/<token>/`) |
 | Catch-up | `POST /api/catchup/sessions/`, `POST /api/catchup/sessions/{id}/position/`, `DELETE /api/catchup/sessions/{id}/` |
 | VOD | `GET /api/vod/movies/`, `/series/`, `/series/{id}/episodes/`, `/categories/`; images `…/{id}/image`; play `GET /proxy/vod/{content_type}/{content_id}`. Details/episodes are lazy until `…/{id}/provider-info/` is called; episode payloads embed the provider account incl. credentials — parse typed fields only (see endpoints doc) |
 | DVR | `GET/POST /api/channels/recordings/` (bare array), `…/{id}/stop`, `…/{id}/extend` (`{"extra_minutes": n}`), `…/{id}/file`, in-progress `…/{id}/hls/index.m3u8`; `recurring-rules/` (list, delete), `series-rules/` (`{"rules": […]}`; create then `series-rules/evaluate/`; delete by `?tvg_id=&title=`) |
@@ -346,8 +346,13 @@ Dispatcharr's API is unversioned. Policy:
 ### 3.5 Playing a stream
 
 Primary: **`/proxy/ts/stream/{channel_uuid}`** with `X-API-Key` passed as a **per-file** mpv option
-(`loadfile <url> replace -1 http-header-fields=…`), never as a global option. HLS is used only when TS
-stalls repeatedly or the channel's output requires it. XC `/live/` URLs are used only for Xtream
+(`loadfile <url> replace -1 http-header-fields=…`), never as a global option. HLS is an **opt-in per-source
+"Use HLS transport" setting** (decided 2026-11-20): Dispatcharr's HLS reads the same upstream buffer as TS,
+so it only helps when something between client and server breaks long TS responses. There is no automatic
+TS→HLS fallback. When on, Rust mints the session at play time
+(`GET /proxy/ts/stream/{uuid}?output_format=hls`, redirects disabled → `/proxy/hls/<token>/index.m3u8`),
+mpv gets the playlist with no auth headers (the token is the credential), the token is tracked in
+`open_session` and deleted on every exit path, and a 410 re-mints at most once. XC `/live/` URLs are used only for Xtream
 sources.
 
 **Redirect-profile channels (key-leak protection).** If a channel's effective stream profile is
