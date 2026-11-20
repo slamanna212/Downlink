@@ -1,0 +1,5 @@
+[
+  {"id": 1, "name": "Action", "category_type": "movie", "category_type_display": "Movie", "m3u_accounts": []},
+  {"id": 2, "name": "Comedy", "category_type": "movie", "category_type_display": "Movie", "m3u_accounts": []},
+  {"id": 3, "name": "Drama Series", "category_type": "series", "category_type_display": "Series", "m3u_accounts": []}
+]

@@ -1,0 +1,10 @@
+{"count": 3, "next": null, "previous": null, "results": [
+  {"id": 11, "uuid": "11111111-0000-4000-8000-000000000011", "name": "Night Train", "description": "A synthetic thriller.", "year": 2021,
+   "rating": "7.4", "genre": "Action, Thriller", "duration_secs": 5400, "tmdb_id": null, "imdb_id": null, "language": "en", "is_adult": false,
+   "logo": {"id": 5, "name": "Night Train", "url": "http://img.test/nt.jpg", "cache_url": "/api/vod/vodlogos/5/cache/"},
+   "custom_properties": {"backdrop_path": ["http://img.test/nt-bd.jpg"]}, "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z"},
+  {"id": 12, "uuid": "11111111-0000-4000-8000-000000000012", "name": "Quiet Morning", "description": null, "year": null,
+   "rating": null, "genre": null, "duration_secs": 0, "logo": null, "custom_properties": null, "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-01T00:00:00Z"},
+  {"id": 13, "uuid": "11111111-0000-4000-8000-000000000013", "name": "Third Feature", "year": 1999, "rating": "n/a", "genre": "Comedy",
+   "duration_secs": 3000, "logo": null}
+]}

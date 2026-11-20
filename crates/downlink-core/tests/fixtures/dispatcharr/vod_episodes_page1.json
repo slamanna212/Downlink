@@ -1,0 +1,7 @@
+{"count": 5, "next": null, "previous": null, "results": [
+  {"id": 303, "uuid": "33333333-0000-4000-8000-000000000303", "series": {"id": 21, "name": "Fieldwork"}, "name": "S2 E1", "description": "Back again.", "duration_secs": 2700, "season_number": 2, "episode_number": 1, "providers": []},
+  {"id": 301, "uuid": "33333333-0000-4000-8000-000000000301", "series": {"id": 21, "name": "Fieldwork"}, "name": "Pilot", "description": "It begins.", "duration_secs": 2700, "season_number": 1, "episode_number": 1, "providers": []},
+  {"id": 302, "uuid": "33333333-0000-4000-8000-000000000302", "series": {"id": 21, "name": "Fieldwork"}, "name": "Second", "description": null, "duration_secs": 2640, "season_number": 1, "episode_number": 2, "providers": []},
+  {"id": 304, "uuid": "33333333-0000-4000-8000-000000000304", "series": 21, "name": "S2 E2", "duration_secs": 2700, "season_number": 2, "episode_number": 2},
+  {"id": 305, "uuid": "33333333-0000-4000-8000-000000000305", "series": 21, "name": "Special", "duration_secs": null, "season_number": null, "episode_number": null}
+]}

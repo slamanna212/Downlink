@@ -1,0 +1,5 @@
+{"count": 1, "next": null, "previous": null, "results": [
+  {"id": 21, "uuid": "22222222-0000-4000-8000-000000000021", "name": "Fieldwork", "description": "A synthetic drama.", "year": 2022,
+   "rating": "8.1", "genre": "Drama", "episode_count": 5, "logo": {"id": 6, "name": "Fieldwork", "url": "http://img.test/fw.jpg", "cache_url": "/x/"},
+   "custom_properties": null}
+]}

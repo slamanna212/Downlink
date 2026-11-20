@@ -6,6 +6,7 @@
 //! construct URLs. The one exception is `resolve_redirect` in `source::play`, used at play time.
 
 pub mod dto;
+mod vod;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
@@ -23,8 +24,9 @@ use tokio::sync::Semaphore;
 use self::dto::*;
 use super::{
     AccountInfo, Caps, ChannelKey, ChannelPage, Page, PlayPlan, PlayProfile, ProfileInfo,
-    ProgramSearch, Programme, SessionId, Source, SourceChannel, SourceGroup, SourceId, SourceKind,
-    StreamMode, Surface, TimeWindow,
+    ProgramSearch, Programme, RecordRequest, RecordingInfo, RuleInfo, SessionId, Source,
+    SourceChannel, SourceGroup, SourceId, SourceKind, StreamMode, Surface, TimeWindow,
+    VodCategoryInfo, VodItem, VodKind, VodListPage, VodListQuery,
 };
 use crate::auth::SecretString;
 use crate::error::{AppError, Result};
@@ -143,6 +145,8 @@ pub struct DispatcharrClient {
     sem: Semaphore,
     secrets: Mutex<RedactionSet>,
     settings: Mutex<Option<ServerSettings>>,
+    has_vod: std::sync::atomic::AtomicBool,
+    has_dvr: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for DispatcharrClient {
@@ -226,6 +230,8 @@ impl DispatcharrClient {
             sem: Semaphore::new(MAX_CONCURRENT),
             secrets: Mutex::new(secrets),
             settings: Mutex::new(None),
+            has_vod: std::sync::atomic::AtomicBool::new(false),
+            has_dvr: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -557,6 +563,7 @@ impl DispatcharrClient {
             *g = None;
         }
         let settings = self.settings().await;
+        self.probe_features(me.level()).await;
         Ok(AccountInfo {
             server_version: version,
             user_id: me.id,
@@ -1161,8 +1168,23 @@ impl Source for DispatcharrClient {
         SourceKind::Dispatcharr
     }
 
+    /// VOD and DVR are advertised only when this account can use them (probed at connect): a
+    /// Streamer cannot record, and a server with no VOD content shows no VOD section.
     fn caps(&self) -> Caps {
-        Caps::LIVE | Caps::EPG | Caps::CATCHUP | Caps::FAVOURITES | Caps::FAILOVER | Caps::PROFILES
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut c = Caps::LIVE
+            | Caps::EPG
+            | Caps::CATCHUP
+            | Caps::FAVOURITES
+            | Caps::FAILOVER
+            | Caps::PROFILES;
+        if self.has_vod.load(Relaxed) {
+            c |= Caps::VOD;
+        }
+        if self.has_dvr.load(Relaxed) {
+            c |= Caps::DVR;
+        }
+        c
     }
 
     async fn connect(&self) -> Result<AccountInfo> {
@@ -1213,6 +1235,67 @@ impl Source for DispatcharrClient {
 
     async fn catchup_position(&self, s: &SessionId, position_secs: u64) -> Result<()> {
         DispatcharrClient::catchup_position(self, s, position_secs).await
+    }
+
+    async fn vod_categories(&self, kind: VodKind) -> Result<Vec<VodCategoryInfo>> {
+        let mut cats = self.vod_category_list(kind).await?;
+        // Item counts: one cheap request per category (the UI shows them in the filter chips).
+        for c in cats.iter_mut().take(80) {
+            c.count = self.vod_category_count(kind, &c.name).await.ok();
+        }
+        Ok(cats)
+    }
+
+    async fn vod_list(&self, kind: VodKind, q: &VodListQuery) -> Result<VodListPage> {
+        self.vod_page(kind, q).await
+    }
+
+    async fn vod_detail(&self, kind: VodKind, ext_id: &str) -> Result<VodItem> {
+        self.vod_item_detail(kind, ext_id).await
+    }
+
+    async fn series_episodes(&self, series_ext_id: &str) -> Result<Vec<VodItem>> {
+        self.series_episode_list(series_ext_id).await
+    }
+
+    async fn play_vod(&self, item: &VodItem) -> Result<PlayPlan> {
+        self.vod_plan(item).await
+    }
+
+    async fn recordings(&self) -> Result<Vec<RecordingInfo>> {
+        self.recording_list().await
+    }
+
+    async fn schedule_recording(&self, r: &RecordRequest) -> Result<()> {
+        self.create_recording(r).await
+    }
+
+    async fn schedule_series_rule(&self, r: &RecordRequest) -> Result<()> {
+        self.create_series_rule(r).await
+    }
+
+    async fn stop_recording(&self, ext_id: &str) -> Result<()> {
+        self.stop_recording_by_id(ext_id).await
+    }
+
+    async fn delete_recording(&self, ext_id: &str) -> Result<()> {
+        self.delete_recording_by_id(ext_id).await
+    }
+
+    async fn extend_recording(&self, ext_id: &str, minutes: i64) -> Result<()> {
+        self.extend_recording_by_id(ext_id, minutes).await
+    }
+
+    async fn recording_plan(&self, rec: &RecordingInfo) -> Result<PlayPlan> {
+        self.recording_play_plan(rec).await
+    }
+
+    async fn recording_rules(&self) -> Result<Vec<RuleInfo>> {
+        self.rule_list().await
+    }
+
+    async fn delete_rule(&self, rule: &RuleInfo) -> Result<()> {
+        self.delete_rule_by(rule).await
     }
 
     async fn next_stream(&self, ch: &ChannelKey) -> Result<bool> {

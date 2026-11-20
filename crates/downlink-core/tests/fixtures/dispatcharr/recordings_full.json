@@ -1,0 +1,12 @@
+[
+  {"id": 31, "start_time": "2099-01-01T20:00:00Z", "end_time": "2099-01-01T21:00:00Z", "task_id": "dvr-recording-31",
+   "custom_properties": {"status": "scheduled", "program": {"id": "p1", "title": "Future Show", "tvg_id": "one.test"}}, "channel": 1},
+  {"id": 32, "start_time": "2020-01-01T20:00:00Z", "end_time": "2099-01-01T21:00:00Z", "task_id": "dvr-recording-32",
+   "custom_properties": {"status": "recording", "file_url": "/api/channels/recordings/32/hls/index.m3u8", "program": {"title": "Live Now"}, "rule_id": 4}, "channel": 2},
+  {"id": 33, "start_time": "2020-01-01T20:00:00Z", "end_time": "2020-01-01T21:00:00Z", "task_id": "dvr-recording-33",
+   "custom_properties": {"status": "completed", "file_size": 123456789, "program": {"title": "Done Show"}}, "channel": 1},
+  {"id": 34, "start_time": "2020-02-01T20:00:00Z", "end_time": "2020-02-01T21:00:00Z", "task_id": "dvr-recording-34",
+   "custom_properties": {"status": "failed", "error": "Provider refused the connection.", "program": {"title": "Broken"}}, "channel": 1},
+  {"id": 35, "start_time": "2020-03-01T20:00:00Z", "end_time": "2020-03-01T21:00:00Z", "task_id": "t", "custom_properties": null, "channel": 3},
+  {"id": 36, "start_time": "garbage", "end_time": "garbage", "task_id": "t", "custom_properties": {}, "channel": 3}
+]

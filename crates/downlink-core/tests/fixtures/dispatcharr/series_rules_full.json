@@ -1,0 +1,4 @@
+{"rules": [
+  {"tvg_id": "one.test", "mode": "new", "title": "Fieldwork", "title_mode": "exact", "channel_id": 1},
+  {"tvg_id": "two.test", "mode": "all", "title": "Quiz Hour"}
+]}

@@ -4,6 +4,7 @@
 pub mod dispatcharr;
 pub mod m3u;
 pub mod play;
+pub mod vod;
 pub mod xtream;
 
 use std::collections::HashSet;
@@ -17,6 +18,10 @@ use crate::error::{AppError, Result};
 pub use play::{
     Location, PlayPlan, PlayProfile, RedactedPlan, RedirectOutcome, SessionId, Surface,
     probe_redirect, resolve_redirect,
+};
+pub use vod::{
+    RecStatus, RecordRequest, RecordingInfo, RuleInfo, RuleKind, VodCategoryInfo, VodItem, VodKind,
+    VodListPage, VodListQuery,
 };
 
 /// Local row id of a configured source (`source.id`).
@@ -357,6 +362,56 @@ pub trait Source: Send + Sync {
     async fn channel_stream_names(&self, _ch_ext_id: &str) -> Result<Vec<(String, String)>> {
         Ok(Vec::new())
     }
+    // ---- VOD (PLAN M4) --------------------------------------------------------------------
+    async fn vod_categories(&self, _kind: VodKind) -> Result<Vec<VodCategoryInfo>> {
+        Err(no_vod())
+    }
+    /// One page of movies or series (`kind` is `Movie` or `Series`).
+    async fn vod_list(&self, _kind: VodKind, _q: &VodListQuery) -> Result<VodListPage> {
+        Err(no_vod())
+    }
+    async fn vod_detail(&self, _kind: VodKind, _ext_id: &str) -> Result<VodItem> {
+        Err(no_vod())
+    }
+    async fn series_episodes(&self, _series_ext_id: &str) -> Result<Vec<VodItem>> {
+        Err(no_vod())
+    }
+    /// A play plan for a movie or episode. `item.uuid`/`container` come from the cached row.
+    async fn play_vod(&self, _item: &VodItem) -> Result<PlayPlan> {
+        Err(no_vod())
+    }
+
+    // ---- DVR (PLAN M4) --------------------------------------------------------------------
+    async fn recordings(&self) -> Result<Vec<RecordingInfo>> {
+        Err(no_dvr())
+    }
+    async fn schedule_recording(&self, _r: &RecordRequest) -> Result<()> {
+        Err(no_dvr())
+    }
+    /// Series rule from a programme (`tvg_id` + title, new episodes or all).
+    async fn schedule_series_rule(&self, _r: &RecordRequest) -> Result<()> {
+        Err(no_dvr())
+    }
+    async fn stop_recording(&self, _ext_id: &str) -> Result<()> {
+        Err(no_dvr())
+    }
+    /// Cancel an upcoming recording or delete a finished one (the server has a single DELETE).
+    async fn delete_recording(&self, _ext_id: &str) -> Result<()> {
+        Err(no_dvr())
+    }
+    async fn extend_recording(&self, _ext_id: &str, _minutes: i64) -> Result<()> {
+        Err(no_dvr())
+    }
+    async fn recording_plan(&self, _rec: &RecordingInfo) -> Result<PlayPlan> {
+        Err(no_dvr())
+    }
+    async fn recording_rules(&self) -> Result<Vec<RuleInfo>> {
+        Err(no_dvr())
+    }
+    async fn delete_rule(&self, _rule: &RuleInfo) -> Result<()> {
+        Err(no_dvr())
+    }
+
     /// Authenticated image fetch (same-origin only).
     async fn fetch_image(&self, _url: &str) -> Result<crate::images::RawImage> {
         Err(AppError::local("This source has no images."))
@@ -407,4 +462,12 @@ pub trait SourceClient:
 impl<T> SourceClient for T where
     T: Source + crate::sessions::SessionStopper + crate::userstate::AppDataRemote
 {
+}
+
+fn no_vod() -> AppError {
+    AppError::server("This source does not offer on-demand video.")
+}
+
+fn no_dvr() -> AppError {
+    AppError::server("This source does not support recording.")
 }
