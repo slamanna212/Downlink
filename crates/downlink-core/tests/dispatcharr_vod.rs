@@ -367,7 +367,7 @@ async fn endpoints_stop_extend_delete_recording() {
         .await;
     Mock::given(method("POST"))
         .and(path("/api/channels/recordings/32/extend/"))
-        .and(body_partial_json(json!({"minutes": 15})))
+        .and(body_partial_json(json!({"extra_minutes": 15})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": 32})))
         .expect(1)
         .mount(&server)
@@ -411,6 +411,7 @@ async fn recording_plans_hls_while_running_file_when_done_same_origin_only() {
         size_bytes: None,
         error: None,
         file_url: file.map(Into::into),
+        ..Default::default()
     };
     let live = c
         .recording_plan(&mk(
@@ -813,4 +814,305 @@ async fn categories_are_a_bare_array_even_with_page_params() {
         .await
         .unwrap();
     assert_eq!(cats[0].name, "Drama");
+}
+
+// ---- canonical fixtures captured from a local 0.34.1 server (tools/fixtures/dispatcharr) --------
+
+fn tfx(name: &str) -> Value {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/fixtures/dispatcharr")
+        .join(name);
+    serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn captured_recordings_list_states_rules_and_tags() {
+    let server = MockServer::start().await;
+    get(
+        &server,
+        "/api/channels/recordings/",
+        tfx("recordings_list.json"),
+    )
+    .await;
+    let r = client(&server).recordings().await.unwrap();
+    let by = |id: &str| r.iter().find(|x| x.ext_id == id).unwrap();
+    // Recurring-rule recordings: tagged with the rule, status "scheduled", programme times shown.
+    let rec = by("11");
+    assert_eq!(
+        (
+            rec.status,
+            rec.rule_label.as_deref(),
+            rec.rule_ext.as_deref()
+        ),
+        (RecStatus::Scheduled, Some("Recurring"), Some("1"))
+    );
+    assert_eq!(rec.title, "Synthetic Weekday Rule");
+    // Series-evaluation recordings carry no rule tag but do carry title + tvg_id for matching.
+    assert_eq!(by("26").rule_label, None);
+    assert_eq!(
+        (by("26").tvg_id.as_deref(), by("26").title.as_str()),
+        (Some("test-news.test"), "Pattern Playhouse")
+    );
+    // `stopped` = finished with a partial file; it plays via /file/.
+    assert_eq!(
+        (by("29").status, by("29").file_url.as_deref()),
+        (
+            RecStatus::Completed,
+            Some("/api/channels/recordings/29/file/")
+        )
+    );
+    assert_eq!(by("4").status, RecStatus::Completed);
+}
+
+#[tokio::test]
+async fn absent_status_is_derived_from_the_window_and_odd_statuses_are_mapped() {
+    let server = MockServer::start().await;
+    let now = downlink_core::sync::now_utc();
+    let iso = |t: i64| {
+        chrono::DateTime::from_timestamp(t, 0)
+            .unwrap()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    let row = |id: i64, s: i64, e: i64, status: Option<&str>| {
+        let mut cp = json!({"program": {"title": format!("R{id}")}});
+        if let Some(st) = status {
+            cp["status"] = json!(st);
+        }
+        json!({"id": id, "channel": 1, "start_time": iso(s), "end_time": iso(e), "custom_properties": cp})
+    };
+    get(
+        &server,
+        "/api/channels/recordings/",
+        json!([
+            row(1, now + 3600, now + 7200, None), // future: scheduled
+            row(2, now - 600, now + 600, None),   // inside the window: recording
+            row(3, now - 7200, now - 3600, None), // past: completed
+            row(4, now - 7200, now - 3600, Some("interrupted")),
+            row(5, now + 3600, now + 7200, Some("cancelled")),
+            row(6, now - 7200, now - 3600, Some("stopped")),
+        ]),
+    )
+    .await;
+    let r = client(&server).recordings().await.unwrap();
+    let st = |id: &str| r.iter().find(|x| x.ext_id == id).map(|x| x.status);
+    assert_eq!(
+        (st("1"), st("2"), st("3")),
+        (
+            Some(RecStatus::Scheduled),
+            Some(RecStatus::Recording),
+            Some(RecStatus::Completed)
+        )
+    );
+    assert_eq!(st("4"), Some(RecStatus::Failed));
+    assert_eq!(
+        r.iter().find(|x| x.ext_id == "4").unwrap().error.as_deref(),
+        Some("The recording was interrupted.")
+    );
+    assert_eq!(st("5"), None, "cancelled recordings are hidden");
+    assert_eq!(
+        st("6"),
+        Some(RecStatus::Completed),
+        "stopped = completed with a partial file"
+    );
+}
+
+#[tokio::test]
+async fn extend_uses_extra_minutes_and_maps_the_finished_error() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/channels/recordings/31/extend/"))
+        .and(body_partial_json(json!({"extra_minutes": 15})))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(tfx("recording_extend_in_progress.json")),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/channels/recordings/29/extend/"))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(tfx("recording_extend_finished_error.json")),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = client(&server);
+    c.extend_recording("31", 15).await.unwrap();
+    let e = c.extend_recording("29", 15).await.unwrap_err();
+    assert_eq!(e.code, ErrorCode::Stream);
+    assert_eq!(e.message, "That recording has already finished.");
+}
+
+#[tokio::test]
+async fn a_past_one_off_gets_a_plain_sentence() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/channels/recordings/"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(tfx("recording_past_error.json")))
+        .mount(&server)
+        .await;
+    let req = RecordRequest {
+        channel_ext_id: "1".into(),
+        tvg_id: None,
+        programme_ext_id: None,
+        title: "T".into(),
+        description: None,
+        start_utc: 1,
+        end_utc: 2,
+    };
+    let e = client(&server).schedule_recording(&req).await.unwrap_err();
+    assert_eq!(e.code, ErrorCode::Stream);
+    assert!(
+        e.message.contains("already finished") && !e.message.contains("non_field"),
+        "{}",
+        e.message
+    );
+}
+
+#[tokio::test]
+async fn series_rule_create_is_followed_by_an_evaluate() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST")).and(path("/api/channels/series-rules/"))
+        .and(body_partial_json(json!({"tvg_id": "test-news.test", "title": "Pattern Playhouse", "mode": "new", "title_mode": "exact"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tfx("series_rule_create.json"))).expect(1).mount(&server).await;
+    Mock::given(method("POST"))
+        .and(path("/api/channels/series-rules/evaluate/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"success": true, "scheduled": 5, "details": []})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let req = RecordRequest {
+        channel_ext_id: "2".into(),
+        tvg_id: Some("test-news.test".into()),
+        programme_ext_id: None,
+        title: "Pattern Playhouse".into(),
+        description: None,
+        start_utc: 1,
+        end_utc: 2,
+    };
+    client(&server).schedule_series_rule(&req).await.unwrap();
+}
+
+#[tokio::test]
+async fn captured_rules_and_weekday_labels() {
+    let server = MockServer::start().await;
+    get(
+        &server,
+        "/api/channels/recurring-rules/",
+        tfx("recurring_rules.json"),
+    )
+    .await;
+    get(
+        &server,
+        "/api/channels/series-rules/",
+        tfx("series_rules.json"),
+    )
+    .await;
+    let rules = client(&server).recording_rules().await.unwrap();
+    let rec = rules
+        .iter()
+        .find(|r| r.kind == RuleKind::Recurring)
+        .unwrap();
+    assert_eq!(
+        rec.schedule, "Mon, Wed, Fri 20:00",
+        "0 = Monday (Python weekday)"
+    );
+    assert_eq!(rec.ext_id, "1");
+}
+
+#[tokio::test]
+async fn rating_as_number_custom_properties_as_string_and_server_built_urls() {
+    let server = MockServer::start().await;
+    let mut movies = tfx("vod_movies.json");
+    // /api/vod/all/ style: numeric rating and a JSON *string* in custom_properties.
+    movies["results"][0]["rating"] = json!(7.5);
+    movies["results"][0]["custom_properties"] =
+        json!("{\"backdrop_path\": [\"http://streams.dispatcharr.test/img/backdrop.png\"]}");
+    get(&server, "/api/vod/movies/", movies).await;
+    let page = client(&server)
+        .vod_list(
+            VodKind::Movie,
+            &VodListQuery {
+                offset: 0,
+                limit: 50,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let m = &page.items[0];
+    assert_eq!(m.rating.as_deref(), Some("7.5"));
+    assert_eq!(
+        m.backdrop.as_deref(),
+        Some("http://streams.dispatcharr.test/img/backdrop.png"),
+        "string-encoded custom_properties parsed"
+    );
+    assert!(
+        m.poster
+            .as_deref()
+            .unwrap()
+            .starts_with(&format!("{}/api/vod/vodlogos/", server.uri())),
+        "an absolute cache_url built from the request Host is rewritten onto our base: {:?}",
+        m.poster
+    );
+    assert!(
+        m.poster.as_deref().unwrap().contains("?v="),
+        "the cache-busting query is kept"
+    );
+}
+
+#[tokio::test]
+async fn image_urls_keep_their_query_string() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/vod/movies/3/image/"))
+        .and(query_param("kind", "backdrop"))
+        .and(query_param("index", "0"))
+        .and(header("X-API-Key", KEY))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![7u8]))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let url = format!(
+        "{}/api/vod/movies/3/image/?kind=backdrop&index=0&v=abc",
+        server.uri()
+    );
+    assert_eq!(client(&server).fetch_image(&url).await.unwrap().bytes, [7]);
+}
+
+#[tokio::test]
+async fn provider_info_is_typed_and_never_exposes_the_account() {
+    let server = MockServer::start().await;
+    let mut info = tfx("vod_movie_provider_info.json");
+    info["m3u_account"] = json!({"id": 3, "name": "X", "account_type": "XC", "password": "FAKEPROVIDERPASS-7731", "username": "fakeprovideruser"});
+    get(&server, "/api/vod/movies/3/provider-info/", info).await;
+    let item = client(&server)
+        .vod_enrich(VodKind::Movie, "3")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        item.plot.as_deref(),
+        Some("Synthetic plot for Test Documentary Three.")
+    );
+    assert_eq!(
+        (item.year, item.genre.as_deref(), item.duration_secs),
+        (Some(2019), Some("Test"), Some(20))
+    );
+    assert!(
+        item.backdrop.as_deref().unwrap().starts_with(&server.uri()),
+        "image URL rewritten onto our base"
+    );
+    assert!(!format!("{item:?}").contains("FAKEPROVIDERPASS"));
+    // 404 means "nothing to add", not an error.
+    assert!(
+        client(&server)
+            .vod_enrich(VodKind::Movie, "999")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }

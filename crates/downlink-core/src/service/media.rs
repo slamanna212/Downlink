@@ -248,6 +248,23 @@ impl Service {
         {
             row = r;
         }
+        // Details are lazy on Dispatcharr: description, genre and duration stay empty until
+        // `provider-info` has been asked for once. Do that when anything is missing, and cache it.
+        if (row.description.is_none() || row.genre.is_none() || row.duration_secs.is_none())
+            && let Ok(client) = self.client(row.source_id).await
+            && let Ok(Some(mut extra)) = client.vod_enrich(VodKind::Movie, &row.ext_id).await
+        {
+            extra.title = row.name.clone();
+            if let Some(r) = self
+                .store
+                .upsert_vod_items(row.source_id, &[extra], now_utc())
+                .await?
+                .into_iter()
+                .next()
+            {
+                row = r;
+            }
+        }
         self.movie_dto(&row).await
     }
 
@@ -276,6 +293,28 @@ impl Service {
             },
             None => Vec::new(),
         };
+        if eps.is_empty()
+            && let Some(c) = &client
+            && let Ok(Some(mut extra)) = c.vod_enrich(VodKind::Series, &row.ext_id).await
+        {
+            // The episode list is created by `provider-info`; ask once, then read it again.
+            extra.title = row.name.clone();
+            if let Some(r) = self
+                .store
+                .upsert_vod_items(row.source_id, &[extra], now_utc())
+                .await?
+                .into_iter()
+                .next()
+            {
+                row = r;
+            }
+            if let Ok(items) = c.series_episodes(&row.ext_id).await {
+                eps = self
+                    .store
+                    .upsert_vod_items(row.source_id, &items, now_utc())
+                    .await?;
+            }
+        }
         if eps.is_empty() {
             eps = self.store.vod_episodes(row.source_id, &row.ext_id).await?; // offline: the cache
         }
@@ -513,14 +552,28 @@ impl Service {
         }
         .unwrap_or_else(|| "Unknown channel".into());
         let title = r.title.clone().unwrap_or_else(|| "Recording".into());
-        let rule_id = (r.rule_label.as_deref() == Some("Series"))
-            .then(|| {
-                rules
-                    .iter()
-                    .find(|x| x.kind == "series" && x.title == title)
-                    .map(|x| x.id)
+        // Link to the rule that made it: recurring recordings are tagged with the rule id; series
+        // recordings carry no tag, so they match by title + tvg_id (`"<tvg>|<title>"`).
+        let tvg = r.tvg_id.clone().unwrap_or_default();
+        let by_recurring = r.rule_ext.as_deref().and_then(|e| {
+            rules
+                .iter()
+                .find(|x| x.kind == "recurring" && x.ext_id == e)
+        });
+        let by_series = rules
+            .iter()
+            .find(|x| x.kind == "series" && x.ext_id == format!("{tvg}|{title}"));
+        let linked = by_recurring.or(by_series);
+        let rule_id = linked.map(|x| x.id);
+        let rule_label = r.rule_label.clone().or_else(|| {
+            linked.map(|x| {
+                if x.kind == "series" {
+                    "Series".to_owned()
+                } else {
+                    "Recurring".to_owned()
+                }
             })
-            .flatten();
+        });
         Ok(RecordingDto {
             id: r.id,
             title,
@@ -530,7 +583,7 @@ impl Service {
             end_utc: r.end_utc,
             status: r.status().as_str(),
             rule_id,
-            rule_label: r.rule_label.clone(),
+            rule_label,
             size_bytes: r.size_bytes,
             error: r.error.clone(),
         })
@@ -747,6 +800,8 @@ impl Service {
             size_bytes: r.size_bytes,
             error: r.error.clone(),
             file_url: r.file_url.clone(),
+            rule_ext: r.rule_ext.clone(),
+            tvg_id: r.tvg_id.clone(),
         };
         let plan = c.recording_plan(&info).await?;
         let resume_secs = self

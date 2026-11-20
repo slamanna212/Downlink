@@ -74,7 +74,87 @@ fn first_http(v: Option<&Value>) -> Option<String> {
     (c.starts_with("http://") || c.starts_with("https://")).then_some(c)
 }
 
+/// Fields of `provider-info` we use. The reply also holds an `m3u_account` summary and more; serde
+/// skips what is not named here.
+#[derive(serde::Deserialize, Default)]
+struct ProviderInfo {
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    description: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    plot: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_i64")]
+    year: Option<i64>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    genre: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    rating: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_i64")]
+    duration_secs: Option<i64>,
+    #[serde(default)]
+    backdrop_path: Option<Value>,
+}
+
 impl DispatcharrClient {
+    /// Rewrite an absolute URL the server built from the request Host (`cache_url`, image URLs) onto
+    /// our configured base when it is one of its own `/api/` paths; relative paths are joined;
+    /// anything else (a poster CDN) stays as it is.
+    fn server_url(&self, raw: &str) -> Option<String> {
+        if raw.starts_with("http://") || raw.starts_with("https://") {
+            let u = reqwest::Url::parse(raw).ok()?;
+            if u.path().starts_with("/api/")
+                || (self.base.path() != "/" && u.path().starts_with(self.base.path()))
+            {
+                let tail = format!(
+                    "{}{}",
+                    u.path().trim_start_matches('/'),
+                    u.query().map(|q| format!("?{q}")).unwrap_or_default()
+                );
+                return self.base.join(&tail).ok().map(|x| x.to_string());
+            }
+            return Some(raw.to_owned());
+        }
+        self.url(raw.trim_start_matches('/'))
+            .ok()
+            .map(|u| u.to_string())
+    }
+
+    /// `GET …/{id}/provider-info/`: the server asks the provider (`get_vod_info` /
+    /// `get_series_info`) and fills in details; for a series it also creates the episode list. A
+    /// control endpoint, not a stream. Parsed into typed fields only.
+    pub async fn provider_info(&self, kind: VodKind, ext_id: &str) -> Result<Option<VodItem>> {
+        let seg = if kind == VodKind::Movie {
+            "movies"
+        } else {
+            "series"
+        };
+        let r = self
+            .call(
+                Method::GET,
+                &format!("api/vod/{seg}/{ext_id}/provider-info/"),
+                &[],
+                None,
+            )
+            .await?;
+        if r.status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let r = r.ok("that title's details")?;
+        let info: ProviderInfo = serde_json::from_slice(&r.body)?;
+        drop(r);
+        Ok(Some(VodItem {
+            kind: Some(kind),
+            ext_id: ext_id.to_owned(),
+            plot: info.description.or(info.plot).filter(|d| !d.is_empty()),
+            year: info.year,
+            genre: info.genre.filter(|g| !g.is_empty()),
+            rating: info.rating.filter(|g| !g.is_empty()),
+            duration_secs: info.duration_secs.filter(|d| *d > 0),
+            backdrop: first_http(info.backdrop_path.as_ref())
+                .map(|u| self.server_url(&u).unwrap_or(u)),
+            ..Default::default()
+        }))
+    }
+
     // ---- VOD --------------------------------------------------------------------------------
 
     pub async fn vod_category_list(&self, kind: VodKind) -> Result<Vec<VodCategoryInfo>> {
@@ -141,14 +221,16 @@ impl DispatcharrClient {
             l.get("cache_url")
                 .and_then(flex_string)
                 .filter(|c| !c.is_empty())
-                .and_then(|c| {
-                    self.url(c.trim_start_matches('/'))
-                        .ok()
-                        .map(|u| u.to_string())
-                })
+                .and_then(|c| self.server_url(&c))
                 .or_else(|| first_http(l.get("url")))
         });
-        let cp = v.get("custom_properties");
+        // `custom_properties` is an object on most rows but a JSON *string* in `/api/vod/all/`.
+        let cp_owned: Option<Value> = match v.get("custom_properties") {
+            Some(Value::String(t)) => serde_json::from_str(t).ok(),
+            Some(o) => Some(o.clone()),
+            None => None,
+        };
+        let cp = cp_owned.as_ref();
         Some(VodItem {
             kind: Some(kind),
             uuid: s(v, "uuid"),
@@ -172,7 +254,8 @@ impl DispatcharrClient {
             episode: v.get("episode_number").and_then(flex_i64),
             duration_secs: v.get("duration_secs").and_then(flex_i64).filter(|d| *d > 0),
             poster,
-            backdrop: first_http(cp.and_then(|c| c.get("backdrop_path"))),
+            backdrop: first_http(cp.and_then(|c| c.get("backdrop_path")))
+                .map(|u| self.server_url(&u).unwrap_or(u)),
             category_ext: None,
             container: None,
             ext_id: id,
@@ -326,30 +409,42 @@ impl DispatcharrClient {
             .or_else(|| s(&cp, "title"))
             .unwrap_or_else(|| "Recording".to_owned());
         let status_s = s(&cp, "status").map(|x| x.to_ascii_lowercase());
+        // `status` is absent while a one-off or series recording is scheduled: derive from times.
+        let by_time = |now: i64| {
+            if now < rec_start {
+                RecStatus::Scheduled
+            } else if now < rec_end {
+                RecStatus::Recording
+            } else {
+                RecStatus::Completed
+            }
+        };
+        let mut interrupted = false;
         let status = match status_s.as_deref() {
             Some("scheduled" | "pending" | "upcoming") => RecStatus::Scheduled,
             Some("recording" | "in_progress" | "running" | "active") => RecStatus::Recording,
             Some("failed" | "error") => RecStatus::Failed,
-            Some("completed" | "complete" | "done" | "finished" | "stopped" | "interrupted") => {
+            // Stopped early: the partial file is playable, so it is a finished recording.
+            Some("completed" | "complete" | "done" | "finished" | "stopped") => {
                 RecStatus::Completed
             }
-            _ => {
-                if now < rec_start {
-                    RecStatus::Scheduled
-                } else if now < rec_end {
-                    RecStatus::Recording
-                } else {
-                    RecStatus::Completed
-                }
+            Some("interrupted") => {
+                interrupted = true;
+                RecStatus::Failed
             }
+            // Cancelled recordings are gone as far as the user is concerned.
+            Some("cancelled" | "canceled") => return None,
+            _ => by_time(now),
         };
-        let rule_label = if cp.get("rule_id").is_some()
-            || cp.get("series_rule").is_some()
-            || cp.get("rule").and_then(Value::as_str) == Some("series")
+        let rule = cp.get("rule").filter(|r| r.is_object());
+        let rule_ext = rule.and_then(|r| s(r, "id"));
+        let rule_label = if rule.and_then(|r| r.get("type")).and_then(Value::as_str)
+            == Some("recurring")
+            || cp.get("recurring_rule_id").is_some()
         {
-            Some("Series".to_owned())
-        } else if cp.get("recurring_rule_id").is_some() {
             Some("Recurring".to_owned())
+        } else if cp.get("rule_id").is_some() || cp.get("series_rule").is_some() {
+            Some("Series".to_owned())
         } else {
             None
         };
@@ -365,10 +460,16 @@ impl DispatcharrClient {
                 .iter()
                 .find_map(|k| cp.get(*k).and_then(flex_i64)),
             error: (status == RecStatus::Failed).then(|| {
-                s(&cp, "error")
-                    .or_else(|| s(&cp, "message"))
-                    .unwrap_or_else(|| "The recording failed.".into())
+                if interrupted {
+                    "The recording was interrupted.".to_owned()
+                } else {
+                    s(&cp, "error")
+                        .or_else(|| s(&cp, "message"))
+                        .unwrap_or_else(|| "The recording failed.".into())
+                }
             }),
+            rule_ext,
+            tvg_id: s(&program, "tvg_id"),
             file_url: s(&cp, "file_url"),
         })
     }
@@ -398,9 +499,19 @@ impl DispatcharrClient {
                 "start_time": fmt_time(r.start_utc)?, "end_time": fmt_time(r.end_utc)?,
             }},
         });
-        self.call(Method::POST, "api/channels/recordings/", &[], Some(&body))
-            .await?
-            .ok("recording")?;
+        let r = self
+            .call(Method::POST, "api/channels/recordings/", &[], Some(&body))
+            .await?;
+        if r.status == reqwest::StatusCode::BAD_REQUEST {
+            // The body is only inspected, never echoed.
+            let text = String::from_utf8_lossy(&r.body);
+            return Err(if text.contains("must be in the future") {
+                AppError::stream("That programme has already finished, so it cannot be recorded.")
+            } else {
+                AppError::stream("The server did not accept that recording.")
+            });
+        }
+        r.ok("recording")?;
         Ok(())
     }
 
@@ -412,13 +523,31 @@ impl DispatcharrClient {
             .ok_or_else(|| {
                 AppError::local("This channel has no guide id, so a series rule cannot be created.")
             })?;
-        let body = json!({
+        let mut body = json!({
             "tvg_id": tvg, "mode": "new", "title": r.title, "title_mode": "exact",
             "channel_id": r.channel_ext_id.parse::<i64>().ok(),
         });
+        if let Some(d) = r.description.as_deref().filter(|d| !d.is_empty()) {
+            body["description"] = json!(d);
+            body["description_mode"] = json!("contains");
+        }
         self.call(Method::POST, "api/channels/series-rules/", &[], Some(&body))
             .await?
             .ok("the series rule")?;
+        // Creating a rule schedules nothing by itself: evaluate so matching programmes get
+        // recordings. Best effort; the rule exists either way.
+        if let Err(e) = self
+            .call(
+                Method::POST,
+                "api/channels/series-rules/evaluate/",
+                &[],
+                Some(&json!({})),
+            )
+            .await
+            .and_then(|r| r.ok("the series rule"))
+        {
+            tracing::warn!(error = %e, "series rule evaluation failed");
+        }
         Ok(())
     }
 
@@ -457,26 +586,38 @@ impl DispatcharrClient {
                 "Extend a recording by between 1 minute and 24 hours.",
             ));
         }
-        self.call(
-            Method::POST,
-            &format!("api/channels/recordings/{id}/extend/"),
-            &[],
-            Some(&json!({ "minutes": minutes })),
-        )
-        .await?
-        .ok("that recording")?;
+        let r = self
+            .call(
+                Method::POST,
+                &format!("api/channels/recordings/{id}/extend/"),
+                &[],
+                Some(&json!({ "extra_minutes": minutes })),
+            )
+            .await?;
+        if r.status == reqwest::StatusCode::BAD_REQUEST {
+            let text = String::from_utf8_lossy(&r.body);
+            return Err(AppError::stream(if text.contains("already finished") {
+                "That recording has already finished."
+            } else {
+                "The server would not extend that recording."
+            }));
+        }
+        r.ok("that recording")?;
         Ok(())
     }
 
     /// Plan for a recording: HLS while it runs, the file when complete. Authenticated with the
     /// source key (same-origin media, not a provider stream).
     pub async fn recording_play_plan(&self, rec: &RecordingInfo) -> Result<PlayPlan> {
-        let rel = match rec.file_url.as_deref().filter(|u| !u.is_empty()) {
-            Some(u) => u.to_owned(),
-            None if rec.status == RecStatus::Recording => {
-                format!("api/channels/recordings/{}/hls/index.m3u8", rec.ext_id)
+        // While recording, the EVENT playlist is the only seekable-growing source (`/file/` would
+        // just 302 to it); afterwards the MKV.
+        let rel = if rec.status == RecStatus::Recording {
+            format!("api/channels/recordings/{}/hls/index.m3u8", rec.ext_id)
+        } else {
+            match rec.file_url.as_deref().filter(|u| !u.is_empty()) {
+                Some(u) => u.to_owned(),
+                None => format!("api/channels/recordings/{}/file/", rec.ext_id),
             }
-            None => format!("api/channels/recordings/{}/file/", rec.ext_id),
         };
         let url = if rel.starts_with("http://") || rel.starts_with("https://") {
             let u = reqwest::Url::parse(&rel)?;

@@ -373,6 +373,11 @@ pub trait Source: Send + Sync {
     async fn vod_detail(&self, _kind: VodKind, _ext_id: &str) -> Result<VodItem> {
         Err(no_vod())
     }
+    /// Fill in details the server only fetches on demand (Dispatcharr's `provider-info`: movie
+    /// description/genre/duration, and a series' episode list). `None` when there is nothing to add.
+    async fn vod_enrich(&self, _kind: VodKind, _ext_id: &str) -> Result<Option<VodItem>> {
+        Ok(None)
+    }
     async fn series_episodes(&self, _series_ext_id: &str) -> Result<Vec<VodItem>> {
         Err(no_vod())
     }

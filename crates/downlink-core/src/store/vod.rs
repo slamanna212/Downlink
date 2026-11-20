@@ -48,9 +48,11 @@ pub struct RecordingRow {
     pub size_bytes: Option<i64>,
     pub error: Option<String>,
     pub file_url: Option<String>,
+    pub rule_ext: Option<String>,
+    pub tvg_id: Option<String>,
 }
 
-const REC_COLS: &str = "id, source_id, ext_id, channel_id, start_utc, end_utc, state, title, rule_label, size_bytes, error, file_url";
+const REC_COLS: &str = "id, source_id, ext_id, channel_id, start_utc, end_utc, state, title, rule_label, size_bytes, error, file_url, rule_ext, tvg_id";
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct RuleRow {
@@ -176,12 +178,13 @@ impl Store {
                     .await?;
             let id: i64 = sqlx::query_scalar(
                 "INSERT INTO recording (source_id, ext_id, channel_id, start_utc, end_utc, state, title,
-                   rule_label, size_bytes, error, file_url)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                   rule_label, size_bytes, error, file_url, rule_ext, tvg_id)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                  ON CONFLICT(source_id, ext_id) DO UPDATE SET channel_id = excluded.channel_id,
                    start_utc = excluded.start_utc, end_utc = excluded.end_utc, state = excluded.state,
                    title = excluded.title, rule_label = excluded.rule_label, size_bytes = excluded.size_bytes,
-                   error = excluded.error, file_url = excluded.file_url
+                   error = excluded.error, file_url = excluded.file_url,
+                   rule_ext = excluded.rule_ext, tvg_id = excluded.tvg_id
                  RETURNING id",
             )
             .bind(source_id)
@@ -195,6 +198,8 @@ impl Store {
             .bind(r.size_bytes)
             .bind(&r.error)
             .bind(&r.file_url)
+            .bind(&r.rule_ext)
+            .bind(&r.tvg_id)
             .fetch_one(&mut *tx)
             .await?;
             ids.push(id);

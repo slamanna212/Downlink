@@ -549,7 +549,7 @@ async fn schedule_once_and_series_cancel_stop_extend_delete() {
         .await;
     Mock::given(method("POST"))
         .and(path("/api/channels/recordings/51/extend/"))
-        .and(body_partial_json(json!({"minutes": 30})))
+        .and(body_partial_json(json!({"extra_minutes": 30})))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
         .expect(1)
         .mount(&server)
@@ -928,4 +928,203 @@ async fn provider_credentials_in_the_episodes_payload_never_reach_sqlite() {
             }
         }
     }
+}
+
+// ---- captured 0.34.1 behaviour through the Service ----------------------------------------------
+
+fn tfx(name: &str) -> Value {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/fixtures/dispatcharr")
+        .join(name);
+    serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+}
+
+/// A Dispatcharr with only the connect/sync basics mounted, so a test mounts its own VOD/DVR mocks.
+async fn bare_server() -> MockServer {
+    let s = MockServer::start().await;
+    get(&s, "/api/core/version/", fx("version.json")).await;
+    get(&s, "/api/accounts/users/me/", fx("me.json")).await;
+    get(&s, "/api/core/settings/", fx("settings.json")).await;
+    get(&s, "/api/core/streamprofiles/", fx("stream_profiles.json")).await;
+    get(&s, "/api/channels/groups/", fx("groups.json")).await;
+    get(&s, "/api/epg/grid/", json!({"data": []})).await;
+    Mock::given(method("GET"))
+        .and(path("/api/channels/channels/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&s)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/accounts/users/me/app-data/com.downlink.state.v1/",
+        ))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&s)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(
+            "/api/accounts/users/me/app-data/com.downlink.state.v1/",
+        ))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&s)
+        .await;
+    s
+}
+
+async fn svc_for(server: &MockServer) -> Arc<Service> {
+    let dir = Box::leak(Box::new(tempfile::tempdir().unwrap()));
+    let svc = Service::with_store(
+        Store::open_memory().await.unwrap(),
+        Arc::new(MemorySecretStore::new()),
+        dir.path().join("img"),
+        "t".into(),
+    );
+    let input: AddSourceInput = serde_json::from_value(json!({"kind": "dispatcharr", "name": "S", "url": server.uri(), "apiKey": KEY, "allowSelfSigned": false})).unwrap();
+    svc.add_source(input).await.unwrap();
+    svc
+}
+
+#[tokio::test]
+async fn movie_details_are_lazy_provider_info_fills_them_once() {
+    let s = bare_server().await;
+    let mut movies = tfx("vod_movies.json");
+    for m in movies["results"].as_array_mut().unwrap() {
+        m["description"] = json!("");
+        m["genre"] = Value::Null;
+        m["duration_secs"] = Value::Null;
+    }
+    let row = movies["results"][0].clone();
+    let id = row["id"].as_i64().unwrap();
+    get(&s, "/api/vod/categories/", tfx("vod_categories.json")).await;
+    get(&s, "/api/vod/movies/", movies).await;
+    get(&s, "/api/vod/series/", json!({"count": 0, "results": []})).await;
+    get(&s, &format!("/api/vod/movies/{id}/"), row).await;
+    let mut info = tfx("vod_movie_provider_info.json");
+    info["id"] = json!(id);
+    Mock::given(method("GET"))
+        .and(path(format!("/api/vod/movies/{id}/provider-info/")))
+        .and(header("X-API-Key", KEY))
+        .respond_with(ResponseTemplate::new(200).set_body_json(info))
+        .expect(1)
+        .mount(&s)
+        .await;
+    let svc = svc_for(&s).await;
+
+    let list = svc.list_movies(VodListArgs::default()).await.unwrap();
+    let first = list
+        .iter()
+        .find(|m| m.title.contains("Documentary Three"))
+        .unwrap();
+    assert!(
+        first.plot.is_none() && first.genres.is_empty() && first.duration_secs.is_none(),
+        "empty before provider-info"
+    );
+    let detail = svc.get_movie(first.id).await.unwrap();
+    assert_eq!(
+        detail.plot.as_deref(),
+        Some("Synthetic plot for Test Documentary Three.")
+    );
+    assert_eq!(detail.genres, ["Test"]);
+    assert_eq!(detail.duration_secs, Some(20));
+    // Cached: a second call does not ask the provider again (expect(1) above).
+    svc.get_movie(first.id).await.unwrap();
+}
+
+#[tokio::test]
+async fn series_episodes_are_lazy_empty_until_provider_info_has_run() {
+    let s = bare_server().await;
+    get(&s, "/api/vod/categories/", tfx("vod_categories.json")).await;
+    get(&s, "/api/vod/movies/", json!({"count": 0, "results": []})).await;
+    get(&s, "/api/vod/series/", tfx("vod_series.json")).await;
+    let series_id = tfx("vod_series.json")["results"][0]["id"].as_i64().unwrap();
+    get(
+        &s,
+        &format!("/api/vod/series/{series_id}/"),
+        tfx("vod_series_detail.json"),
+    )
+    .await;
+    // First read: [] (nothing fetched yet). After provider-info: the real list.
+    Mock::given(method("GET"))
+        .and(path(format!("/api/vod/series/{series_id}/episodes/")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .up_to_n_times(1)
+        .mount(&s)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/vod/series/{series_id}/episodes/")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tfx("vod_series_episodes.json")))
+        .mount(&s)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/vod/series/{series_id}/provider-info/")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(tfx("vod_series_provider_info.json")),
+        )
+        .expect(1)
+        .mount(&s)
+        .await;
+    let svc = svc_for(&s).await;
+    let list = svc.list_series(VodListArgs::default()).await.unwrap();
+    let d = svc.get_series(list[0].id).await.unwrap();
+    let total: usize = d.seasons.iter().map(|x| x.episodes.len()).sum();
+    assert_eq!(total, 5, "episodes appear after provider-info");
+    assert!(d.next_episode_id.is_some());
+    assert!(
+        !serde_json::to_string(&d).unwrap().contains("password"),
+        "the embedded provider account never reaches the DTO"
+    );
+}
+
+#[tokio::test]
+async fn recording_rows_link_to_their_rules_and_play_via_the_captured_urls() {
+    let s = bare_server().await;
+    get(&s, "/api/vod/movies/", json!({"count": 0, "results": []})).await;
+    get(&s, "/api/vod/series/", json!({"count": 0, "results": []})).await;
+    get(&s, "/api/channels/recordings/", tfx("recordings_list.json")).await;
+    get(
+        &s,
+        "/api/channels/recurring-rules/",
+        tfx("recurring_rules.json"),
+    )
+    .await;
+    get(&s, "/api/channels/series-rules/", json!({"rules": [{"tvg_id": "test-news.test", "mode": "all", "title": "Pattern Playhouse", "title_mode": "exact"}]})).await;
+    let svc = svc_for(&s).await;
+    let rules = svc.list_recording_rules().await.unwrap();
+    let recurring = rules.iter().find(|r| r.kind == "recurring").unwrap().id;
+    let series = rules.iter().find(|r| r.kind == "series").unwrap().id;
+    let r = svc.list_recordings().await.unwrap();
+    let weekday = r
+        .upcoming
+        .iter()
+        .find(|x| x.title == "Synthetic Weekday Rule")
+        .unwrap();
+    assert_eq!(
+        (weekday.rule_id, weekday.rule_label.as_deref()),
+        (Some(recurring), Some("Recurring"))
+    );
+    let pp = r
+        .upcoming
+        .iter()
+        .find(|x| x.title == "Pattern Playhouse")
+        .unwrap();
+    assert_eq!(
+        (pp.rule_id, pp.rule_label.as_deref()),
+        (Some(series), Some("Series")),
+        "series recordings match by title + tvg_id"
+    );
+    let plain = r
+        .upcoming
+        .iter()
+        .find(|x| x.title == "Synthetic Upcoming Recording");
+    if let Some(p) = plain {
+        assert_eq!(p.rule_id, None);
+    }
+    // Stopped = finished, plays from /file/.
+    let stopped = r
+        .completed
+        .iter()
+        .find(|x| x.title == "Synthetic In Progress Recording")
+        .unwrap();
+    let play = svc.play_recording(stopped.id).await.unwrap();
+    assert!(play.plan.url.ends_with("/api/channels/recordings/29/file/"));
+    assert_eq!(play.plan.headers[0].0, "X-API-Key");
 }

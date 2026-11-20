@@ -76,9 +76,10 @@ pub struct VodListPage {
     pub total: Option<i64>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RecStatus {
+    #[default]
     Scheduled,
     Recording,
     Completed,
@@ -96,7 +97,7 @@ impl RecStatus {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct RecordingInfo {
     pub ext_id: String,
     /// The source's channel id (`channel.ext_id`).
@@ -110,6 +111,10 @@ pub struct RecordingInfo {
     pub error: Option<String>,
     /// Path or URL of the media (HLS while recording, file when complete).
     pub file_url: Option<String>,
+    /// The recurring rule that created it (`custom_properties.rule.id`), when tagged.
+    pub rule_ext: Option<String>,
+    /// Guide id of the programme (matches series rules by title + tvg_id).
+    pub tvg_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

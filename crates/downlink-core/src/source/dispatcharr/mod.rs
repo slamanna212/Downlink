@@ -919,8 +919,11 @@ impl DispatcharrClient {
             return crate::images::fetch_public(url, self.insecure_tls).await;
         }
         let rel = u.path().strip_prefix(self.base.path()).unwrap_or_default();
+        // Keep the query: image URLs select the variant (`?kind=backdrop&index=0`).
+        let pairs: Vec<(String, String)> = u.query_pairs().into_owned().collect();
+        let q: Vec<(&str, String)> = pairs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
         let r = self
-            .call(Method::GET, rel, &[], None)
+            .call(Method::GET, rel, &q, None)
             .await?
             .ok("that image")?;
         Ok(crate::images::RawImage {
@@ -1255,6 +1258,10 @@ impl Source for DispatcharrClient {
 
     async fn series_episodes(&self, series_ext_id: &str) -> Result<Vec<VodItem>> {
         self.series_episode_list(series_ext_id).await
+    }
+
+    async fn vod_enrich(&self, kind: VodKind, ext_id: &str) -> Result<Option<VodItem>> {
+        self.provider_info(kind, ext_id).await
     }
 
     async fn play_vod(&self, item: &VodItem) -> Result<PlayPlan> {
