@@ -374,3 +374,150 @@ pub struct DiagnosticsData {
 /// Settings are an open JSON object (the UI owns the field set); core validates only
 /// `liveBufferSecs` (1..=10) and persists the rest verbatim.
 pub type SettingsDto = Value;
+
+// ---- VOD ------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum VodKindArg {
+    Movie,
+    Series,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VodCategoryDto {
+    pub id: i64,
+    pub name: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VodListArgs {
+    #[serde(default)]
+    pub category_id: Option<i64>,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub offset: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MovieDto {
+    pub id: i64,
+    pub title: String,
+    pub year: Option<i64>,
+    /// 0..10 or null.
+    pub rating: Option<f64>,
+    pub duration_secs: Option<i64>,
+    pub poster: Option<String>,
+    pub backdrop: Option<String>,
+    pub plot: Option<String>,
+    pub genres: Vec<String>,
+    pub category_id: Option<i64>,
+    /// Saved position in seconds, null when never watched.
+    pub resume_secs: Option<i64>,
+    pub watched: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeriesDto {
+    pub id: i64,
+    pub title: String,
+    pub year: Option<i64>,
+    pub rating: Option<f64>,
+    pub poster: Option<String>,
+    pub backdrop: Option<String>,
+    pub plot: Option<String>,
+    pub genres: Vec<String>,
+    pub category_id: Option<i64>,
+    pub season_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EpisodeDto {
+    pub id: i64,
+    pub number: i64,
+    pub title: String,
+    pub plot: Option<String>,
+    pub duration_secs: Option<i64>,
+    pub still: Option<String>,
+    pub resume_secs: Option<i64>,
+    pub watched: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeasonDto {
+    pub number: i64,
+    pub episodes: Vec<EpisodeDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SeriesDetailDto {
+    pub series: SeriesDto,
+    pub seasons: Vec<SeasonDto>,
+    /// Episode to continue with (resume or next unwatched), null when none.
+    pub next_episode_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayVodArgs {
+    /// `movie` or `episode`.
+    pub kind: String,
+    pub id: i64,
+    #[serde(default)]
+    pub resume: bool,
+}
+
+// ---- DVR ------------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordKindArg {
+    Once,
+    Series,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingDto {
+    pub id: i64,
+    pub title: String,
+    pub channel_id: Option<i64>,
+    pub channel_name: String,
+    pub start_utc: i64,
+    pub end_utc: i64,
+    pub status: &'static str,
+    pub rule_id: Option<i64>,
+    pub rule_label: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingsDto {
+    pub upcoming: Vec<RecordingDto>,
+    pub in_progress: Vec<RecordingDto>,
+    /// Finished recordings, failed ones included (their `status` says so).
+    pub completed: Vec<RecordingDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingRuleDto {
+    pub id: i64,
+    pub title: String,
+    pub channel_name: String,
+    pub kind: &'static str,
+    pub schedule: String,
+}

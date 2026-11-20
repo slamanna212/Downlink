@@ -18,6 +18,21 @@ pub struct ProgrammeRow {
 }
 
 impl Store {
+    pub async fn programme_row(
+        &self,
+        channel_id: i64,
+        start_utc: i64,
+    ) -> Result<Option<ProgrammeRow>> {
+        Ok(sqlx::query_as(
+            "SELECT channel_id, start_utc, end_utc, ext_id, title, subtitle, description, season, episode, flags
+             FROM programme WHERE channel_id = ? AND start_utc = ?",
+        )
+        .bind(channel_id)
+        .bind(start_utc)
+        .fetch_optional(self.pool())
+        .await?)
+    }
+
     /// Upsert programmes in one transaction. Returns rows written.
     pub async fn upsert_programmes(&self, rows: &[ProgrammeRow]) -> Result<usize> {
         let mut tx = self.pool().begin().await?;

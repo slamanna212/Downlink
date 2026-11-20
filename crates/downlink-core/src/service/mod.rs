@@ -5,6 +5,7 @@
 
 pub mod dto;
 mod logtail;
+mod media;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -60,6 +61,7 @@ fn display_url(u: &str) -> String {
     }
 }
 pub use logtail::LogTail;
+pub use media::{RecordingPlay, VodPlay};
 
 const SETTINGS_KEY: &str = "settings";
 const PREF_ADULT: &str = "pref.include_adult";
@@ -86,6 +88,8 @@ pub struct Service {
     registered_logos: Mutex<HashSet<String>>,
     /// Failover position (0-based) believed to be in use, per channel row id.
     current_stream: Mutex<HashMap<i64, usize>>,
+    /// Category id -> (source id, server category id) for ids that were hashed.
+    vod_cats: Mutex<HashMap<i64, (i64, String)>>,
     log_tail: LogTail,
     app_version: String,
 }
@@ -120,6 +124,7 @@ impl Service {
             status: Mutex::new(HashMap::new()),
             registered_logos: Mutex::new(HashSet::new()),
             current_stream: Mutex::new(HashMap::new()),
+            vod_cats: Mutex::new(HashMap::new()),
             log_tail: LogTail::new(),
             app_version,
         })
@@ -972,14 +977,30 @@ impl Service {
 
     pub async fn get_now_next(&self, channel_ids: &[i64]) -> Result<Vec<NowNextDto>> {
         let m = epg::now_next_many(&self.store, channel_ids, now_utc()).await?;
+        // Collect every programme once, flag the ones being recorded, then rebuild the pairs.
+        let mut flat: Vec<ProgrammeDto> = Vec::new();
+        for id in channel_ids {
+            if let Some(nn) = m.get(id) {
+                flat.extend(nn.now.iter().chain(nn.next.iter()).map(ProgrammeDto::from));
+            }
+        }
+        self.mark_scheduled(&mut flat).await?;
+        let marked: HashMap<(i64, i64), ProgrammeDto> = flat
+            .into_iter()
+            .map(|p| ((p.channel_id, p.start_utc), p))
+            .collect();
+        let pick = |p: &Option<crate::store::ProgrammeRow>| {
+            p.as_ref()
+                .and_then(|p| marked.get(&(p.channel_id, p.start_utc)).cloned())
+        };
         Ok(channel_ids
             .iter()
             .map(|id| {
                 let nn = m.get(id).cloned().unwrap_or_default();
                 NowNextDto {
                     channel_id: *id,
-                    now: nn.now.as_ref().map(Into::into),
-                    next: nn.next.as_ref().map(Into::into),
+                    now: pick(&nn.now),
+                    next: pick(&nn.next),
                 }
             })
             .collect())
@@ -1008,9 +1029,11 @@ impl Service {
             },
         )
         .await?;
+        let mut programmes: Vec<ProgrammeDto> = progs.iter().map(Into::into).collect();
+        self.mark_scheduled(&mut programmes).await?;
         Ok(GuideDto {
             channels: self.to_channel_dtos(&rows).await?,
-            programmes: progs.iter().map(Into::into).collect(),
+            programmes,
         })
     }
 
@@ -1044,7 +1067,7 @@ impl Service {
             .into_iter()
             .map(|c| (c.id, c))
             .collect();
-        let programmes = progs
+        let mut programmes: Vec<ProgrammeHitDto> = progs
             .iter()
             .filter_map(|p| {
                 Some(ProgrammeHitDto {
@@ -1053,6 +1076,11 @@ impl Service {
                 })
             })
             .collect();
+        let mut flat: Vec<ProgrammeDto> = programmes.iter().map(|h| h.programme.clone()).collect();
+        self.mark_scheduled(&mut flat).await?;
+        for (h, p) in programmes.iter_mut().zip(flat) {
+            h.programme = p;
+        }
         Ok(SearchDto {
             channels: self.to_channel_dtos(&rows).await?,
             programmes,
@@ -1103,7 +1131,9 @@ impl Service {
             },
         )
         .await?;
-        Ok(rows.iter().map(Into::into).collect())
+        let mut out: Vec<ProgrammeDto> = rows.iter().map(Into::into).collect();
+        self.mark_scheduled(&mut out).await?;
+        Ok(out)
     }
 
     async fn programme_dto(&self, channel_id: i64, start_utc: i64) -> Result<Option<ProgrammeDto>> {
@@ -1192,11 +1222,11 @@ impl Service {
 
     async fn continue_item_vod(
         &self,
-        _r: &crate::store::ResumeRow,
-        _progress: Option<f64>,
-        _remaining: Option<i64>,
+        r: &crate::store::ResumeRow,
+        progress: Option<f64>,
+        remaining: Option<i64>,
     ) -> Result<Option<ContinueItemDto>> {
-        Ok(None)
+        self.continue_item_vod_impl(r, progress, remaining).await
     }
 
     async fn continue_item(

@@ -6,6 +6,7 @@ mod programmes;
 mod sessions;
 mod sources;
 mod userstate;
+mod vod;
 
 use std::path::Path;
 use std::str::FromStr;
@@ -21,6 +22,7 @@ pub use programmes::ProgrammeRow;
 pub use sessions::OpenSession;
 pub use sources::{NewSource, SourceRow, SourceUpdate};
 pub use userstate::{FavouriteRow, RecentRow, ResumeRow};
+pub use vod::{RecordingRow, RuleRow, VodRow};
 
 /// Handle to the local database. Cheap to clone.
 #[derive(Clone, Debug)]

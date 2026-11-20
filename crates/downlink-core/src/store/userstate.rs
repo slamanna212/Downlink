@@ -186,7 +186,7 @@ impl Store {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(source_id, kind, item_key) DO UPDATE SET
                position_ms = ?4, duration_ms = ?5, updated_at = ?6
-             WHERE excluded.updated_at > resume.updated_at",
+             WHERE excluded.updated_at >= resume.updated_at",
         )
         .bind(r.source_id)
         .bind(&r.kind)
@@ -283,5 +283,18 @@ impl Store {
         .execute(self.pool())
         .await?;
         Ok(())
+    }
+}
+
+impl ResumeRow {
+    /// Watched to (nearly) the end: not offered for resume, shown as watched.
+    pub fn finished(&self) -> bool {
+        self.duration_ms
+            .is_some_and(|d| d > 0 && self.position_ms * 100 >= d * FINISHED_FRACTION_PERCENT)
+    }
+
+    /// Worth resuming: past the first seconds and not finished.
+    pub fn resumable(&self) -> bool {
+        self.position_ms >= MIN_RESUME_MS && !self.finished()
     }
 }

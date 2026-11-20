@@ -22,6 +22,7 @@ use super::dispatcharr::dto::{flex_i64, flex_string};
 use super::{
     AccountInfo, Caps, ChannelKey, ChannelPage, Page, PlayPlan, PlayProfile, Programme, SessionId,
     Source, SourceChannel, SourceGroup, SourceId, SourceKind, Surface, TimeWindow, UserLevel,
+    VodCategoryInfo, VodItem, VodKind, VodListPage, VodListQuery,
 };
 use crate::auth::SecretString;
 use crate::catchup::template::{CatchupTemplate, ExpandCtx, Mode, TimeSemantics, XcParts, expand};
@@ -48,7 +49,19 @@ pub struct XtreamClient {
     sem: Semaphore,
     state: Mutex<AccountState>,
     vault: crate::vault::Vault,
+    has_vod: std::sync::atomic::AtomicBool,
+    vod_cache: tokio::sync::Mutex<VodCache>,
 }
+
+/// Xtream has no server-side paging or search: the movie and series lists are fetched whole and
+/// served from memory for a few minutes.
+#[derive(Default)]
+struct VodCache {
+    movies: Option<(std::time::Instant, std::sync::Arc<Vec<VodStreamDto>>)>,
+    series: Option<(std::time::Instant, std::sync::Arc<Vec<SeriesDto>>)>,
+}
+
+const VOD_CACHE_TTL: Duration = Duration::from_secs(600);
 
 impl std::fmt::Debug for XtreamClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -86,6 +99,16 @@ pub fn normalise_base(input: &str) -> Result<Url> {
     Ok(u)
 }
 
+/// `Movie Title (2021)` -> 2021.
+fn year_in_title(name: &str) -> Option<i64> {
+    let t = name.trim_end();
+    let inner = t.strip_suffix(')')?.rsplit_once('(')?.1;
+    (inner.len() == 4)
+        .then(|| inner.parse().ok())
+        .flatten()
+        .filter(|y| (1850..2200).contains(y))
+}
+
 fn some_str(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(flex_string)
 }
@@ -113,6 +136,8 @@ impl XtreamClient {
             sem: Semaphore::new(MAX_CONCURRENT),
             state: Mutex::new(AccountState::default()),
             vault: crate::vault::Vault::new(),
+            has_vod: std::sync::atomic::AtomicBool::new(false),
+            vod_cache: tokio::sync::Mutex::new(VodCache::default()),
         })
     }
 
@@ -356,7 +381,7 @@ impl XtreamClient {
             .await
     }
 
-    pub async fn vod_categories(&self) -> Result<Vec<CategoryDto>> {
+    pub async fn vod_category_list(&self) -> Result<Vec<CategoryDto>> {
         self.list("get_vod_categories", &[], "its movie categories")
             .await
     }
@@ -428,6 +453,96 @@ impl XtreamClient {
         HttpFetcher::new(self.insecure_tls)
     }
 
+    async fn movies_cached(&self) -> Result<std::sync::Arc<Vec<VodStreamDto>>> {
+        let mut g = self.vod_cache.lock().await;
+        if let Some((t, v)) = &g.movies
+            && t.elapsed() < VOD_CACHE_TTL
+        {
+            return Ok(v.clone());
+        }
+        let v = std::sync::Arc::new(self.vod_streams(None).await?);
+        g.movies = Some((std::time::Instant::now(), v.clone()));
+        Ok(v)
+    }
+
+    async fn series_cached(&self) -> Result<std::sync::Arc<Vec<SeriesDto>>> {
+        let mut g = self.vod_cache.lock().await;
+        if let Some((t, v)) = &g.series
+            && t.elapsed() < VOD_CACHE_TTL
+        {
+            return Ok(v.clone());
+        }
+        let v = std::sync::Arc::new(self.series(None).await?);
+        g.series = Some((std::time::Instant::now(), v.clone()));
+        Ok(v)
+    }
+
+    async fn category_counts(
+        &self,
+        kind: VodKind,
+    ) -> Result<std::collections::HashMap<String, i64>> {
+        let mut m = std::collections::HashMap::new();
+        if kind == VodKind::Movie {
+            for x in self.movies_cached().await?.iter() {
+                *m.entry(x.category_id.clone().unwrap_or_default())
+                    .or_insert(0) += 1;
+            }
+        } else {
+            for x in self.series_cached().await?.iter() {
+                *m.entry(x.category_id.clone().unwrap_or_default())
+                    .or_insert(0) += 1;
+            }
+        }
+        Ok(m)
+    }
+
+    fn movie_item(&self, m: &VodStreamDto) -> VodItem {
+        let year = m.year.or_else(|| year_in_title(&m.name));
+        VodItem {
+            kind: Some(VodKind::Movie),
+            ext_id: m.stream_id.clone(),
+            title: m.name.clone(),
+            year,
+            rating: m.rating.clone().filter(|r| !r.is_empty()),
+            poster: m
+                .icon
+                .as_deref()
+                .filter(|i| !i.is_empty())
+                .map(|i| self.vault.template_url(i)),
+            category_ext: m.category_id.clone(),
+            container: m.container_extension.clone(),
+            ..Default::default()
+        }
+    }
+
+    fn series_item(&self, s: &SeriesDto) -> VodItem {
+        VodItem {
+            kind: Some(VodKind::Series),
+            ext_id: s.series_id.clone(),
+            title: s.name.clone(),
+            year: s
+                .release_date
+                .as_deref()
+                .and_then(|d| d.get(..4))
+                .and_then(|y| y.parse().ok()),
+            rating: s.rating.clone().filter(|r| !r.is_empty()),
+            genre: s.genre.clone().filter(|g| !g.is_empty()),
+            plot: s.plot.clone().filter(|p| !p.is_empty()),
+            poster: s
+                .cover
+                .as_deref()
+                .filter(|i| !i.is_empty())
+                .map(|i| self.vault.template_url(i)),
+            backdrop: s
+                .backdrop_path
+                .as_deref()
+                .filter(|i| !i.is_empty())
+                .map(|i| self.vault.template_url(i)),
+            category_ext: s.category_id.clone(),
+            ..Default::default()
+        }
+    }
+
     fn live_to_channel(&self, s: &LiveStreamDto, tz: Option<&str>) -> SourceChannel {
         let template = (s.tv_archive && s.tv_archive_days > 0).then(|| {
             CatchupTemplate {
@@ -472,12 +587,31 @@ impl Source for XtreamClient {
         SourceKind::Xtream
     }
 
+    /// VOD is advertised only when the panel actually has movies or series (probed at connect).
     fn caps(&self) -> Caps {
-        Caps::LIVE | Caps::EPG | Caps::CATCHUP | Caps::FAVOURITES | Caps::LIMITS
+        let c = Caps::LIVE | Caps::EPG | Caps::CATCHUP | Caps::FAVOURITES | Caps::LIMITS;
+        if self.has_vod.load(std::sync::atomic::Ordering::Relaxed) {
+            c | Caps::VOD
+        } else {
+            c
+        }
     }
 
     async fn connect(&self) -> Result<AccountInfo> {
-        self.account().await
+        let info = self.account().await?;
+        let vod = !self
+            .vod_category_list()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+            || !self
+                .series_categories()
+                .await
+                .unwrap_or_default()
+                .is_empty();
+        self.has_vod
+            .store(vod, std::sync::atomic::Ordering::Relaxed);
+        Ok(info)
     }
 
     /// Xtream is not paginated: everything arrives as one page.
@@ -593,6 +727,141 @@ impl Source for XtreamClient {
 
     async fn stop_session(&self, _s: SessionId) -> Result<()> {
         Ok(())
+    }
+
+    async fn vod_categories(&self, kind: VodKind) -> Result<Vec<VodCategoryInfo>> {
+        let cats = if kind == VodKind::Movie {
+            self.vod_category_list().await?
+        } else {
+            self.series_categories().await?
+        };
+        let counts = self.category_counts(kind).await.unwrap_or_default();
+        Ok(cats
+            .into_iter()
+            .map(|c| VodCategoryInfo {
+                count: Some(counts.get(&c.id).copied().unwrap_or(0)),
+                ext_id: c.id,
+                name: c.name,
+            })
+            .collect())
+    }
+
+    async fn vod_list(&self, kind: VodKind, q: &VodListQuery) -> Result<VodListPage> {
+        let needle = q
+            .search
+            .as_deref()
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty());
+        let matches = |name: &str, cat: &Option<String>| {
+            needle
+                .as_ref()
+                .is_none_or(|n| name.to_lowercase().contains(n.as_str()))
+                && q.category_ext
+                    .as_ref()
+                    .is_none_or(|c| cat.as_deref() == Some(c.as_str()))
+        };
+        let (offset, limit) = (
+            usize::try_from(q.offset.max(0)).unwrap_or(0),
+            usize::try_from(q.limit.clamp(1, 500)).unwrap_or(50),
+        );
+        let mut items = Vec::new();
+        let mut total = 0usize;
+        if kind == VodKind::Movie {
+            for m in self
+                .movies_cached()
+                .await?
+                .iter()
+                .filter(|m| matches(&m.name, &m.category_id))
+            {
+                if total >= offset && items.len() < limit {
+                    items.push(self.movie_item(m));
+                }
+                total += 1;
+            }
+        } else {
+            for sr in self
+                .series_cached()
+                .await?
+                .iter()
+                .filter(|s| matches(&s.name, &s.category_id))
+            {
+                if total >= offset && items.len() < limit {
+                    items.push(self.series_item(sr));
+                }
+                total += 1;
+            }
+        }
+        Ok(VodListPage {
+            items,
+            total: Some(i64::try_from(total).unwrap_or(0)),
+        })
+    }
+
+    async fn vod_detail(&self, kind: VodKind, ext_id: &str) -> Result<VodItem> {
+        let found = if kind == VodKind::Movie {
+            self.movies_cached()
+                .await?
+                .iter()
+                .find(|m| m.stream_id == ext_id)
+                .map(|m| self.movie_item(m))
+        } else {
+            self.series_cached()
+                .await?
+                .iter()
+                .find(|s| s.series_id == ext_id)
+                .map(|s| self.series_item(s))
+        };
+        found.ok_or_else(|| AppError::stream("That title is not in the library any more."))
+    }
+
+    async fn series_episodes(&self, series_ext_id: &str) -> Result<Vec<VodItem>> {
+        let info = self.series_info(series_ext_id).await?;
+        Ok(info
+            .episodes
+            .into_iter()
+            .map(|e| VodItem {
+                kind: Some(VodKind::Episode),
+                ext_id: e.id,
+                parent_ext: Some(series_ext_id.to_owned()),
+                title: e.title,
+                season: Some(e.season).filter(|s| *s > 0),
+                episode: Some(e.episode).filter(|n| *n > 0),
+                duration_secs: e.duration_secs.filter(|d| *d > 0),
+                container: e.container_extension,
+                ..Default::default()
+            })
+            .collect())
+    }
+
+    /// `/movie/<u>/<p>/<id>.<ext>` or `/series/<u>/<p>/<episode id>.<ext>`: built at play time.
+    async fn play_vod(&self, item: &VodItem) -> Result<PlayPlan> {
+        self.ensure_account().await?;
+        let ext = item
+            .container
+            .as_deref()
+            .filter(|e| !e.is_empty())
+            .unwrap_or("mp4");
+        let url = match item.kind {
+            Some(VodKind::Movie) => self.movie_url(&item.ext_id, ext)?,
+            Some(VodKind::Episode) => self.series_url(&item.ext_id, ext)?,
+            _ => return Err(AppError::stream("Only movies and episodes can be played.")),
+        };
+        let mut redact = self.redaction_set();
+        redact.add(url.clone());
+        Ok(PlayPlan {
+            surface: if ext == "m3u8" {
+                Surface::Hls
+            } else {
+                Surface::Direct
+            },
+            url,
+            headers: vec![],
+            profile: PlayProfile::Seekable,
+            session: None,
+            redact,
+            needs_redirect_resolve: false,
+            unknown_profile: false,
+        })
     }
 
     fn credentials(&self) -> std::collections::HashMap<String, String> {

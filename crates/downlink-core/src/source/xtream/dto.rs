@@ -18,6 +18,14 @@ fn str_or_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
         .and_then(flex_string)
         .unwrap_or_default())
 }
+/// A string, or the first string of an array (`backdrop_path` is usually a list).
+fn first_str<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match Option::<Value>::deserialize(d)? {
+        Some(Value::Array(a)) => a.iter().find_map(flex_string),
+        Some(v) => flex_string(&v),
+        None => None,
+    })
+}
 fn opt_f64<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     Ok(Option::<Value>::deserialize(d)?.as_ref().and_then(flex_f64))
 }
@@ -89,6 +97,8 @@ pub struct VodStreamDto {
     pub rating: Option<String>,
     #[serde(default, deserialize_with = "opt_i64")]
     pub added: Option<i64>,
+    #[serde(default, deserialize_with = "opt_i64")]
+    pub year: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -105,6 +115,12 @@ pub struct SeriesDto {
     pub category_id: Option<String>,
     #[serde(default, deserialize_with = "opt_str")]
     pub rating: Option<String>,
+    #[serde(default, deserialize_with = "opt_str")]
+    pub genre: Option<String>,
+    #[serde(rename = "releaseDate", default, deserialize_with = "opt_str")]
+    pub release_date: Option<String>,
+    #[serde(default, deserialize_with = "first_str")]
+    pub backdrop_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

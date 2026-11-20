@@ -758,15 +758,29 @@ async fn fetch_image_is_same_origin_only() {
     let c = client(&server);
     let url = c.logo_url("100").unwrap();
     assert_eq!(c.fetch_image(&url).await.unwrap().bytes, [1, 2, 3]);
-    let e = c
-        .fetch_image("http://provider.test/logo.png")
+    // Another host (a poster CDN) is fetched anonymously: the key never goes elsewhere.
+    let cdn = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/poster.jpg"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![9u8, 9]))
+        .expect(1)
+        .mount(&cdn)
+        .await;
+    let got = c
+        .fetch_image(&format!("{}/poster.jpg", cdn.uri()))
         .await
-        .unwrap_err();
-    assert_eq!(e.code, ErrorCode::Local);
+        .unwrap();
+    assert_eq!(got.bytes, [9, 9]);
+    let req = &cdn.received_requests().await.unwrap()[0];
+    assert!(
+        req.headers.get("x-api-key").is_none(),
+        "no credentials sent to another origin"
+    );
+    assert!(req.headers.get("authorization").is_none());
     assert_eq!(
         server.received_requests().await.unwrap().len(),
         1,
-        "nothing else was requested"
+        "nothing else hit the server"
     );
 }
 

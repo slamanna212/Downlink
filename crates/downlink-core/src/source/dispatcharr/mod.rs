@@ -915,9 +915,8 @@ impl DispatcharrClient {
     pub async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {
         let u = Url::parse(url)?;
         if u.origin() != self.base.origin() || !u.path().starts_with(self.base.path()) {
-            return Err(AppError::local(
-                "Refusing to fetch an image from another server.",
-            ));
+            // Another host (a poster CDN): fetched anonymously. The key never goes elsewhere.
+            return crate::images::fetch_public(url, self.insecure_tls).await;
         }
         let rel = u.path().strip_prefix(self.base.path()).unwrap_or_default();
         let r = self

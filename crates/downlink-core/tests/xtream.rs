@@ -143,7 +143,10 @@ async fn categories_streams_vod_series_and_series_info() {
             .windows(2)
             .all(|w| (w[0].season, w[0].episode) <= (w[1].season, w[1].episode))
     );
-    assert!(c.vod_categories().await.unwrap().is_empty(), "[] = nothing");
+    assert!(
+        c.vod_category_list().await.unwrap().is_empty(),
+        "[] = nothing"
+    );
     assert!(
         c.series_categories().await.unwrap().is_empty(),
         "{{}} = nothing"
