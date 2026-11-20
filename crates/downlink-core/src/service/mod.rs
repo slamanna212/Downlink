@@ -248,8 +248,28 @@ impl Service {
                 )?)
             }
         };
+        // Restore the credential vault so templated URLs resolve and re-sync keeps placeholders.
+        if kind != SourceKind::Dispatcharr
+            && let Some(j) = self.optional_secret(&row, SecretKind::Credentials)
+            && let Ok(map) = serde_json::from_str(&j)
+        {
+            c.load_credentials(map);
+        }
         self.clients.write().await.insert(source_id, c.clone());
         Ok(c)
+    }
+
+    /// Persist credentials the source extracted from URLs (rule 7: keychain, never SQLite).
+    fn persist_credentials(&self, row_uuid: &str, client: &dyn SourceClient) -> Result<()> {
+        let creds = client.credentials();
+        if creds.is_empty() {
+            return Ok(());
+        }
+        let json = serde_json::to_string(&creds)?;
+        self.secrets.set(
+            &crate::auth::secret_ref(row_uuid, SecretKind::Credentials),
+            &SecretString::new(json),
+        )
     }
 
     /// An unsaved connection for `test_source` / `add_source`.
@@ -486,6 +506,7 @@ impl Service {
             SecretKind::RefreshToken,
             SecretKind::PlaylistUrl,
             SecretKind::XmltvUrl,
+            SecretKind::Credentials,
         ] {
             let _ = self.secrets.delete(&crate::auth::secret_ref(uuid, k));
         }
@@ -569,6 +590,8 @@ impl Service {
         let info = sync::connect_and_record(client.as_ref(), &self.store, source_id).await?;
         self.progress(source_id, "channels", 1, 4);
         sync::sync_channels(client.as_ref(), &self.store, source_id, info.user_level).await?;
+        let uuid = self.store.source(source_id).await?.uuid;
+        self.persist_credentials(&uuid, client.as_ref())?;
         self.progress(source_id, "guide", 2, 4);
         if let Err(e) = self.sync_guide_for(source_id, client.as_ref()).await {
             // The guide is not critical: channels stay usable.
@@ -1156,6 +1179,10 @@ impl Service {
 
 #[async_trait]
 impl AuthProvider for Service {
+    async fn credentials(&self, source: &SourceRow) -> Result<HashMap<String, String>> {
+        self.client(source.id).await.map(|c| c.credentials())
+    }
+
     async fn auth_header(&self, source: &SourceRow) -> Result<(String, SecretString)> {
         // Only Dispatcharr sources use auth headers; build the client if it is not live yet.
         self.client(source.id).await?;

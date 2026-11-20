@@ -336,6 +336,13 @@ pub trait Source: Send + Sync {
     async fn catchup_position(&self, _s: &SessionId, _position_secs: u64) -> Result<()> {
         Ok(())
     }
+    /// Credential values extracted from stored URLs/headers (see `vault`); the app keeps them in
+    /// the keychain. Empty for sources that store no credentials in rows.
+    fn credentials(&self) -> std::collections::HashMap<String, String> {
+        std::collections::HashMap::new()
+    }
+    /// Load previously persisted credentials before channels are mapped or played.
+    fn load_credentials(&self, _map: std::collections::HashMap<String, String>) {}
     /// A whole-guide file to ingest (XMLTV), for sources without a windowed guide API.
     async fn guide_feed(&self) -> Result<Option<GuideFeed>> {
         Ok(None)

@@ -596,3 +596,282 @@ async fn bad_playlist_inputs_fail_with_plain_sentences() {
     );
     let _ = names(&e).await;
 }
+
+// ---- rule 7: no credential ever lands in SQLite ------------------------------------------------
+
+fn data_files_contain(dir: &std::path::Path, needle: &str) -> Vec<String> {
+    let mut hits = vec![];
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_file()
+            && let Ok(bytes) = std::fs::read(&p)
+            && bytes.windows(needle.len()).any(|w| w == needle.as_bytes())
+        {
+            hits.push(p.file_name().unwrap().to_string_lossy().into_owned());
+        }
+    }
+    hits
+}
+
+const CRED_PLAYLIST: &str = "#EXTM3U catchup=\"default\" catchup-days=\"3\" catchup-source=\"http://p.test/timeshift.php?username=ZUSER&password=ZPASSWORD1&stream=1&utc={utc}&duration={duration:60}\"\n\
+#EXTINF:-1 tvg-id=\"a.test\" tvg-logo=\"http://p.test/logo.png?token=ZLOGOTOKEN1\" group-title=\"G\",Cred Channel\n\
+#EXTHTTP:{\"Authorization\":\"Bearer ZBEARER1\",\"Referer\":\"http://r.test/\"}\n\
+http://ZUSER:ZPASSWORD1@p.test/live/ZUSER/ZPASSWORD1/1.ts?username=ZUSER&password=ZPASSWORD1&token=ZTOKEN12345\n\
+#EXTINF:-1 tvg-id=\"b.test\" group-title=\"G\",Other Token\n\
+http://p.test/live/2.ts?token=ZOTHERTOKEN2\n";
+
+#[tokio::test]
+async fn credentialed_playlist_is_templated_in_sqlite_and_resolved_from_the_keychain() {
+    let server = MockServer::start().await;
+    serve_text(&server, "/get.php", CRED_PLAYLIST.to_owned()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = Arc::new(MemorySecretStore::new());
+    let svc = Service::new(downlink_core::service::ServiceConfig {
+        data_dir: dir.path().to_path_buf(),
+        secrets: secrets.clone(),
+        app_version: "t".into(),
+    })
+    .await
+    .unwrap();
+    let url = format!(
+        "{}/get.php?username=ZUSER&password=ZPLAYLISTPASS",
+        server.uri()
+    );
+    let dto = svc.add_source(m3u_input(&url, None)).await.unwrap();
+
+    // Flush the WAL so the main file holds everything, then scan every file for every secret.
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(svc.store().pool())
+        .await
+        .unwrap();
+    for secret in [
+        "ZUSER",
+        "ZPASSWORD1",
+        "ZLOGOTOKEN1",
+        "ZBEARER1",
+        "ZTOKEN12345",
+        "ZOTHERTOKEN2",
+        "ZPLAYLISTPASS",
+    ] {
+        let hits = data_files_contain(dir.path(), secret);
+        assert!(hits.is_empty(), "{secret} found in {hits:?}");
+    }
+    // What the rows hold is the templated shape.
+    let (play_url, headers, tpl): (String, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT play_url, play_headers, catchup_template FROM channel WHERE tvg_id = 'a.test'",
+    )
+    .fetch_one(svc.store().pool())
+    .await
+    .unwrap();
+    assert!(
+        play_url.contains("{dl:user}")
+            && play_url.contains("{dl:pass}")
+            && play_url.contains("{dl:token"),
+        "{play_url}"
+    );
+    assert!(headers.unwrap().contains("{dl:hdr}"));
+    assert!(
+        tpl.unwrap().contains("{dl:pass}"),
+        "catch-up source templated too"
+    );
+    let other: String = sqlx::query_scalar("SELECT play_url FROM channel WHERE tvg_id = 'b.test'")
+        .fetch_one(svc.store().pool())
+        .await
+        .unwrap();
+    assert!(
+        other.contains("{dl:token:"),
+        "a second, different token is keyed by a short hash: {other}"
+    );
+
+    // The keychain holds one deduplicated vault entry (user/pass/token shared across entries).
+    let row = svc.store().source(dto.id).await.unwrap();
+    let vault: std::collections::HashMap<String, String> = serde_json::from_str(
+        secrets
+            .get(&downlink_core::auth::secret_ref(
+                &row.uuid,
+                downlink_core::auth::SecretKind::Credentials,
+            ))
+            .unwrap()
+            .unwrap()
+            .expose(),
+    )
+    .unwrap();
+    assert_eq!(vault.get("user").map(String::as_str), Some("ZUSER"));
+    assert_eq!(vault.get("pass").map(String::as_str), Some("ZPASSWORD1"));
+    assert!(vault.len() >= 5);
+
+    // Play resolves in memory, and still does after an "app restart" (new Service, same keychain).
+    let chans = svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    let a = chans.iter().find(|c| c.name == "Cred Channel").unwrap();
+    let plan = svc.play_channel(a.id).await.unwrap();
+    assert_eq!(
+        plan.url,
+        "http://ZUSER:ZPASSWORD1@p.test/live/ZUSER/ZPASSWORD1/1.ts?username=ZUSER&password=ZPASSWORD1&token=ZTOKEN12345"
+    );
+    assert!(
+        plan.headers
+            .iter()
+            .any(|(k, v)| k == "Authorization" && v.expose() == "Bearer ZBEARER1")
+    );
+    let shown = serde_json::to_string(&plan.redacted()).unwrap();
+    assert!(
+        !shown.contains("ZPASSWORD1") && !shown.contains("ZBEARER1"),
+        "{shown}"
+    );
+
+    drop(svc);
+    let svc2 = Service::new(downlink_core::service::ServiceConfig {
+        data_dir: dir.path().to_path_buf(),
+        secrets: secrets.clone(),
+        app_version: "t".into(),
+    })
+    .await
+    .unwrap();
+    let plan2 = svc2.play_channel(a.id).await.unwrap();
+    assert_eq!(plan2.url, plan.url, "vault restored from the keychain");
+
+    // Catch-up expands only after the vault is resolved.
+    let start = downlink_core::sync::now_utc() - 7200;
+    svc2.store()
+        .upsert_programmes(&[ProgrammeRow {
+            channel_id: a.id,
+            start_utc: start,
+            end_utc: start + 3600,
+            ext_id: None,
+            title: Some("P".into()),
+            subtitle: None,
+            description: None,
+            season: None,
+            episode: None,
+            flags: 0,
+        }])
+        .await
+        .unwrap();
+    let cu = svc2
+        .play_catchup(&format!("{}:{start}", a.id))
+        .await
+        .unwrap();
+    assert_eq!(
+        cu.plan.url,
+        format!(
+            "http://p.test/timeshift.php?username=ZUSER&password=ZPASSWORD1&stream=1&utc={start}&duration=60"
+        )
+    );
+
+    // A resync keeps placeholders stable (no row churn) and still stores no secret.
+    svc2.sync_source(dto.id).await.unwrap();
+    let again: String = sqlx::query_scalar("SELECT play_url FROM channel WHERE tvg_id = 'a.test'")
+        .fetch_one(svc2.store().pool())
+        .await
+        .unwrap();
+    assert_eq!(again, play_url);
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(svc2.store().pool())
+        .await
+        .unwrap();
+    assert!(data_files_contain(dir.path(), "ZPASSWORD1").is_empty());
+
+    // Removal clears the vault from the keychain.
+    svc2.remove_source(dto.id).await.unwrap();
+    assert!(
+        secrets
+            .get(&downlink_core::auth::secret_ref(
+                &row.uuid,
+                downlink_core::auth::SecretKind::Credentials
+            ))
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn xtream_source_keeps_passwords_and_direct_source_credentials_out_of_sqlite() {
+    let server = xc_server().await;
+    // One channel carries a credential-bearing direct_source and a tokenised logo.
+    let mut streams = fx_json("xtream/get_live_streams.json");
+    streams[0]["direct_source"] = json!("http://cdn.test/live/xcuser/XCPASSWORD9/1001.ts");
+    streams[0]["stream_icon"] = json!("http://cdn.test/logo/1.png?token=XCLOGOTOKEN9");
+    server.reset().await;
+    struct NoAction;
+    impl wiremock::Match for NoAction {
+        fn matches(&self, r: &wiremock::Request) -> bool {
+            !r.url.query_pairs().any(|(k, _)| k == "action")
+        }
+    }
+    Mock::given(method("GET"))
+        .and(path("/player_api.php"))
+        .and(NoAction)
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fx_json("xtream/player_api_login.json")),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/player_api.php"))
+        .and(query_param("action", "get_live_categories"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(fx_json("xtream/get_live_categories.json")),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/player_api.php"))
+        .and(query_param("action", "get_live_streams"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(streams))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/xmltv.php"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("<tv/>"))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let secrets = Arc::new(MemorySecretStore::new());
+    let svc = Service::new(downlink_core::service::ServiceConfig {
+        data_dir: dir.path().to_path_buf(),
+        secrets: secrets.clone(),
+        app_version: "t".into(),
+    })
+    .await
+    .unwrap();
+    let mut input = xc_input(&server);
+    input.password = Some("XCPLAINPASS7".into());
+    // The mock ignores credentials, so the login succeeds with any password.
+    let dto = svc.add_source(input).await.unwrap();
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(svc.store().pool())
+        .await
+        .unwrap();
+    for secret in ["XCPLAINPASS7", "XCPASSWORD9", "XCLOGOTOKEN9"] {
+        assert!(
+            data_files_contain(dir.path(), secret).is_empty(),
+            "{secret} found in SQLite files"
+        );
+    }
+    let chans = svc
+        .list_channels(ListChannelsArgs {
+            limit: Some(50),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let c1 = chans.iter().find(|c| c.name == "Test Channel 1").unwrap();
+    let plan = svc.play_channel(c1.id).await.unwrap();
+    assert_eq!(
+        plan.url, "http://cdn.test/live/xcuser/XCPASSWORD9/1001.ts",
+        "direct_source resolved at play time"
+    );
+    let shown = serde_json::to_string(&plan.redacted()).unwrap();
+    assert!(!shown.contains("XCPASSWORD9"), "{shown}");
+    assert!(
+        svc.list_sources()
+            .await
+            .unwrap()
+            .iter()
+            .any(|s| s.id == dto.id)
+    );
+}

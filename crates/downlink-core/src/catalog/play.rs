@@ -37,10 +37,13 @@ pub async fn resolve_play_plan(
             build_live_plan(&base, &key, Some((hname, secret)), set)
         }
         Some(SourceKind::M3u) => {
-            let url = ch
-                .play_url
-                .clone()
-                .ok_or_else(|| AppError::stream("This channel has no stream address."))?;
+            let vault = crate::vault::Vault::new();
+            vault.load(auth.credentials(&src).await?);
+            let url = vault.resolve(
+                &ch.play_url
+                    .clone()
+                    .ok_or_else(|| AppError::stream("This channel has no stream address."))?,
+            )?;
             let hdrs: HashMap<String, String> = ch
                 .play_headers
                 .as_deref()
@@ -51,6 +54,7 @@ pub async fn resolve_play_plan(
             let headers = hdrs
                 .into_iter()
                 .map(|(k, v)| {
+                    let v = vault.resolve(&v).unwrap_or_default();
                     set.add(v.clone());
                     (k, SecretString::new(v))
                 })

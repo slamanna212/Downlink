@@ -18,6 +18,7 @@ use crate::m3u::load::{Fetcher, HttpFetcher, Location, load};
 use crate::m3u::{M3uEntry, Playlist};
 use crate::normalise::{stable_ids, synthetic_id};
 use crate::redact::RedactionSet;
+use crate::vault::Vault;
 
 pub struct M3uSource {
     id: std::sync::atomic::AtomicI64,
@@ -31,6 +32,7 @@ pub struct M3uSource {
     has_guide: AtomicBool,
     /// Set when a verified probe is adopted: the next `connect` reuses its loaded copy once.
     reuse_once: AtomicBool,
+    vault: Vault,
 }
 
 impl std::fmt::Debug for M3uSource {
@@ -79,6 +81,7 @@ impl M3uSource {
             cache: tokio::sync::Mutex::new(None),
             any_catchup: AtomicBool::new(false),
             reuse_once: AtomicBool::new(false),
+            vault: Vault::new(),
         }
     }
 
@@ -115,8 +118,19 @@ impl M3uSource {
     }
 
     fn to_channel(&self, e: &M3uEntry, id: String, pl: &Playlist) -> SourceChannel {
-        let tpl = CatchupTemplate::from_m3u(&e.attrs, &pl.header, None);
-        let headers = e.aux.http_headers();
+        let tpl = CatchupTemplate::from_m3u(&e.attrs, &pl.header, None).map(|mut t| {
+            t.source = t.source.map(|s| self.vault.template_url(&s));
+            t
+        });
+        let headers: Vec<(String, String)> = e
+            .aux
+            .http_headers()
+            .into_iter()
+            .map(|(k, v)| {
+                let v = self.vault.template_header(&k, &v);
+                (k, v)
+            })
+            .collect();
         SourceChannel {
             ext_id: id,
             number: e.tvg_chno(),
@@ -124,13 +138,13 @@ impl M3uSource {
             group_ext_id: e.group.clone(),
             tvg_id: e.tvg_id().map(str::to_owned),
             tvg_name: e.tvg_name().map(str::to_owned),
-            logo_key: e.logo().map(str::to_owned),
+            logo_key: e.logo().map(|l| self.vault.template_url(l)),
             is_radio: e.is_radio(),
             is_drm: e.aux.is_drm(),
             is_catchup: tpl.is_some(),
             catchup_days: tpl.as_ref().map_or(0, |t| t.days),
             catchup_template: tpl.map(|t| t.to_json()),
-            play_url: Some(e.url.clone()),
+            play_url: Some(self.vault.template_url(&e.url)),
             play_headers: (!headers.is_empty()).then(|| {
                 let m: serde_json::Map<String, Value> = headers
                     .into_iter()
@@ -142,7 +156,13 @@ impl M3uSource {
         }
     }
 
-    fn plan_for(url: String, headers_json: Option<&str>, profile: PlayProfile) -> PlayPlan {
+    fn plan_for(
+        &self,
+        url: String,
+        headers_json: Option<&str>,
+        profile: PlayProfile,
+    ) -> Result<PlayPlan> {
+        let url = self.vault.resolve(&url)?;
         let hdrs: Vec<(String, String)> = headers_json
             .and_then(|j| serde_json::from_str::<serde_json::Map<String, Value>>(j).ok())
             .map(|m| {
@@ -151,13 +171,17 @@ impl M3uSource {
                     .collect()
             })
             .unwrap_or_default();
+        let hdrs = hdrs
+            .into_iter()
+            .map(|(k, v)| Ok((k, self.vault.resolve(&v)?)))
+            .collect::<Result<Vec<(String, String)>>>()?;
         let mut redact = RedactionSet::new();
         redact.add(url.clone());
         for (_, v) in &hdrs {
             redact.add(v.clone());
         }
         let hls = url.contains(".m3u8");
-        PlayPlan {
+        Ok(PlayPlan {
             url,
             headers: hdrs
                 .into_iter()
@@ -169,7 +193,7 @@ impl M3uSource {
             redact,
             needs_redirect_resolve: false,
             unknown_profile: false,
-        }
+        })
     }
 }
 
@@ -282,21 +306,21 @@ impl Source for M3uSource {
             .clone()
             .filter(|u| !u.is_empty())
             .ok_or_else(|| AppError::stream("This channel has no stream address."))?;
-        Ok(Self::plan_for(
-            url,
-            ch.play_headers.as_deref(),
-            PlayProfile::Live,
-        ))
+        self.plan_for(url, ch.play_headers.as_deref(), PlayProfile::Live)
     }
 
     /// Template path: the URL is built from the channel's stored template and the programme row.
     async fn catchup(&self, ch: ChannelKey, p: &Programme) -> Result<PlayPlan> {
-        let tpl = ch
+        let mut tpl = ch
             .catchup_template
             .as_deref()
             .and_then(CatchupTemplate::from_json)
             .ok_or_else(|| AppError::stream("This channel does not offer an archive."))?;
-        let live = ch.play_url.clone().unwrap_or_default();
+        // Credentials are resolved before expansion so `{dl:…}` never meets the template engine.
+        tpl.source = tpl.source.map(|s| self.vault.resolve(&s)).transpose()?;
+        let live = self
+            .vault
+            .resolve(&ch.play_url.clone().unwrap_or_default())?;
         let url = expand(
             &tpl,
             &ExpandCtx {
@@ -309,19 +333,23 @@ impl Source for M3uSource {
                 xc: None,
             },
         )?;
-        Ok(Self::plan_for(
-            url,
-            ch.play_headers.as_deref(),
-            PlayProfile::Seekable,
-        ))
+        self.plan_for(url, ch.play_headers.as_deref(), PlayProfile::Seekable)
     }
 
     async fn stop_session(&self, _s: SessionId) -> Result<()> {
         Ok(())
     }
 
+    fn credentials(&self) -> std::collections::HashMap<String, String> {
+        self.vault.export()
+    }
+
+    fn load_credentials(&self, map: std::collections::HashMap<String, String>) {
+        self.vault.load(map);
+    }
+
     async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {
-        crate::images::fetch_public(url, self.insecure_tls).await
+        crate::images::fetch_public(&self.vault.resolve(url)?, self.insecure_tls).await
     }
 }
 

@@ -16,6 +16,7 @@ pub mod store;
 pub mod sync;
 pub mod userstate;
 pub mod util;
+pub mod vault;
 pub mod xmltv;
 
 pub use error::{AppError, ErrorCode, Result};

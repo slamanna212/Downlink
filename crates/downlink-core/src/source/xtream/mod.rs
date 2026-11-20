@@ -47,6 +47,7 @@ pub struct XtreamClient {
     password: SecretString,
     sem: Semaphore,
     state: Mutex<AccountState>,
+    vault: crate::vault::Vault,
 }
 
 impl std::fmt::Debug for XtreamClient {
@@ -111,6 +112,7 @@ impl XtreamClient {
             password,
             sem: Semaphore::new(MAX_CONCURRENT),
             state: Mutex::new(AccountState::default()),
+            vault: crate::vault::Vault::new(),
         })
     }
 
@@ -445,13 +447,16 @@ impl XtreamClient {
             name: s.name.clone(),
             group_ext_id: s.category_id.clone(),
             tvg_id: s.epg_channel_id.clone(),
-            logo_key: s.icon.clone(),
+            logo_key: s.icon.as_deref().map(|l| self.vault.template_url(l)),
             is_adult: s.is_adult,
             is_radio: s.stream_type.as_deref() == Some("radio_streams"),
             is_catchup: s.tv_archive,
             catchup_days: if s.tv_archive { s.tv_archive_days } else { 0 },
             catchup_template: template,
-            play_url: s.direct_source.clone(),
+            play_url: s
+                .direct_source
+                .as_deref()
+                .map(|u| self.vault.template_url(u)),
             ..Default::default()
         }
     }
@@ -521,7 +526,7 @@ impl Source for XtreamClient {
         self.ensure_account().await?;
         // A direct source, when the panel provides one, wins; otherwise build at play time.
         let url = match ch.play_url.as_deref().filter(|u| !u.is_empty()) {
-            Some(u) => u.to_owned(),
+            Some(u) => self.vault.resolve(u)?,
             None => self.live_url(&ch.ext_id)?,
         };
         let hls = url.contains(".m3u8");
@@ -590,8 +595,16 @@ impl Source for XtreamClient {
         Ok(())
     }
 
+    fn credentials(&self) -> std::collections::HashMap<String, String> {
+        self.vault.export()
+    }
+
+    fn load_credentials(&self, map: std::collections::HashMap<String, String>) {
+        self.vault.load(map);
+    }
+
     async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {
-        crate::images::fetch_public(url, self.insecure_tls).await
+        crate::images::fetch_public(&self.vault.resolve(url)?, self.insecure_tls).await
     }
 }
 

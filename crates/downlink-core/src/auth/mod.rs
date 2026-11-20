@@ -52,6 +52,8 @@ pub enum SecretKind {
     PlaylistUrl,
     /// An XMLTV guide URL (may embed credentials).
     XmltvUrl,
+    /// The per-source credential vault (templated URL/header values, see `vault`).
+    Credentials,
 }
 
 impl SecretKind {
@@ -62,6 +64,7 @@ impl SecretKind {
             Self::RefreshToken => "refresh_token",
             Self::PlaylistUrl => "playlist_url",
             Self::XmltvUrl => "xmltv_url",
+            Self::Credentials => "credentials",
         }
     }
 }
@@ -155,6 +158,14 @@ impl SecretStore for MemorySecretStore {
 pub trait AuthProvider: Send + Sync {
     async fn auth_header(&self, source: &crate::store::SourceRow)
     -> Result<(String, SecretString)>;
+
+    /// The source's credential vault (values behind `{dl:…}` placeholders in stored URLs).
+    async fn credentials(
+        &self,
+        _source: &crate::store::SourceRow,
+    ) -> Result<std::collections::HashMap<String, String>> {
+        Ok(std::collections::HashMap::new())
+    }
 }
 
 /// API-key auth read straight from the keychain (`source.secret_ref`).
@@ -174,6 +185,18 @@ impl AuthProvider for ApiKeyAuth<'_> {
             AppError::auth("The saved credentials for this source were not found. Sign in again.")
         })?;
         Ok(("X-API-Key".to_owned(), secret))
+    }
+
+    async fn credentials(
+        &self,
+        source: &crate::store::SourceRow,
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let r = secret_ref(&source.uuid, SecretKind::Credentials);
+        Ok(self
+            .0
+            .get(&r)?
+            .and_then(|s| serde_json::from_str(s.expose()).ok())
+            .unwrap_or_default())
     }
 }
 
