@@ -4,7 +4,12 @@
 
 use std::sync::{Arc, Mutex};
 
+pub mod inhibit;
+pub mod media;
 pub mod power;
+
+pub use inhibit::PlaybackInhibitor;
+pub use media::{MediaCommand, MediaHandler, MediaSession, MediaState};
 
 pub use power::{PowerCallback, PowerEvent, PowerWatcher, watch_power};
 
