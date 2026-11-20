@@ -740,3 +740,75 @@ async fn home_and_search_carry_full_channel_dtos_in_the_ui_shapes() {
         .unwrap();
     assert!(progs.len() >= 3);
 }
+
+// ---- source status at launch --------------------------------------------------------------------
+
+#[tokio::test]
+async fn status_is_connecting_until_probed_then_connected_offline_or_auth_error() {
+    let (server, e, sid) = added().await;
+    // "Launch": a fresh Service over the same store has not probed anything yet.
+    let dir = tempfile::tempdir().unwrap();
+    let relaunched = Service::with_store(
+        e.svc.store().clone(),
+        e.secrets.clone(),
+        dir.path().join("img"),
+        "t".into(),
+    );
+    async fn status(s: &Service) -> Value {
+        serde_json::to_value(&s.list_sources().await.unwrap()[0]).unwrap()["status"].clone()
+    }
+    assert_eq!(
+        status(&relaunched).await,
+        "connecting",
+        "never `connected` before the first probe"
+    );
+    assert!(
+        relaunched.list_sources().await.unwrap()[0]
+            .last_sync_at
+            .is_some(),
+        "last updated is still shown"
+    );
+
+    // Probe uses cheap identity calls only (no channel/guide fetch, no stream endpoints).
+    let before = server.received_requests().await.unwrap().len();
+    relaunched.probe_sources().await.unwrap();
+    assert_eq!(status(&relaunched).await, "connected");
+    let new: Vec<String> = server.received_requests().await.unwrap()[before..]
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    assert_eq!(new, ["/api/accounts/users/me/"], "{new:?}");
+
+    // Bad key -> auth_error; server gone -> offline.
+    server.reset().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    relaunched.probe_source(sid).await.unwrap();
+    assert_eq!(status(&relaunched).await, "auth_error");
+    // Server gone: a fresh launch pointed at a dead port.
+    sqlx::query("UPDATE source SET base_url = 'http://127.0.0.1:1/' WHERE id = ?")
+        .bind(sid)
+        .execute(e.svc.store().pool())
+        .await
+        .unwrap();
+    let offline = Service::with_store(
+        e.svc.store().clone(),
+        e.secrets.clone(),
+        dir.path().join("img2"),
+        "t".into(),
+    );
+    offline.probe_source(sid).await.unwrap();
+    assert_eq!(status(&offline).await, "offline");
+    let relaunched = offline;
+    // The cached catalogue is still browsable while offline.
+    assert_eq!(
+        relaunched
+            .list_channels(ListChannelsArgs::default())
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+}

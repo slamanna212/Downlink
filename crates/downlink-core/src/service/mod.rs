@@ -529,6 +529,67 @@ impl Service {
         }
     }
 
+    /// Cheap reachability probe at launch (PLAN §2.5 offline mode): Dispatcharr asks for the
+    /// account (version + identity, so a revoked key shows as `auth_error`), Xtream logs in, an M3U
+    /// file checks it still exists. A remote M3U playlist is not downloaded just to probe: its
+    /// state follows the last sync. Offline sources keep their cached catalogue and show
+    /// `last_sync_at` as "last updated".
+    pub async fn probe_source(&self, source_id: i64) -> Result<SourceStatus> {
+        let row = self.store.source(source_id).await?;
+        let status = match self.probe_inner(&row).await {
+            Ok(()) => SourceStatus::Connected,
+            Err(e) => match e.code {
+                crate::ErrorCode::Auth => SourceStatus::AuthError,
+                crate::ErrorCode::Network => SourceStatus::Offline,
+                _ => SourceStatus::Stale,
+            },
+        };
+        self.set_status(source_id, status);
+        Ok(status)
+    }
+
+    async fn probe_inner(&self, row: &SourceRow) -> Result<()> {
+        match SourceKind::parse(&row.kind) {
+            Some(SourceKind::Dispatcharr) => {
+                self.client(row.id).await?;
+                let c = self.dispatcharr.read().await.get(&row.id).cloned();
+                c.ok_or_else(|| AppError::local("This source is not available."))?
+                    .me()
+                    .await
+                    .map(|_| ())
+            }
+            Some(SourceKind::Xtream) => self.client(row.id).await?.connect().await.map(|_| ()),
+            Some(SourceKind::M3u) => {
+                if let Some(p) = row
+                    .base_url
+                    .as_deref()
+                    .and_then(|u| u.strip_prefix("file://"))
+                    && !std::path::Path::new(p).exists()
+                {
+                    return Err(AppError::network(
+                        "The playlist file is not there any more.",
+                    ));
+                }
+                Ok(())
+            }
+            None => Err(AppError::local("Unknown source type.")),
+        }
+    }
+
+    /// Probe every source concurrently (call once at startup, after `list_sources` has shown
+    /// `connecting`). Emits `catalog://updated` per source so the UI refetches the statuses.
+    pub async fn probe_sources(&self) -> Result<()> {
+        let rows = self.store.list_sources().await?;
+        let probes = rows.iter().map(|r| async move {
+            let _ = self.probe_source(r.id).await;
+            if let Ok(c) = self.counts(r.id).await {
+                self.emit(Event::CatalogUpdated(c));
+            }
+        });
+        futures_util::future::join_all(probes).await;
+        Ok(())
+    }
+
     /// Stop its sessions, delete its rows and its keychain entries.
     pub async fn remove_source(&self, source_id: i64) -> Result<()> {
         let row = self.store.source(source_id).await?;
@@ -668,8 +729,34 @@ impl Service {
             }
             Ok(None) => {
                 if client.kind() == SourceKind::Dispatcharr {
+                    // PLAN §7.3: the visible window first, then history back to the longest
+                    // `catchup_days`, so catch-up from the guide has programme rows to play.
                     epg::sync_guide(client, &self.store, source_id, epg::visible_window(now))
                         .await?;
+                    let days = refresh::max_catchup_days(&self.store, source_id).await?;
+                    if days > 0 {
+                        let row = self.store.source(source_id).await?;
+                        let plan = refresh::plan_windows(
+                            now,
+                            days,
+                            refresh::parse_tz(row.server_tz.as_deref()),
+                        );
+                        let cancel = AtomicBool::new(false);
+                        if let Err(e) = refresh::run_plan(
+                            client,
+                            &self.store,
+                            source_id,
+                            &plan,
+                            &[refresh::WindowKind::CatchupHistory],
+                            &cancel,
+                            |d, t| self.progress(source_id, "history", d, t),
+                        )
+                        .await
+                        {
+                            // History is best effort: the visible guide is already in place.
+                            tracing::warn!(error = %e, "catch-up history fill failed");
+                        }
+                    }
                 }
                 Ok(())
             }

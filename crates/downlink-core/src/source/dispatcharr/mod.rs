@@ -7,7 +7,7 @@
 
 pub mod dto;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -611,15 +611,55 @@ impl DispatcharrClient {
                 "its channels",
             )
             .await?;
-        let channels: Vec<SourceChannel> = Self::parse_items::<ChannelDto>(items, "channels")
+        let dtos = Self::parse_items::<ChannelDto>(items, "channels");
+        // Channels with an EPG assignment but no `tvg_id` of their own still need a guide join key.
+        let needs_epg = dtos.iter().any(|d| {
+            d.epg_id().is_some()
+                && d.effective_tvg_id
+                    .as_deref()
+                    .or(d.tvg_id.as_deref())
+                    .is_none_or(str::is_empty)
+        });
+        let epg_map = if needs_epg {
+            self.epg_data_map().await
+        } else {
+            HashMap::new()
+        };
+        let channels: Vec<SourceChannel> = dtos
             .into_iter()
-            .map(ChannelDto::into_source)
+            .map(|d| {
+                let epg = d.epg_id();
+                let mut c = d.into_source();
+                if c.tvg_id.as_deref().is_none_or(str::is_empty)
+                    && let Some(t) = epg.and_then(|e| epg_map.get(&e))
+                {
+                    c.tvg_id = Some(t.clone());
+                }
+                c
+            })
             .collect();
         Ok(ChannelPage {
             channels,
             count,
             has_next,
         })
+    }
+
+    /// `epg data id -> tvg_id` (tolerant: an unreadable list just means no fallback joins).
+    async fn epg_data_map(&self) -> HashMap<i64, String> {
+        match self
+            .fetch_all("api/epg/epgdata/", &[], "its guide channels")
+            .await
+        {
+            Ok(items) => Self::parse_items::<EpgDataDto>(items, "epg data")
+                .into_iter()
+                .filter_map(|e| Some((e.id, e.tvg_id.filter(|t| !t.is_empty())?)))
+                .collect(),
+            Err(e) => {
+                tracing::debug!(error = %e, "epg data list unavailable");
+                HashMap::new()
+            }
+        }
     }
 
     pub async fn group_list(&self) -> Result<Vec<SourceGroup>> {

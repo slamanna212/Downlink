@@ -1316,6 +1316,7 @@ dependencies = [
  "chrono-tz",
  "encoding_rs",
  "flate2",
+ "futures-util",
  "image",
  "keyring",
  "lzma-rs",

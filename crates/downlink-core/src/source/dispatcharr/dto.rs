@@ -170,6 +170,17 @@ pub struct ChannelDto {
     pub effective_stream_profile_id: Option<i64>,
     #[serde(default)]
     pub effective_is_radio: Option<bool>,
+    #[serde(default, deserialize_with = "de_opt_i64")]
+    pub epg_data_id: Option<i64>,
+    #[serde(default, deserialize_with = "de_opt_i64")]
+    pub effective_epg_data_id: Option<i64>,
+}
+
+impl ChannelDto {
+    /// The EPG data row this channel is assigned to, if any.
+    pub fn epg_id(&self) -> Option<i64> {
+        self.effective_epg_data_id.or(self.epg_data_id)
+    }
 }
 
 impl ChannelDto {
@@ -389,4 +400,13 @@ impl ProgramSearchDto {
             channel_ext_ids,
         })
     }
+}
+
+/// `GET /api/epg/epgdata/` row: the EPG channel a channel is assigned to.
+#[derive(Debug, Deserialize, Default)]
+pub struct EpgDataDto {
+    #[serde(default, deserialize_with = "de_i64")]
+    pub id: i64,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub tvg_id: Option<String>,
 }
