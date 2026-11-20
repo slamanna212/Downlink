@@ -58,6 +58,16 @@ Initial import of the 20k-channel playlist and 672k-programme guide: 58 s.
 - `get_guide`: one `channel_id IN (json_each(...))` range query for the whole page.
 - First import: `task://progress` per channel page (`channels`, done = fetched, total = server count or 0) and per XMLTV batch (`guide`, done = programmes written, total 0); `catalog://updated` fires as soon as the channel list is committed, before the guide.
 
+### Service-level search (the app path)
+The app calls `Service::search`, not `catalog::search_programmes`: channel leg + programme leg + channel DTOs (logo, favourites) + scheduled flags. In the real app (release, 20k channels / 672k programmes) it measured p50 21 ms / p95 61 ms against the core bench's p95 24 ms. Causes found and fixed:
+- Every channel logo was re-registered with an `INSERT OR IGNORE` write on every search, even when the in-memory `registered_logos` set already knew it (the `known` flag was computed but unused). Known logos now return their `dlimg://` URL with no DB access.
+- `to_channel_dtos` ran twice per search (each reloads favourites and the source list): now once for both legs.
+- `catalog::channels_by_ids` was one query per id: now one `json_each` IN query.
+- The two legs ran one after the other: now `tokio::join!` on the 4-connection pool.
+
+Method: `search_bench::service_search_p95_under_30ms_on_672k_programmes` (ignored; fixture channels carry logos; 61 keystroke queries). Debug profile, same machine, before then after: p50 20.6 to 16.9 ms, p95 59.1 to 47.3 ms. The debug programme leg alone is p95 about 46 ms, so the Service path now costs about the same as its dominant leg; release should land near the core bench's 24 ms and still needs a release re-measure when disk allows. Run: `cargo test -p downlink-core --test search_bench -- --ignored --nocapture service_search` (add `--release` for the real number; `SEARCH_BUDGET_MS` overrides the 30 ms assert, which debug exceeds).
+Not done: a separate read-only pool (readers and writers share the pool; the bench has no concurrent writes).
+
 ### Core-side findings (original, kept for the record)
 - Unified `search` programme leg (FTS5 over 672k programmes) is the one budget miss: p95 188 ms. Candidates: a prefix-only query for short inputs, a lower per-keystroke limit, or a cap on the FTS candidate set before the join with visible channels.
 - `get_guide` scroll chunks p95 43 ms are fine, but they query per channel (`epg::window` loops over channel ids); one query with `channel_id IN (...)` would cut it.

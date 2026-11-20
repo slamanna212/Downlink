@@ -211,17 +211,17 @@ pub async fn channels_by_ids(
     ids: &[i64],
 ) -> Result<Vec<ChannelRow>> {
     let vis = visibility_sql(f);
-    let mut out = Vec::with_capacity(ids.len());
-    for &id in ids {
-        let row: Option<ChannelRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {COLS} FROM channel c WHERE c.id = ?1 AND {vis}"
-        )))
-        .bind(id)
-        .fetch_optional(store.pool())
-        .await?;
-        out.extend(row);
+    if ids.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(out)
+    // One query for the whole set (was one per id).
+    let ids_json = serde_json::to_string(ids)?;
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {COLS} FROM channel c WHERE c.id IN (SELECT value FROM json_each(?1)) AND {vis}"
+    )))
+    .bind(ids_json)
+    .fetch_all(store.pool())
+    .await?)
 }
 
 /// Programme candidates taken from FTS before the time/visibility filter. A narrow query has

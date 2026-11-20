@@ -1026,6 +1026,13 @@ impl Service {
             .lock()
             .ok()
             .is_some_and(|g| g.contains(&url));
+        if known {
+            // Already in image_origin: no write on the read path.
+            return Some(crate::images::dlimg_url(
+                &crate::images::hash_url(&url),
+                ImageSize::Grid,
+            ));
+        }
         let dl = self
             .images
             .register(c.source_id, &url, ImageSize::Grid)
@@ -1142,17 +1149,16 @@ impl Service {
     pub async fn search(&self, query: &str, limit: i64) -> Result<SearchDto> {
         let limit = limit.clamp(1, 200);
         let f = self.filter().await?;
-        let rows = catalog::list_channels(
-            &self.store,
-            &ChannelFilter {
-                search: Some(query.to_owned()),
-                ..f.clone()
-            },
-            limit,
-            0,
-        )
-        .await?;
-        let progs = catalog::search_programmes(&self.store, &f, query, now_utc(), limit).await?;
+        let chan_filter = ChannelFilter {
+            search: Some(query.to_owned()),
+            ..f.clone()
+        };
+        // Both legs are independent reads: run them concurrently on the pool.
+        let (rows, progs) = tokio::join!(
+            catalog::list_channels(&self.store, &chan_filter, limit, 0),
+            catalog::search_programmes(&self.store, &f, query, now_utc(), limit),
+        );
+        let (rows, progs) = (rows?, progs?);
         // Each hit carries its full channel DTO (logo included) so the UI needs no second call.
         let ids: Vec<i64> = {
             let mut seen = HashSet::new();
@@ -1162,11 +1168,18 @@ impl Service {
                 .filter(|i| seen.insert(*i))
                 .collect()
         };
-        let chan_rows = catalog::channels_by_ids(&self.store, &f, &ids).await?;
-        let chan_dtos: HashMap<i64, ChannelDto> = self
-            .to_channel_dtos(&chan_rows)
-            .await?
-            .into_iter()
+        let hit_rows = catalog::channels_by_ids(&self.store, &f, &ids).await?;
+        // One DTO pass (favourites, sources, logos) for both legs.
+        let mut all_rows = rows.clone();
+        let have: HashSet<i64> = rows.iter().map(|r| r.id).collect();
+        all_rows.extend(hit_rows.into_iter().filter(|r| !have.contains(&r.id)));
+        let mut dtos = self.to_channel_dtos(&all_rows).await?;
+        let extra = dtos.split_off(rows.len());
+        let channels = dtos;
+        let chan_dtos: HashMap<i64, ChannelDto> = channels
+            .iter()
+            .cloned()
+            .chain(extra)
             .map(|c| (c.id, c))
             .collect();
         let mut programmes: Vec<ProgrammeHitDto> = progs
@@ -1184,7 +1197,7 @@ impl Service {
             h.programme = p;
         }
         Ok(SearchDto {
-            channels: self.to_channel_dtos(&rows).await?,
+            channels,
             programmes,
         })
     }

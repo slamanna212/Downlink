@@ -41,6 +41,8 @@ async fn build() -> (Store, i64) {
             name: format!("{} {} {}", WORDS[i % 16], WORDS[(i / 16) % 16], i),
             group_ext_id: Some((i % 50).to_string()),
             tvg_id: Some(format!("c{i}.test")),
+            // Absolute public logo, as M3U/Xtream sources carry: exercises the image path.
+            logo_key: Some(format!("https://img.example.test/{i}.png")),
             ..Default::default()
         })
         .collect();
@@ -263,6 +265,72 @@ async fn programme_search_p95_under_30ms_on_672k_programmes() {
     let p = |q: f64| times[((times.len() as f64 * q) as usize).min(times.len() - 1)];
     println!(
         "programme search over {} queries: p50 {:.1} ms, p95 {:.1} ms, max {:.1} ms",
+        times.len(),
+        p(0.5),
+        p(0.95),
+        times.last().unwrap()
+    );
+    assert!(
+        p(0.95) < budget_ms,
+        "p95 {:.1} ms exceeds {budget_ms} ms",
+        p(0.95)
+    );
+}
+
+/// Service-level search (what the app calls): channel leg + programme leg + channel DTOs with
+/// logos, favourites and scheduled flags, over the same 672k-programme fixture. Mirrors the app
+/// path, so it includes the work the core bench leaves out. Debug builds are slower: compare
+/// before/after in the same profile, or set SEARCH_BUDGET_MS.
+/// `cargo test -p downlink-core --test search_bench -- --ignored --nocapture service_search`
+#[tokio::test]
+#[ignore = "builds a 672k-programme database; run with --ignored"]
+async fn service_search_p95_under_30ms_on_672k_programmes() {
+    use downlink_core::auth::MemorySecretStore;
+    use downlink_core::service::Service;
+    use std::sync::Arc;
+    let now = downlink_core::sync::now_utc();
+    let (store, _sid) = build_guide(20_000, 34, now).await;
+    let img = tempfile::tempdir().unwrap();
+    let svc = Service::with_store(
+        store,
+        Arc::new(MemorySecretStore::new()),
+        img.path().to_path_buf(),
+        "0.0.0-bench".into(),
+    );
+    let budget_ms: f64 = std::env::var("SEARCH_BUDGET_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30.0);
+    let mut queries: Vec<String> = Vec::new();
+    for w in [
+        "news",
+        "morning",
+        "weekend cinema",
+        "kitchen",
+        "tonight",
+        "grand",
+        "quiz",
+        "xqzv",
+        "channel 1",
+    ] {
+        for n in 1..=w.len() {
+            queries.push(w[..n].to_owned());
+        }
+    }
+    for q in queries.iter().take(8) {
+        svc.search(q, 20).await.unwrap();
+    }
+    let mut times = Vec::new();
+    for q in &queries {
+        let t = Instant::now();
+        let r = svc.search(q, 20).await.unwrap();
+        times.push(t.elapsed().as_secs_f64() * 1000.0);
+        assert!(r.programmes.len() <= 20 && r.channels.len() <= 20);
+    }
+    times.sort_by(f64::total_cmp);
+    let p = |q: f64| times[((times.len() as f64 * q) as usize).min(times.len() - 1)];
+    println!(
+        "service search over {} queries: p50 {:.1} ms, p95 {:.1} ms, max {:.1} ms",
         times.len(),
         p(0.5),
         p(0.95),
