@@ -15,6 +15,8 @@ import {
   type Programme,
   type Source,
   type Transition,
+  type MultiviewState,
+  type MultiviewTile,
 } from './types';
 
 const NAMES = [
@@ -33,7 +35,8 @@ export function mockSources(empty: boolean, status: Source['status'] = 'connecte
   return [
     {
       id: 1, uuid: 'mock-source-1', kind: 'dispatcharr', name: 'Demo server', host: 'demo.invalid',
-      caps: Cap.Live | Cap.Epg | Cap.Catchup | Cap.Vod | Cap.Dvr | Cap.Favourites,
+      caps: Cap.Live | Cap.Epg | Cap.Catchup | Cap.Vod | Cap.Dvr | Cap.Favourites | Cap.StreamSwitch,
+      streamLimit: 4,
       status, serverVersion: '0.0-mock', lastSyncAt: nowSec() - 600, archiveDays: 7, supportsHlsTransport: true, hlsTransport: false,
     },
   ];
@@ -119,11 +122,21 @@ export function mockNowNext(channelId: number, now = nowSec(), scheduled?: Reado
   return { channelId, now: idx >= 0 ? (list[idx] ?? null) : null, next: idx >= 0 ? (list[idx + 1] ?? null) : null };
 }
 
+/** Synthetic tracks: two audio languages and subtitles including a teletext page. */
+export function mockTracks(): PlayerState['tracks'] {
+  return [
+    { id: 1, kind: 'audio', lang: 'eng', title: 'Main', codec: 'ac3', selected: true },
+    { id: 2, kind: 'audio', lang: 'deu', title: null, codec: 'mp2', selected: false },
+    { id: 1, kind: 'sub', lang: 'eng', title: 'Teletext 888', codec: 'dvb_teletext', selected: false },
+    { id: 2, kind: 'sub', lang: 'fra', title: null, codec: 'dvb_subtitle', selected: false },
+  ];
+}
+
 export function idleState(): PlayerState {
   return {
     state: 'Idle', mode: null, channelId: null, position: null, duration: null, buffered: null, seekable: false,
     volume: 100, muted: false, hwdecCurrent: null, videoCodec: null, width: null, height: null, waitingOn: null, reconnecting: false,
-    error: null, transitionedAt: Date.now(), programme: null, title: null, resumeAt: null,
+    error: null, transitionedAt: Date.now(), programme: null, title: null, resumeAt: null, tracks: [],
   };
 }
 
@@ -157,6 +170,19 @@ export function createMockBackend(): Backend {
   let searchIndex: { programme: Programme; channel: Channel; hay: string }[] | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let player = idleState();
+  const streamInUse = new Map<number, number>();
+  const MV_MAX = 4;
+  const mvTiles = new Map<number, MultiviewTile>();
+  let mvAudible = 0;
+  const mvState = (): MultiviewState => ({
+    tiles: [
+      ...(player.channelId != null && player.mode === 'live' ? [{ slot: 0, channelId: player.channelId, state: player.state, failure: null }] : []),
+      ...[...mvTiles.values()].sort((a, b) => a.slot - b.slot),
+    ],
+    audible: mvAudible,
+    maxTiles: MV_MAX,
+    streamLimit: 4,
+  });
   const transitions: Transition[] = [];
   const handlers = new Map<EventName, Set<(p: never) => void>>();
 
@@ -346,7 +372,7 @@ export function createMockBackend(): Backend {
         // `?fail=<id>` in the URL makes that channel fail, to exercise the error overlay.
         if (failId !== null && failId === channelId)
           setPlayer({ state: 'Failed', error: failError() });
-        else setPlayer({ state: 'Playing', hwdecCurrent: 'vaapi', videoCodec: 'h264', width: 1920, height: 1080, reconnecting: reconnectFlag });
+        else setPlayer({ state: 'Playing', hwdecCurrent: 'vaapi', videoCodec: 'h264', width: 1920, height: 1080, reconnecting: reconnectFlag, tracks: mockTracks() });
       }, 400);
       return null;
     },
@@ -357,6 +383,8 @@ export function createMockBackend(): Backend {
       else if (command.kind === 'setVolume') setPlayer({ volume: command.volume });
       else if (command.kind === 'setMuted') setPlayer({ muted: command.muted });
       else if (command.kind === 'seek') setPlayer({ position: Math.max(0, Math.min(command.seconds, player.duration ?? command.seconds)) });
+      else if (command.kind === 'setAudioTrack') setPlayer({ tracks: player.tracks.map((t) => (t.kind === 'audio' ? { ...t, selected: t.id === command.id } : t)) });
+      else if (command.kind === 'setSubtitleTrack') setPlayer({ tracks: player.tracks.map((t) => (t.kind === 'sub' ? { ...t, selected: t.id === command.id } : t)) });
       else if (command.kind === 'goLive' && player.channelId != null) impl.play_channel({ channelId: player.channelId });
       else if (command.kind === 'retry' && player.channelId != null) {
         if (player.mode === 'catchup' && player.programme) impl.play_catchup({ programmeId: player.programme.id });
@@ -436,6 +464,57 @@ export function createMockBackend(): Backend {
       return null;
     },
     get_counts: () => ({ all: channels.length, favourites: channels.filter((c) => c.isFavourite).length }),
+    get_multiview: () => mvState(),
+    multiview_set_tile: async ({ slot, channelId }) => {
+      if (slot <= 0 || slot >= MV_MAX) throw appError('local', 'That multiview slot is not available.');
+      const failSlot = typeof location !== 'undefined' && new URLSearchParams(location.search).get('mvlimit') === String(slot);
+      mvTiles.set(slot, { slot, channelId, state: 'Connecting', failure: null });
+      emit('multiview://state', mvState());
+      await wait(300);
+      const t = mvTiles.get(slot);
+      if (t && t.channelId === channelId) mvTiles.set(slot, failSlot ? { ...t, state: 'Failed', failure: 'limit' } : { ...t, state: 'Playing' });
+      emit('multiview://state', mvState());
+      return null;
+    },
+    multiview_remove_tile: ({ slot }) => {
+      mvTiles.delete(slot);
+      if (mvAudible === slot) mvAudible = 0;
+      emit('multiview://state', mvState());
+      return null;
+    },
+    multiview_set_audio: ({ slot }) => {
+      mvAudible = slot;
+      emit('multiview://state', mvState());
+      return null;
+    },
+    multiview_make_main: ({ slot }) => {
+      const t = mvTiles.get(slot);
+      if (!t) return null;
+      const main = player.channelId;
+      impl.play_channel({ channelId: t.channelId });
+      if (main != null) mvTiles.set(slot, { ...t, channelId: main });
+      else mvTiles.delete(slot);
+      emit('multiview://state', mvState());
+      return null;
+    },
+    multiview_set_bounds: () => null,
+    multiview_exit: () => {
+      mvTiles.clear();
+      mvAudible = 0;
+      emit('multiview://state', mvState());
+      return null;
+    },
+    get_channel_streams: ({ channelId }) => ({
+      channelId,
+      sourceIndex: (streamInUse.get(channelId) ?? 0) + 1,
+      sourceCount: 3,
+      streams: ['Primary', 'Backup A', 'Backup B'].map((name, index) => ({ index, streamId: `s${channelId}-${index}`, name: `${name} · 1080p` })),
+    }),
+    switch_stream: ({ channelId, index }) => {
+      if (player.channelId !== channelId || player.mode !== 'live') throw appError('local', 'Switch streams while the channel is playing live.');
+      streamInUse.set(channelId, index);
+      return null;
+    },
     list_audio_devices: () => [{ id: 'default', name: 'System default' }, { id: 'hdmi-1', name: 'Demo TV (HDMI)' }, { id: 'usb-1', name: 'Demo headset (USB)' }],
     get_update_status: () => update,
     set_update_channel: ({ channel }) => {
@@ -450,6 +529,7 @@ export function createMockBackend(): Backend {
       return update;
     },
     set_fullscreen: () => null,
+    set_mini_player: () => null,
   };
 
   // `?mock=resume`: the shell resumes the last channel at launch (setting on, playback starts by itself).

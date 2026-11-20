@@ -36,6 +36,7 @@ export const SeriesBrowse: Story = { args: { path: '/series' } };
 export const SeriesDetailScreen: Story = { args: { path: '/series/4' } };
 export const Recordings: Story = { args: { path: '/recordings' } };
 export const Player: Story = { args: { path: '/player' } };
+export const Multiview: Story = { args: { path: '/multiview' } };
 export const AddSource: Story = { args: { path: '/sources/add' } };
 export const SettingsPlayback: Story = { args: { path: '/settings/playback' } };
 export const SettingsAbout: Story = { args: { path: '/settings/about' } };

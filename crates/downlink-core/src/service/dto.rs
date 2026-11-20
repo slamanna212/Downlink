@@ -39,6 +39,8 @@ pub struct SourceDto {
     /// Whether this source can offer that option (Dispatcharr only); the UI shows the toggle on this,
     /// never on `kind`.
     pub supports_hls_transport: bool,
+    /// Concurrent streams the account may hold; null when unknown or unlimited.
+    pub stream_limit: Option<i64>,
 }
 
 /// Arguments of `set_source_options`.
@@ -74,6 +76,7 @@ impl SourceDto {
             archive_days,
             hls_transport: r.hls_transport,
             supports_hls_transport: r.kind == "dispatcharr",
+            stream_limit: r.stream_limit,
         }
     }
 }

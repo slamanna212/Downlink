@@ -25,4 +25,4 @@ pub use player::{
 };
 pub use retry::{FailureCause, RetryDecision, RetryPolicy};
 pub use state::{SessionState, StateMachine, Transition};
-pub use surface::{MainThreadDispatch, SurfaceBounds, VideoSurface};
+pub use surface::{MAX_SURFACES, MainThreadDispatch, SurfaceBounds, VideoSurface};

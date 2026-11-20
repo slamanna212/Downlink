@@ -968,7 +968,7 @@ fn handle_event(inner: &Inner, ev: EngineEvent) {
                 on_failure(inner, &mut s, FailureCause::EndFileError(e));
             }
             EndReason::Eof if s.request.is_some() => {
-                if s.request.as_ref().map(|r| r.profile) == Some(Profile::Live) {
+                if s.request.as_ref().is_some_and(|r| r.profile.is_live()) {
                     on_failure(inner, &mut s, FailureCause::UnexpectedEof);
                 } else {
                     s.request = None;

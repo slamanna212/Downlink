@@ -70,6 +70,9 @@ bitflags! {
         const FAILOVER   = 1 << 6;
         const LIMITS     = 1 << 7;
         const PROFILES   = 1 << 8;
+        /// The account may switch a live channel to another provider stream (Dispatcharr admin).
+        /// Exposed to the UI as `Cap.StreamSwitch`.
+        const STREAM_SWITCH = 1 << 9;
     }
 }
 
@@ -88,7 +91,7 @@ impl<'de> Deserialize<'de> for Caps {
 
 impl Caps {
     /// The bits the UI knows (`Cap` in types.ts).
-    pub const UI_MASK: u32 = 0b11_1111;
+    pub const UI_MASK: u32 = 0b10_0011_1111;
 
     /// Value stored in `source.caps`.
     pub fn to_db(self) -> i64 {
@@ -357,6 +360,11 @@ pub trait Source: Send + Sync {
     /// Ask the server to move an active channel to its next provider stream (failover). `false`
     /// when the source has no such notion or the channel is not active.
     async fn next_stream(&self, _ch: &ChannelKey) -> Result<bool> {
+        Ok(false)
+    }
+    /// Ask the server to switch an active channel to one of its provider streams (the stream
+    /// picker). `false` when the source has no such notion or the channel is not active there.
+    async fn change_stream(&self, _ch: &ChannelKey, _stream_id: &str) -> Result<bool> {
         Ok(false)
     }
     /// `(stream id, name)` of a channel's provider streams in failover order (names only; provider

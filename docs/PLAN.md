@@ -3,7 +3,8 @@
 > Desktop IPTV client for Dispatcharr, M3U/XMLTV and Xtream. Windows · macOS · Linux.
 > Revised 2026-11-19. This file is the source of truth; ADRs live in `docs/adr/`.
 > Reference server: Sam's Dispatcharr at `10.1.20.202:9191` (0.32.0 at time of writing; upstream 0.34.1).
-> Implementation: M0–M5 built (2026-11); Linux verified, Windows/macOS pending testers. Observed server
+> Implementation: M0–M5 built (2026-11); M5b (multiview, track/stream pickers, mini player) in progress;
+> Linux verified, Windows/macOS pending testers. Observed server
 > behaviour lives in `docs/dispatcharr-endpoints.md`; performance numbers in `docs/perf.md`; M0 record in
 > `docs/M0-go-no-go.md`.
 
@@ -36,7 +37,7 @@
 | Playback | libmpv, in-process, rendered into a native surface **under** a transparent webview |
 | Engine shipping | libmpv is bundled in every installer; never a system dependency |
 | Scope | A **viewing client**. No admin console — Dispatcharr's web UI is the admin console |
-| Must-have | Live TV, guide, **catch-up**, VOD, DVR scheduling/playback, M3U/XMLTV/Xtream sources |
+| Must-have | Live TV, guide, **catch-up**, VOD, DVR scheduling/playback, M3U/XMLTV/Xtream sources, **multiview** |
 | Releases | Same artefact mix as Apogee (§10), signed updater artefacts, `latest.json`, auto-update with stable + dev channels |
 | Platforms | Windows x64, macOS universal (two Mac testers), Linux x86_64 (Wayland and X11) |
 | Licence | GPL-3.0 with a GPL mpv build (default; confirm in §12) |
@@ -94,8 +95,12 @@ Differentiators, in order:
   M3U/M3U8 + XMLTV. Multiple sources at once.
 - Live TV: channel list, guide grid, groups, search, favourites, channel numbers, logos, now/next,
   catch-up badges, adult/radio flags, hidden channels respected.
-- Playback: hardware decode, fast zap, audio/subtitle track selection, passthrough, aspect/zoom,
-  deinterlace, PiP / always-on-top mini player, sleep inhibition.
+- Playback: hardware decode, fast zap, audio/subtitle track picker (teletext and DVB subtitles come
+  through it), passthrough, deinterlace, compact always-on-top mini player (§8.2), sleep inhibition.
+- **Stream picker** (Dispatcharr only, and only when the account may switch streams): list the
+  channel's provider streams in failover order and switch the live channel to one (§3.4).
+- **Multiview**: up to 4 live channels at once (9 when hardware and the server's stream limit allow),
+  one audible, layouts 2-up / 2×2 / 1+3 / 3×3 (§4.11, DESIGN.md §9).
 - **Catch-up**: restart current programme, play past programmes from the guide, seek within the
   archive window, jump back to live (§5).
 - VOD: movies and series browse, detail, resume, next episode.
@@ -114,7 +119,7 @@ Differentiators, in order:
 - Mobile/TV builds. The core is portable, but the shipping targets are the three desktops.
 - A server, sync service, cloud account or telemetry.
 - Bundled playlists, provider recommendations, DRM (Widevine/PlayReady), transcoding, Stalker portals,
-  multi-view, casting. Each is a post-1.0 candidate at most.
+  casting, aspect/zoom controls. Each is a post-1.0 candidate at most.
 
 ### 1.6 What "done" looks like
 
@@ -329,6 +334,7 @@ Dispatcharr's API is unversioned. Policy:
 | Identity | `GET /api/accounts/users/me/`, `GET /api/core/version/`, token + refresh |
 | Channels | `GET /api/channels/channels/?page=&page_size=&search=&channel_group=` |
 | Channel streams (failover order) | `GET /api/channels/channels/{id}/streams/` |
+| Stream picker (switch the live channel) | `POST /proxy/ts/change_stream/{channel_uuid}` `{stream_id}` — a control endpoint, not a stream endpoint. It moves the **server's** channel session, so everyone watching that channel switches too. Offered only to admin accounts (`Caps::STREAM_SWITCH`); a 403 hides it for the session |
 | Groups | `GET /api/channels/groups/` |
 | Channel profiles | `GET /api/channels/profiles/` |
 | Stream profiles (redirect detection) | stream profile list + server default from core settings (exact paths verified in M1) |
@@ -551,6 +557,26 @@ Size: expect ~30–40 MB compressed per platform added by the engine; `.deb`/`.r
 
 A CI job runs each artefact on a clean VM/container with **no mpv or libmpv installed**, asserts
 `which mpv` is empty, and plays a fixture stream to first frame.
+
+### 4.11 Multiview
+
+- **Engines.** One mpv instance and one native surface per tile. Tile 1 is the main player (it keeps
+  its pre-warmed instance and the full failover policy); tiles 2–9 get their own instances, created
+  on entering multiview and destroyed on exit. Live channels only (no catch-up, VOD, recordings).
+- **Surfaces.** Linux: one `GtkGLArea` per tile in the same `GtkOverlay`, each with its own render
+  context. Windows: one `--wid` child HWND per tile beneath WebView2. macOS: one NSView per tile;
+  until the macOS surface is reworked for several instances, macOS reports a cap of 1 tile and the
+  entry points are hidden.
+- **Options.** Tiles use profile `multiview` (owned by `downlink-player`): the `live` profile plus
+  `hwdec=auto-safe`, `vd-lavc-skiploopfilter=nonkey` above 4 tiles, and `mute=yes` on every tile but
+  the audible one. Only one tile is ever unmuted.
+- **Budget.** Each tile is one stream on the server. The budget is `min(tile cap, account stream
+  limit)` when the source reports a limit (Dispatcharr `stream_limit`, Xtream `max_connections`),
+  else the tile cap. A tile that fails with `FailureKind::Limit` shows the stream-limit tile
+  (Replace channel / Remove tile). 3×3 is offered only when hwdec is active and the budget is ≥ 9.
+- **Sessions.** Rule 6 applies per tile: removing or replacing a tile, exiting multiview, sleep and
+  quit stop that tile's stream and release any session it holds.
+- **Network discipline.** Adding a tile is a play; the picker browses SQLite only (rule 4).
 
 ---
 
@@ -921,7 +947,8 @@ Home
 Live TV
 ├─ Channels                 group sidebar, list
 ├─ Guide                    G
-└─ Channel detail           now/next, catch-up window, record, favourite
+├─ Channel detail           now/next, catch-up window, record, favourite
+└─ Multiview                2–9 live tiles (from the player or a channel's context menu)
 Movies / Series             (absent if no source has VOD)
 Recordings                  Upcoming · In progress · Completed  (absent if no source has DVR)
 Settings
@@ -950,12 +977,24 @@ record menu. `PgUp/PgDn` page, `Home` jumps to now. "No guide data for this chan
 
 **Player.** Video fills the window; controls fade after 3 s idle. Control bar: play/pause, restart
 programme, ±10 s (seekable only), Go live (catch-up only), volume, audio track, subtitle track, PiP,
-fullscreen, info. Zap overlay: number + logo + name pill for 1.2 s. Info panel (I): channel,
+fullscreen, info, plus three menus: **audio** (tracks with language/codec), **subtitles** (off +
+tracks, teletext included), and **stream** (Dispatcharr with `Caps::STREAM_SWITCH` only: provider
+streams in failover order, current marked, a one-line note that switching affects everyone watching
+the channel). Mini player and multiview buttons sit next to fullscreen. Zap overlay: number + logo + name pill for 1.2 s. Info panel (I): channel,
 programme + progress, source/stream index, resolution, codec, bitrate, buffer, dropped frames,
 `hwdec-current`. Errors are inline overlays with one action.
 Back (control bar button or Esc) returns to the screen the player was opened from. From the guide,
 playback continues in the preview pane's top-right box (mini player); clicking it reopens the player.
 With nothing playing the box is a programme-art placeholder.
+
+**Mini player (PiP).** `P` or the control-bar button turns the window into a compact, borderless,
+always-on-top video window (default 480×270, remembers size and corner) with hover-only play/pause,
+mute, restore and close. Restore (button, double-click or `P`) returns to the previous window size,
+position and route. One surface, the same on all three OSes; no second window.
+
+**Multiview.** As DESIGN.md §9: tiles on `--dl-multiview-canvas`, one audible, focused tile with an
+inset accent ring, floating toolbar (layout, audio follows focus, stream budget, Exit), picker popover
+on an empty slot. Entered from the player's grid button or "Add to multiview" on a channel.
 
 **Recordings.** Upcoming (cancel), In progress (watch while recording, stop), Completed (play,
 delete).
@@ -986,6 +1025,8 @@ hover-only affordances.
 | `S` | restart programme (catch-up) |
 | `End` | go live |
 | `I` | info panel |
+| `A` / `T` | audio track / subtitle track menu (player) |
+| `P` | mini player on/off |
 | `M` | mute |
 | `F11` / `⌃⌘F` | fullscreen |
 | `0–9` | channel number entry (2 s timeout) |
@@ -1064,7 +1105,8 @@ subtitle size/background control, screen-reader labels for channel rows (number,
 Order matters more than durations; Claude Code builds it, so there are no day estimates.
 
 ```
-M0 spike → M1 skeleton + release pipeline → M2 live TV + catch-up → M3 sources → M4 VOD + DVR → M5 polish → M6 1.0
+M0 spike → M1 skeleton + release pipeline → M2 live TV + catch-up → M3 sources → M4 VOD + DVR → M5 polish
+→ M5b multiview + pickers + mini player → M5c stabilise → M6 1.0 (Windows + Linux) → M7 macOS
 ```
 
 - **M0 first**: compositing and engine bundling are the only existential risks.
@@ -1156,16 +1198,47 @@ Acceptance:
 - Media keys and OS media controls drive playback on all three OSes.
 - A first-time user goes from install to a playing channel in under 60 s, unassisted.
 
-### M6 — 1.0
+### M5b — Multiview, pickers, mini player
 
-Stable channel; signing decisions applied (§10.5); README, disclaimer, install notes; clean-machine
-QA across the matrix; update path tested stable → stable and dev → stable.
+Audio and subtitle track menus in the player; Dispatcharr stream picker behind `Caps::STREAM_SWITCH`;
+compact always-on-top mini player; multiview (§4.11, DESIGN.md §9) with picker, layouts, audio focus,
+stream budget and the stream-limit tile.
 
 Acceptance:
 
-- Every §10.1 artefact installs and launches on a clean machine.
+- Track menus list every audio/subtitle track mpv reports and switching takes effect without a
+  restart; "Off" disables subtitles; teletext pages appear as subtitle tracks when present.
+- The stream menu appears only for a Dispatcharr admin account, lists streams in failover order and
+  switching plays the chosen stream; a non-admin account never sees it.
+- Mini player toggles both ways, stays on top, and restores the previous size, position and route.
+- Four tiles play at once on the reference server with one audible; removing a tile, exiting
+  multiview and quitting stop every tile's stream (test); the picker generates zero stream-endpoint
+  requests while browsing (test); a limit failure shows the stream-limit tile.
+
+### M5c — Stabilise
+
+No new features. Work through how each flow actually behaves day to day on Linux, fix every bug found,
+polish copy, motion and states, and keep §8.8 budgets. Dev-channel builds only. Ends when Sam calls
+the app stable.
+
+### M6 — 1.0 (Windows + Linux)
+
+Stable channel opens; releases cover Windows and Linux only (`ENABLE_MACOS` stays off); signing as
+§10.5; README, disclaimer, install notes; clean-machine QA on Windows 11 and Linux; Windows-specific
+bugs (surface z-order, DPI, fullscreen, taskbar auto-hide, multiview HWNDs) fixed before 1.0 ships;
+update path tested stable → stable and dev → stable.
+
+Acceptance:
+
+- Every Windows and Linux §10.1 artefact installs and launches on a clean machine.
 - The updater moves a user from 1.0.0 to 1.0.1.
 - No provider names or copyrighted screenshots in the repo.
+
+### M7 — macOS
+
+Turn on `ENABLE_MACOS`; Developer ID signing and notarisation (§10.5); universal libmpv; the macOS
+surface reworked for several instances so multiview works; Mac testers verify the M0 checks and every
+milestone's acceptance; fix what they find, then ship macOS on the stable channel.
 
 ### Definition of done (every milestone)
 
@@ -1178,8 +1251,9 @@ Acceptance:
 
 ### Deliberately out of 1.0
 
-Admin features of any kind, multi-view, casting, downloads/offline VOD, phone remote, Stalker portals,
-Flussonic catch-up, cross-source channel merging, gamepad, mobile/TV ports, DRM.
+Admin features of any kind, casting, downloads/offline VOD, phone remote, Stalker portals,
+Flussonic catch-up, cross-source channel merging, gamepad, mobile/TV ports, DRM, aspect/zoom controls,
+a detached floating PiP window. (macOS ships after 1.0, in M7.)
 
 ---
 
@@ -1413,6 +1487,10 @@ Local dev may use a system mpv/libmpv (`DOWNLINK_MPV_PATH`); release artefacts n
 | D14 | macOS universal, validated by two Mac testers | **Decided (Sam)** |
 | D15 | Hand-written Dispatcharr client (no codegen) | Decided |
 | D16 | Automated tests use a separate test Dispatcharr container, never real providers | Decided |
+| D17 | Multiview is a 1.0 feature: 4 tiles, 9 when capable (§4.11) | **Decided (Sam)** |
+| D18 | Stream picker switches the server's shared channel session; shown only to accounts allowed to (`Caps::STREAM_SWITCH`) | **Decided (Sam)** |
+| D19 | PiP is a compact always-on-top mode of the main window, not a second window | **Decided (Sam)** |
+| D20 | Release order: stabilise on Linux → 1.0 on Windows + Linux → macOS (M7) | **Decided (Sam)** |
 
 ### 12.3 Open questions
 

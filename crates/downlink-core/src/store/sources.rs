@@ -33,6 +33,8 @@ pub struct SourceRow {
     pub tls_pin: Option<String>,
     /// Opt-in: live channels on this (Dispatcharr) source play through its HLS output.
     pub hls_transport: bool,
+    /// Concurrent streams the account may hold (NULL = unknown or unlimited).
+    pub stream_limit: Option<i64>,
     pub last_sync_at: Option<i64>,
     pub created_at: i64,
 }
@@ -44,6 +46,7 @@ pub struct SourceUpdate {
     pub server_version: Option<String>,
     pub server_tz: Option<String>,
     pub caps: i64,
+    pub stream_limit: Option<i64>,
 }
 
 impl Store {
@@ -81,12 +84,13 @@ impl Store {
 
     pub async fn update_source(&self, id: i64, u: &SourceUpdate) -> Result<()> {
         sqlx::query(
-            "UPDATE source SET user_level = ?, server_version = ?, server_tz = ?, caps = ? WHERE id = ?",
+            "UPDATE source SET user_level = ?, server_version = ?, server_tz = ?, caps = ?, stream_limit = ? WHERE id = ?",
         )
         .bind(&u.user_level)
         .bind(&u.server_version)
         .bind(&u.server_tz)
         .bind(u.caps)
+        .bind(u.stream_limit)
         .bind(id)
         .execute(self.pool())
         .await?;

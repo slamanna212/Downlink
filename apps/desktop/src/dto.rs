@@ -67,6 +67,41 @@ pub struct PlayerStateDto {
     pub reconnecting: bool,
     pub error: Option<AppError>,
     pub transitioned_at: i64,
+    /// Audio and subtitle tracks of the current file (video tracks are left out).
+    pub tracks: Vec<TrackDto>,
+}
+
+/// `Track` of types.ts: one audio or subtitle track (teletext and DVB subtitles are `sub`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrackDto {
+    pub id: i64,
+    pub kind: &'static str,
+    pub lang: Option<String>,
+    pub title: Option<String>,
+    pub codec: Option<String>,
+    pub selected: bool,
+}
+
+pub fn track_dtos(tracks: &[downlink_player::Track]) -> Vec<TrackDto> {
+    tracks
+        .iter()
+        .filter_map(|t| {
+            let kind = match t.kind.as_str() {
+                "audio" => "audio",
+                "sub" => "sub",
+                _ => return None,
+            };
+            Some(TrackDto {
+                id: t.id,
+                kind,
+                lang: t.lang.clone(),
+                title: t.title.clone(),
+                codec: t.codec.clone(),
+                selected: t.selected,
+            })
+        })
+        .collect()
 }
 
 /// What the player glue knows about the current session beyond mpv's own state.
@@ -116,6 +151,7 @@ pub fn player_state(snap: &PlayerSnapshot, info: &SessionInfo) -> PlayerStateDto
         reconnecting: snap.reconnecting || (info.failover_active && state != SessionState::Playing),
         error,
         transitioned_at: info.transitioned_at,
+        tracks: track_dtos(&snap.tracks),
     }
 }
 

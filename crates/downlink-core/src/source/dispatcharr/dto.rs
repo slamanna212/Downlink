@@ -93,9 +93,18 @@ pub struct MeDto {
     pub username: Option<String>,
     #[serde(default)]
     pub user_level: Value,
+    #[serde(default, deserialize_with = "de_opt_i64")]
+    pub stream_limit: Option<i64>,
 }
 
 impl MeDto {
+    /// Concurrent streams this account may hold; `None` when unlimited (0) or not reported.
+    pub fn stream_limit(&self) -> Option<u32> {
+        self.stream_limit
+            .filter(|n| *n > 0)
+            .and_then(|n| u32::try_from(n).ok())
+    }
+
     /// Dispatcharr levels: 0 streamer, 1 standard, 10 admin (or the names).
     pub fn level(&self) -> Option<UserLevel> {
         match &self.user_level {

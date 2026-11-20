@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Drawer, Menu, UnstyledButton } from '@mantine/core';
-import { IconStar } from '@tabler/icons-react';
+import { IconStar, IconLayoutGrid } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
 import { useCaps, useChannels, useOffline } from '../../api/queries';
 import type { Programme } from '../../api/types';
@@ -18,12 +18,14 @@ import { useDetailStore } from '../../store/detail';
 import { activateProgramme } from '../guide/activate';
 import { blockState } from '../guide/guideModel';
 import { playChannel } from '../player/actions';
+import { useMultiviewAvailable } from '../multiview/available';
 import classes from './Detail.module.css';
 
 /** Channel detail drawer: now/next, catch-up window, schedule, record, favourite. */
 export function ChannelDetail() {
   const open = useDetailStore((s) => s.open);
   const close = useDetailStore((s) => s.close);
+  const multiview = useMultiviewAvailable();
   const show = useDetailStore((s) => s.show);
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -84,6 +86,18 @@ export function ChannelDetail() {
             >
               {t('detail.watchLive')}
             </DLButton>
+            {multiview && !channel.isRadio && (
+              <DLButton
+                variant="default"
+                icon={IconLayoutGrid}
+                onClick={() => {
+                  close();
+                  void navigate('/multiview', { state: { add: channel.id } });
+                }}
+              >
+                {t('multiview.add')}
+              </DLButton>
+            )}
             <DLIconButton
               label={t(channel.isFavourite ? 'channels.favourite.remove' : 'channels.favourite.add')}
               icon={IconStar}

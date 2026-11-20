@@ -4,15 +4,17 @@ import { createBoundsReporter, toPhysicalBounds } from './videoBounds';
 
 /**
  * Reports the element's rect in physical pixels (ResizeObserver + one rAF debounce) so the libmpv
- * surface sits under it. Used by the full player and by the guide's mini player.
+ * surface sits under it. Used by the full player, the guide's mini player and multiview tiles
+ * (`slot` > 0 positions that tile's surface; slot 0 is the main player).
  */
-export function useVideoBounds(ref: React.RefObject<HTMLElement | null>, enabled = true) {
+export function useVideoBounds(ref: React.RefObject<HTMLElement | null>, enabled = true, slot = 0) {
   useEffect(() => {
     const el = ref.current;
     if (!el || !enabled) return;
     const reporter = createBoundsReporter({
       measure: () => toPhysicalBounds(el.getBoundingClientRect(), window.devicePixelRatio || 1),
-      send: (b) => void invoke('set_video_bounds', b).catch(() => undefined),
+      send: (b) =>
+        void (slot > 0 ? invoke('multiview_set_bounds', { ...b, slot }) : invoke('set_video_bounds', b)).catch(() => undefined),
     });
     const ro = new ResizeObserver(() => reporter.schedule());
     ro.observe(el);
@@ -27,5 +29,5 @@ export function useVideoBounds(ref: React.RefObject<HTMLElement | null>, enabled
       document.removeEventListener('transitionend', onChange, true);
       reporter.dispose();
     };
-  }, [ref, enabled]);
+  }, [ref, enabled, slot]);
 }

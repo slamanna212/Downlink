@@ -39,7 +39,7 @@ Suggested first prompt for Claude Code:
 > from DESIGN.md §11. No feature screens yet.
 
 Notes:
-- Multiview is designed but listed as post-1.0 in PLAN §1.5; update the plan if it moves into 1.0.
+- Multiview is in 1.0 (PLAN §1.5, §4.11).
 - Light theme, Movies/Series screens and the command palette aren't designed yet.
 - Verify Mantine 9 API names (variant augmentation, `focusRing`, `autoContrast`) against the installed
   version; they're written against the Mantine 7/8 API.

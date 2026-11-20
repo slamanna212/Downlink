@@ -37,7 +37,7 @@ export const useNowNext = (channelIds: number[]) =>
     enabled: channelIds.length > 0,
   });
 
-const NO_CAPS: Caps = { live: false, epg: false, catchup: false, vod: false, dvr: false, favourites: false };
+const NO_CAPS: Caps = { live: false, epg: false, catchup: false, vod: false, dvr: false, favourites: false, streamSwitch: false };
 
 /** UI branches on Caps, never on source kind. `loaded` is false until the first answer. */
 export function useCaps(): { caps: Caps; loaded: boolean; hasSource: boolean } {

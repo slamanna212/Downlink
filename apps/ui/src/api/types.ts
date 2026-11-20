@@ -12,6 +12,8 @@ export const Cap = {
   Vod: 1 << 3,
   Dvr: 1 << 4,
   Favourites: 1 << 5,
+  /** The account may switch a live channel to another provider stream (stream picker). */
+  StreamSwitch: 1 << 9,
 } as const;
 export type CapFlag = (typeof Cap)[keyof typeof Cap];
 
@@ -23,6 +25,7 @@ export interface Caps {
   vod: boolean;
   dvr: boolean;
   favourites: boolean;
+  streamSwitch: boolean;
 }
 
 /** `connecting` = not probed yet since launch. */
@@ -46,6 +49,8 @@ export interface Source {
   supportsHlsTransport?: boolean;
   /** Live TV uses HLS for this source. */
   hlsTransport?: boolean;
+  /** Concurrent streams the account may hold; null/absent when unknown or unlimited. */
+  streamLimit?: number | null;
 }
 
 export interface Group {
@@ -142,6 +147,51 @@ export interface PlayerState {
   error: AppError | null;
   /** UTC ms of the last transition (debug panel). */
   transitionedAt: number;
+  /** Audio and subtitle tracks of the current file (teletext / DVB subtitles are `sub`). */
+  tracks: Track[];
+}
+
+export interface Track {
+  id: number;
+  kind: 'audio' | 'sub';
+  lang: string | null;
+  title: string | null;
+  codec: string | null;
+  selected: boolean;
+}
+
+/** One provider stream of a channel, in failover order. */
+export interface AltStream {
+  /** 0-based failover position. */
+  index: number;
+  streamId: string;
+  name: string;
+}
+
+/** One multiview tile. Slot 0 is the main player (its playback state is `PlayerState`). */
+export interface MultiviewTile {
+  slot: number;
+  channelId: number;
+  state: PlayerPhase;
+  failure: 'limit' | 'codec' | 'engine' | 'stream' | null;
+}
+
+export interface MultiviewState {
+  tiles: MultiviewTile[];
+  /** Audible slot (0 = main player). */
+  audible: number;
+  /** Tiles this machine may show, main player included (1 = multiview unavailable). */
+  maxTiles: number;
+  /** Concurrent streams the account may hold, when known. */
+  streamLimit: number | null;
+}
+
+export interface StreamList {
+  channelId: number;
+  /** 1-based stream believed to be in use, when known. */
+  sourceIndex: number | null;
+  sourceCount: number;
+  streams: AltStream[];
 }
 
 export type ErrorCode = 'auth' | 'network' | 'server' | 'stream' | 'media' | 'local';
@@ -176,6 +226,9 @@ export type PlayerCommand =
   | { kind: 'goLive' }
   | { kind: 'setVolume'; volume: number }
   | { kind: 'setMuted'; muted: boolean }
+  | { kind: 'setAudioTrack'; id: number }
+  /** `null` turns subtitles off. */
+  | { kind: 'setSubtitleTrack'; id: number | null }
   | { kind: 'retry' };
 
 export type DensitySetting = 'compact' | 'comfortable' | 'tv';

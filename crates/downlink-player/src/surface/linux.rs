@@ -2,9 +2,12 @@
 //! sits **under** the transparent WebKitGTK webview; mpv renders into it through the OpenGL
 //! render API (PLAN §2.2, ADR-0001). GTK-level, so it works on Wayland and X11.
 //!
-//! Only one surface per process (the GTK state lives in a main-thread thread-local).
+//! Several surfaces per process (multiview, PLAN §4.11): slot 0 is the main player and owns the
+//! overlay; other slots add their own `GtkGLArea` to the same overlay, also under the webview. The
+//! GTK state lives in a main-thread thread-local keyed by slot.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -97,7 +100,7 @@ struct GtkState {
 }
 
 thread_local! {
-    static STATE: RefCell<Option<GtkState>> = const { RefCell::new(None) };
+    static STATE: RefCell<HashMap<u32, GtkState>> = RefCell::new(HashMap::new());
 }
 
 /// Linux surface; see the module docs.
@@ -105,15 +108,34 @@ pub struct LinuxSurface {
     engine: Arc<Engine>,
     dispatch: MainThreadDispatch,
     frames: Arc<AtomicU64>,
+    slot: u32,
 }
 
 impl LinuxSurface {
+    /// The main player's surface (slot 0).
     pub fn new(engine: Arc<Engine>, dispatch: MainThreadDispatch) -> Self {
+        Self::with_slot(engine, dispatch, 0)
+    }
+
+    /// A multiview tile's surface. Slot 0 must already be attached.
+    pub fn with_slot(engine: Arc<Engine>, dispatch: MainThreadDispatch, slot: u32) -> Self {
         Self {
             engine,
             dispatch,
             frames: Arc::new(AtomicU64::new(0)),
+            slot,
         }
+    }
+
+    fn with_state(&self, f: impl FnOnce(&GtkState) + Send + 'static) {
+        let slot = self.slot;
+        (self.dispatch)(Box::new(move || {
+            STATE.with(|s| {
+                if let Some(st) = s.borrow().get(&slot) {
+                    f(st);
+                }
+            });
+        }));
     }
 
     /// Number of frames rendered into the GLArea so far (for FPS measurement).
@@ -163,15 +185,24 @@ impl VideoSurface for LinuxSurface {
     type Parent = gtk::Box;
 
     fn attach(&mut self, vbox: &gtk::Box) -> Result<(), PlayerError> {
-        let webview = vbox
-            .children()
-            .into_iter()
-            .find(|c| c.type_().name().contains("WebView"))
-            .ok_or_else(|| PlayerError::Surface("no webview found in the window".into()))?;
-
-        let overlay = gtk::Overlay::new();
-        let base = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        overlay.add(&base);
+        // Tiles join the overlay slot 0 created; only slot 0 re-parents the webview.
+        let existing = STATE.with(|s| s.borrow().get(&0).map(|st| st.overlay.clone()));
+        let (overlay, webview) = if self.slot == 0 {
+            let webview = vbox
+                .children()
+                .into_iter()
+                .find(|c| c.type_().name().contains("WebView"))
+                .ok_or_else(|| PlayerError::Surface("no webview found in the window".into()))?;
+            let overlay = gtk::Overlay::new();
+            let base = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            overlay.add(&base);
+            (overlay, Some(webview))
+        } else {
+            let overlay = existing.ok_or_else(|| {
+                PlayerError::Surface("the main video surface is not attached".into())
+            })?;
+            (overlay, None)
+        };
 
         let glarea = gtk::GLArea::new();
         glarea.set_halign(gtk::Align::Start);
@@ -304,22 +335,33 @@ impl VideoSurface for LinuxSurface {
             });
         }
 
-        vbox.remove(&webview);
-        overlay.add_overlay(&glarea);
-        overlay.add_overlay(&webview);
-        webview.set_hexpand(true);
-        webview.set_vexpand(true);
-        vbox.pack_start(&overlay, true, true, 0);
-        overlay.show_all();
+        if let Some(webview) = webview {
+            vbox.remove(&webview);
+            overlay.add_overlay(&glarea);
+            overlay.add_overlay(&webview);
+            webview.set_hexpand(true);
+            webview.set_vexpand(true);
+            vbox.pack_start(&overlay, true, true, 0);
+            overlay.show_all();
+        } else {
+            // Under the webview: index 0 is drawn first. Tiles never overlap each other.
+            overlay.add_overlay(&glarea);
+            overlay.reorder_overlay(&glarea, 0);
+            glarea.show();
+        }
 
+        let slot = self.slot;
         STATE.with(|s| {
-            *s.borrow_mut() = Some(GtkState {
-                overlay,
-                glarea,
-                render,
-                engine_slot,
-                create: create_cell,
-            });
+            s.borrow_mut().insert(
+                slot,
+                GtkState {
+                    overlay,
+                    glarea,
+                    render,
+                    engine_slot,
+                    create: create_cell,
+                },
+            );
         });
         Ok(())
     }
@@ -327,51 +369,40 @@ impl VideoSurface for LinuxSurface {
     /// The supervisor replaced a dead mpv instance: free the old render context and create one
     /// on the new engine (GL context current), then redraw.
     fn rebind(&self, engine: Arc<Engine>) {
-        (self.dispatch)(Box::new(move || {
-            STATE.with(|s| {
-                if let Some(st) = s.borrow().as_ref() {
-                    *st.engine_slot.borrow_mut() = engine;
-                    st.glarea.make_current();
-                    *st.render.borrow_mut() = None;
-                    if let Some(create) = st.create.borrow().as_ref() {
-                        create(&st.glarea);
-                    }
-                    st.glarea.queue_render();
-                }
-            });
-        }));
+        self.with_state(move |st| {
+            *st.engine_slot.borrow_mut() = engine;
+            st.glarea.make_current();
+            *st.render.borrow_mut() = None;
+            if let Some(create) = st.create.borrow().as_ref() {
+                create(&st.glarea);
+            }
+            st.glarea.queue_render();
+        });
     }
 
     fn set_bounds(&self, b: SurfaceBounds) {
-        (self.dispatch)(Box::new(move || {
-            STATE.with(|s| {
-                if let Some(st) = s.borrow().as_ref() {
-                    let scale = if b.scale > 0.0 { b.scale } else { 1.0 };
-                    let l = |v: f64| (v / scale).round() as i32;
-                    st.glarea.set_margin_start(l(f64::from(b.x)).max(0));
-                    st.glarea.set_margin_top(l(f64::from(b.y)).max(0));
-                    st.glarea
-                        .set_size_request(l(f64::from(b.w)).max(1), l(f64::from(b.h)).max(1));
-                    st.glarea.queue_render();
-                }
-            });
-        }));
+        self.with_state(move |st| {
+            let scale = if b.scale > 0.0 { b.scale } else { 1.0 };
+            let l = |v: f64| (v / scale).round() as i32;
+            st.glarea.set_margin_start(l(f64::from(b.x)).max(0));
+            st.glarea.set_margin_top(l(f64::from(b.y)).max(0));
+            st.glarea
+                .set_size_request(l(f64::from(b.w)).max(1), l(f64::from(b.h)).max(1));
+            st.glarea.queue_render();
+        });
     }
 
     fn set_visible(&self, visible: bool) {
-        (self.dispatch)(Box::new(move || {
-            STATE.with(|s| {
-                if let Some(st) = s.borrow().as_ref() {
-                    // Hiding does not unrealize, so the render context survives.
-                    st.glarea.set_visible(visible);
-                }
-            });
-        }));
+        // Hiding does not unrealize, so the render context survives.
+        self.with_state(move |st| st.glarea.set_visible(visible));
     }
 
+    /// Must run on the main thread.
     fn detach(&mut self) {
+        let slot = self.slot;
         STATE.with(|s| {
-            if let Some(st) = s.borrow_mut().take() {
+            if let Some(st) = s.borrow_mut().remove(&slot) {
+                st.glarea.make_current();
                 *st.render.borrow_mut() = None;
                 st.overlay.remove(&st.glarea);
             }

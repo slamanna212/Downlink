@@ -63,6 +63,8 @@ pub struct Playback {
     service: Arc<Service>,
     player: Arc<Player>,
     active: Arc<Mutex<Active>>,
+    /// Multiview tiles (PLAN §4.11); set once at boot.
+    pub multiview: OnceLock<Arc<crate::multiview::Multiview>>,
 }
 
 fn lock(a: &Mutex<Active>) -> MutexGuard<'_, Active> {
@@ -72,7 +74,7 @@ fn lock(a: &Mutex<Active>) -> MutexGuard<'_, Active> {
     }
 }
 
-fn plan_request(plan: &PlayPlan, mode: PlayMode, failover: bool) -> PlayRequest {
+pub(crate) fn plan_request(plan: &PlayPlan, mode: PlayMode, failover: bool) -> PlayRequest {
     PlayRequest {
         url: plan.url.clone(),
         headers: plan
@@ -336,6 +338,7 @@ impl Playback {
             service,
             player,
             active: ctx.active.clone(),
+            multiview: OnceLock::new(),
         })
     }
 
@@ -725,6 +728,25 @@ impl Playback {
         self.play_channel(ch).await
     }
 
+    /// Stream picker (Dispatcharr admin). The server swaps the upstream under the same proxy
+    /// connection, so mpv keeps its URL; only the info-panel position changes.
+    pub async fn switch_stream(&self, channel_id: i64, index: usize) -> Result<(), AppError> {
+        let playing = {
+            let a = lock(&self.active);
+            a.info.channel_id == Some(channel_id) && a.info.mode == Some(PlayMode::Live)
+        };
+        if !playing {
+            return Err(AppError::local(
+                "Switch streams while the channel is playing live.",
+            ));
+        }
+        let (i, c) = self.service.switch_stream(channel_id, index).await?;
+        let mut a = lock(&self.active);
+        a.source_index = u32::try_from(i).unwrap_or(0);
+        a.source_count = u32::try_from(c).unwrap_or(0);
+        Ok(())
+    }
+
     pub async fn retry(&self) -> Result<(), AppError> {
         let last = lock(&self.active)
             .last
@@ -763,8 +785,16 @@ impl Playback {
         r
     }
 
+    /// The channel the main player is on (live or catch-up), if any.
+    pub fn channel_id(&self) -> Option<i64> {
+        lock(&self.active).info.channel_id
+    }
+
     /// Sleep / quit: pause and release the stream, delete every open session.
     pub async fn release_all(&self) {
+        if let Some(mv) = self.multiview.get() {
+            mv.clear().await;
+        }
         let _ = self.stop().await;
         match self.service.stop_all_sessions().await {
             Ok(r) => tracing::info!(

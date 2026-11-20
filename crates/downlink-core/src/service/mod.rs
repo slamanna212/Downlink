@@ -1535,6 +1535,18 @@ impl Service {
     }
 
     async fn live_plan(&self, channel_id: i64) -> Result<PlayPlan> {
+        self.live_plan_with(channel_id, true).await
+    }
+
+    /// Play plan for a multiview tile (PLAN §4.11). Always the TS path: the opt-in live HLS
+    /// transport keeps one session for the main player, and a tile must never replace it.
+    pub async fn tile_plan(&self, channel_id: i64) -> Result<PlayPlan> {
+        let plan = self.live_plan_with(channel_id, false).await?;
+        self.store.touch_recent(channel_id, now_utc()).await?;
+        Ok(plan)
+    }
+
+    async fn live_plan_with(&self, channel_id: i64, allow_hls: bool) -> Result<PlayPlan> {
         let ch = self
             .store
             .channel(channel_id)
@@ -1544,7 +1556,10 @@ impl Service {
         if SourceKind::parse(&src.kind) == Some(SourceKind::Dispatcharr) {
             // Opt-in HLS transport: only for channels the server proxies (a Redirect-profile channel
             // is answered before the output format is considered, so it keeps its normal path).
-            if src.hls_transport && ch.stream_redirect == crate::source::StreamMode::Proxy {
+            if allow_hls
+                && src.hls_transport
+                && ch.stream_redirect == crate::source::StreamMode::Proxy
+            {
                 return self.mint_hls_plan(&ch, &src).await;
             }
             let plan = catalog::resolve_play_plan(&self.store, self, channel_id).await?;
@@ -1612,6 +1627,38 @@ impl Service {
             source_count: streams.len(),
             streams,
         })
+    }
+
+    /// Stream picker: switch the live channel to the stream at `index` (0-based, failover order).
+    /// Moves the server's shared channel session (PLAN §3.4, D18). Returns `(1-based index, count)`.
+    pub async fn switch_stream(&self, channel_id: i64, index: usize) -> Result<(usize, usize)> {
+        let ch = self
+            .store
+            .channel(channel_id)
+            .await?
+            .ok_or_else(|| AppError::local("That channel is no longer in the list."))?;
+        let src = self.store.source(ch.source_id).await?;
+        if !crate::source::Caps::from_db(src.caps).contains(crate::source::Caps::STREAM_SWITCH) {
+            return Err(AppError::local("This account can't switch streams."));
+        }
+        let list = self.channel_streams(channel_id).await?;
+        let target = list
+            .streams
+            .get(index)
+            .ok_or_else(|| AppError::local("That stream is no longer available."))?;
+        let client = self.client(ch.source_id).await?;
+        let switched = client
+            .change_stream(&ChannelKey::from_row(&ch), &target.stream_id)
+            .await?;
+        if !switched {
+            return Err(AppError::stream(
+                "This channel can't switch streams while it plays this way.",
+            ));
+        }
+        if let Ok(mut g) = self.current_stream.lock() {
+            g.insert(channel_id, index);
+        }
+        Ok((index + 1, list.source_count))
     }
 
     /// `(1-based index in use, count)` for PlayerState, from local data only.

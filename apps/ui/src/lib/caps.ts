@@ -8,6 +8,7 @@ export function decodeCaps(bits: number): Caps {
     vod: (bits & Cap.Vod) !== 0,
     dvr: (bits & Cap.Dvr) !== 0,
     favourites: (bits & Cap.Favourites) !== 0,
+    streamSwitch: (bits & Cap.StreamSwitch) !== 0,
   };
 }
 

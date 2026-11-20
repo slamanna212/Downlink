@@ -10,6 +10,9 @@ import {
   IconInfoCircle,
   IconMaximize,
   IconMinimize,
+  IconArrowsMaximize,
+  IconPictureInPicture,
+  IconLayoutGrid,
   IconPlayerPause,
   IconPlayerPlay,
   IconRefresh,
@@ -40,7 +43,10 @@ import { usePlayerStore } from '../../store/player';
 import { useUiStore } from '../../store/ui';
 import { copyDiagnostics } from '../diagnostics/copyDiagnostics';
 import { resumeUseful } from '../vod/vod';
+import { decodeCaps } from '../../lib/caps';
 import { playChannel, restartProgramme } from './actions';
+import { AudioMenu, StreamMenu, SubtitleMenu } from './PlayerMenus';
+import { useMultiviewAvailable } from '../multiview/available';
 import { holdSession, releaseSession } from './session';
 import classes from './Player.module.css';
 
@@ -201,11 +207,36 @@ function ErrorOverlay({ error, onRetry }: { error: AppError | null; onRetry: () 
 
 let pendingFullscreenReset: ReturnType<typeof setTimeout> | null = null;
 
+/** Enter or leave the mini player (compact always-on-top window). */
+export function setMiniPlayer(enabled: boolean): Promise<void> {
+  return invoke('set_mini_player', { enabled })
+    .then(() => useUiStore.getState().setMini(enabled))
+    .catch(() => undefined);
+}
+
+/** Mini player chrome: drag anywhere, hover shows play/pause, mute, restore and close. */
+function MiniOverlay({ paused, muted, onTogglePause, onToggleMute, onRestore, onClose }: {
+  paused: boolean; muted: boolean; onTogglePause: () => void; onToggleMute: () => void; onRestore: () => void; onClose: () => void;
+}) {
+  return (
+    <div className={classes.mini} data-tauri-drag-region onDoubleClick={onRestore}>
+      <div className={classes.miniControls}>
+        <DLIconButton label={paused ? t('player.play') : t('player.pause')} icon={paused ? IconPlayerPlay : IconPlayerPause} variant="overlay" size="md" filledGlyph onClick={onTogglePause} />
+        <DLIconButton label={muted ? t('player.unmute') : t('player.mute')} icon={muted ? IconVolumeOff : IconVolume} variant="overlay" size="md" onClick={onToggleMute} />
+        <DLIconButton label={t('player.miniRestore')} icon={IconArrowsMaximize} variant="overlay" size="md" onClick={onRestore} />
+        <DLIconButton label={t('player.miniClose')} icon={IconX} variant="overlay" size="md" onClick={onClose} />
+      </div>
+    </div>
+  );
+}
+
 export function PlayerPage() {
   const navigate = useNavigate();
   const player = usePlayerStore((s) => s.player);
   const fullscreen = useUiStore((s) => s.fullscreen);
   const setFullscreen = useUiStore((s) => s.setFullscreen);
+  const mini = useUiStore((s) => s.mini);
+  const multiviewAvailable = useMultiviewAvailable();
   const rootRef = useRef<HTMLDivElement | null>(null);
   useVideoBounds(rootRef);
 
@@ -224,6 +255,12 @@ export function PlayerPage() {
   const next = nn.data?.[0]?.next ?? null;
 
   const [infoOpen, setInfoOpen] = useState(false);
+  const [menu, setMenu] = useState<'audio' | 'subs' | 'stream' | null>(null);
+  const [streamDenied, setStreamDenied] = useState(false);
+  const menuProps = (name: 'audio' | 'subs' | 'stream') => ({
+    opened: menu === name,
+    onChange: (open: boolean) => setMenu(open ? name : null),
+  });
   const [entry, setEntry] = useState('');
   const [entryMiss, setEntryMiss] = useState(false);
   const [resumeDismissed, setResumeDismissed] = useState<string | null>(null);
@@ -232,7 +269,11 @@ export function PlayerPage() {
 
   const failed = player.state === 'Failed';
   const paused = player.state === 'Paused';
-  const barHidden = idle && !paused && !failed && !infoOpen;
+  const barHidden = idle && !paused && !failed && !infoOpen && menu === null;
+  const audioTracks = player.tracks.filter((x) => x.kind === 'audio');
+  const subTracks = player.tracks.filter((x) => x.kind === 'sub');
+  const hasAudioMenu = audioTracks.length > 1;
+  const hasSubMenu = subTracks.length > 0;
 
   // Sessions are stopped when leaving the player (CLAUDE rule 6), unless the guide's mini player takes the
   // session over (see ./session). Fullscreen always ends with the player; deferred one tick so React
@@ -245,6 +286,7 @@ export function PlayerPage() {
       releaseSession();
       pendingFullscreenReset = setTimeout(() => {
         pendingFullscreenReset = null;
+        if (useUiStore.getState().mini) void setMiniPlayer(false);
         if (!useUiStore.getState().fullscreen) return;
         useUiStore.getState().setFullscreen(false);
         void invoke('set_fullscreen', { enabled: false }).catch(() => undefined);
@@ -286,6 +328,7 @@ export function PlayerPage() {
     if (st.channelId != null) void restartProgramme(st.channelId);
   }, []);
   const goLive = useCallback(() => cmd({ kind: 'goLive' }), [cmd]);
+  const toggleMini = useCallback(() => void setMiniPlayer(!useUiStore.getState().mini), []);
   // Back to wherever the player was opened from (the guide keeps playing in its mini player); a player
   // reached without history (resume on launch, deep link into a fresh window) falls back to the list.
   const goBack = useCallback(() => {
@@ -328,6 +371,21 @@ export function PlayerPage() {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
+      // Keys inside an open menu (Esc closes it) belong to the menu, not the player.
+      if (target?.closest('[role="menu"], .mantine-Menu-dropdown, [data-mantine-stop-propagation]')) return;
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        toggleMini();
+        return;
+      }
+      if (mini) {
+        if (e.key === ' ') {
+          e.preventDefault();
+          togglePause();
+        } else if (e.key === 'm' || e.key === 'M') toggleMute();
+        else if (e.key === 'Escape') toggleMini();
+        return;
+      }
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
         setEntryMiss(false);
@@ -344,13 +402,16 @@ export function PlayerPage() {
         togglePause();
       } else if (e.key === 'm' || e.key === 'M') toggleMute();
       else if (e.key === 'i' || e.key === 'I') setInfoOpen((v) => !v);
+      else if ((e.key === 'a' || e.key === 'A') && hasAudioMenu) setMenu((m) => (m === 'audio' ? null : 'audio'));
+      else if ((e.key === 't' || e.key === 'T') && hasSubMenu) setMenu((m) => (m === 'subs' ? null : 'subs'));
       else if (e.key === 'f' || e.key === 'F') toggleFavourite();
       else if (e.key === 'ArrowLeft') seekBy(-10);
       else if (e.key === 'ArrowRight') seekBy(10);
       else if (e.key === 's' || e.key === 'S') restart();
       else if (e.key === 'End') goLive();
       else if (e.key === 'Escape') {
-        if (entry) clearEntry();
+        if (menu) setMenu(null);
+        else if (entry) clearEntry();
         else if (infoOpen) setInfoOpen(false);
         else if (fullscreen) toggleFullscreen();
         else goBack();
@@ -358,7 +419,7 @@ export function PlayerPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [entry, infoOpen, fullscreen, toggleFavourite, commitEntry, clearEntry, togglePause, toggleMute, toggleFullscreen, goBack, seekBy, restart, goLive]);
+  }, [mini, toggleMini, entry, infoOpen, menu, hasAudioMenu, hasSubMenu, fullscreen, toggleFavourite, commitEntry, clearEntry, togglePause, toggleMute, toggleFullscreen, goBack, seekBy, restart, goLive]);
 
   useEffect(() => () => { if (entryTimer.current) clearTimeout(entryTimer.current); }, []);
 
@@ -366,7 +427,9 @@ export function PlayerPage() {
   const catchup = player.mode === 'catchup';
   const timeshift = player.mode === 'catchup' || player.mode === 'vod' || player.mode === 'recording';
   const live = !timeshift && (player.mode === 'live' || player.mode === null);
-  const sourceName = sources.data?.find((s) => s.id === channel?.sourceId)?.name ?? '–';
+  const source = sources.data?.find((s) => s.id === channel?.sourceId);
+  const sourceName = source?.name ?? '–';
+  const canSwitchStream = live && player.state !== 'Idle' && !!channel && !!source && decodeCaps(source.caps).streamSwitch && !streamDenied;
   const shownProg = catchup ? player.programme : prog;
   const position = player.position ?? 0;
   const duration = player.duration ?? 0;
@@ -377,9 +440,21 @@ export function PlayerPage() {
       ref={rootRef}
       className={classes.root}
       onDoubleClick={(e) => {
+        if (mini) return;
         if (!(e.target as HTMLElement).closest('button, input, [role="slider"], [role="dialog"]')) toggleFullscreen();
       }}
-      data-video-rect data-idle={barHidden || undefined}>
+      data-video-rect data-idle={barHidden || undefined} data-mini={mini || undefined}>
+      {mini ? (
+        <MiniOverlay
+          paused={paused}
+          muted={player.muted}
+          onTogglePause={togglePause}
+          onToggleMute={toggleMute}
+          onRestore={toggleMini}
+          onClose={() => void setMiniPlayer(false).then(goBack)}
+        />
+      ) : (
+      <>
       {!inTauri() && <div className={classes.devVideo} aria-hidden>video surface (libmpv, under webview)</div>}
       {player.state === 'Idle' || player.state === 'Stopped' ? (
         <div className={classes.layer}>
@@ -511,6 +586,11 @@ export function PlayerPage() {
                 thumbLabel={t('player.volume')}
               />
               <span className={classes.spacer} />
+              {hasAudioMenu && <AudioMenu tracks={player.tracks} {...menuProps('audio')} />}
+              {hasSubMenu && <SubtitleMenu tracks={player.tracks} {...menuProps('subs')} />}
+              {canSwitchStream && channel && (
+                <StreamMenu channelId={channel.id} onDenied={() => setStreamDenied(true)} {...menuProps('stream')} />
+              )}
               {channel && (
                 <DLIconButton
                   label={channel.isFavourite ? t('player.favouriteRemove') : t('player.favouriteAdd')}
@@ -530,6 +610,10 @@ export function PlayerPage() {
                 pressed={infoOpen}
                 onClick={() => setInfoOpen((v) => !v)}
               />
+              {live && multiviewAvailable && player.channelId != null && (
+                <DLIconButton label={t('player.multiview')} icon={IconLayoutGrid} variant="overlay" size="lg" onClick={() => void navigate('/multiview')} />
+              )}
+              <DLIconButton label={t('player.miniPlayer')} icon={IconPictureInPicture} variant="overlay" size="lg" onClick={toggleMini} />
               <DLIconButton
                 label={fullscreen ? t('player.exitFullscreen') : t('player.fullscreen')}
                 icon={fullscreen ? IconMinimize : IconMaximize}
@@ -540,6 +624,8 @@ export function PlayerPage() {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

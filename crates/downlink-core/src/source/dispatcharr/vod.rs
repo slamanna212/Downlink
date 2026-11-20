@@ -785,6 +785,10 @@ impl DispatcharrClient {
             .store(vod, std::sync::atomic::Ordering::Relaxed);
         self.has_dvr
             .store(dvr, std::sync::atomic::Ordering::Relaxed);
+        self.can_switch.store(
+            matches!(level, Some(crate::source::UserLevel::Admin)),
+            std::sync::atomic::Ordering::Relaxed,
+        );
     }
 }
 

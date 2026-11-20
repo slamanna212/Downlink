@@ -273,12 +273,14 @@ async fn sync_state_and_source_update() {
                 server_version: Some("0.32.0".into()),
                 server_tz: Some("UTC".into()),
                 caps: 7,
+                stream_limit: Some(4),
             },
         )
         .await
         .unwrap();
     let s = store.source(src.id).await.unwrap();
     assert_eq!((s.caps, s.user_level.as_deref()), (7, Some("admin")));
+    assert_eq!(s.stream_limit, Some(4));
 }
 
 /// PLAN §2.6: a test asserts no secret is ever written to the DB. The secret exists only in the

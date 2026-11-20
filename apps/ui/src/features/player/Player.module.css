@@ -306,3 +306,41 @@
   font-size: var(--mantine-font-size-lg);
   font-weight: 600;
 }
+
+/* track / stream menus */
+.menuCheck {
+  display: inline-flex;
+  width: 16px;
+  color: var(--dl-accent-text);
+}
+.streamMenu { max-width: 340px; }
+.menuNote {
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  font-size: var(--mantine-font-size-xs);
+  color: var(--dl-text-dim);
+}
+
+/* mini player: the whole window is the video; drag anywhere, controls on hover */
+.mini {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+}
+.miniControls {
+  display: flex;
+  gap: var(--mantine-spacing-xs);
+  padding: var(--mantine-spacing-xs);
+  border-radius: var(--mantine-radius-xl);
+  background: var(--dl-scrim);
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+.mini:hover .miniControls,
+.mini:focus-within .miniControls { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .miniControls { transition: none; }
+}

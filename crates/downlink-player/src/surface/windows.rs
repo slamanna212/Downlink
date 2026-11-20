@@ -31,6 +31,11 @@ impl WindowsSurface {
             child: 0,
         }
     }
+
+    /// A multiview tile's surface: its own child HWND, also beneath the webview.
+    pub fn with_slot(engine: Arc<Engine>, dispatch: MainThreadDispatch, _slot: u32) -> Self {
+        Self::new(engine, dispatch)
+    }
 }
 
 impl VideoSurface for WindowsSurface {

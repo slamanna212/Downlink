@@ -38,6 +38,7 @@ pub async fn connect_and_record(
                 server_version: info.server_version.clone(),
                 server_tz: info.timezone.clone(),
                 caps: src.caps().to_db(),
+                stream_limit: info.max_connections.map(i64::from),
             },
         )
         .await?;

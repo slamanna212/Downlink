@@ -10,6 +10,7 @@ mod dto;
 mod e2e;
 mod hls_proxy;
 mod logging;
+mod multiview;
 mod player_glue;
 mod protocol;
 mod resume;
@@ -140,8 +141,18 @@ macro_rules! handlers {
             commands::player::player_command,
             commands::player::set_video_bounds,
             commands::player::set_fullscreen,
+            commands::player::set_mini_player,
             commands::player::set_stats_enabled,
             commands::player::list_audio_devices,
+            commands::player::get_channel_streams,
+            commands::player::switch_stream,
+            commands::player::get_multiview,
+            commands::player::multiview_set_tile,
+            commands::player::multiview_remove_tile,
+            commands::player::multiview_set_audio,
+            commands::player::multiview_make_main,
+            commands::player::multiview_set_bounds,
+            commands::player::multiview_exit,
             commands::settings::get_settings,
             commands::settings::set_settings,
             commands::diagnostics::get_diagnostics,

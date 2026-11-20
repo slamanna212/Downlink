@@ -105,7 +105,7 @@ function useEscapeBack() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   useEffect(() => {
-    if (pathname === '/' || pathname.startsWith('/player')) return;
+    if (pathname === '/' || pathname.startsWith('/player') || pathname.startsWith('/multiview')) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       const el = e.target as HTMLElement | null;
@@ -156,6 +156,7 @@ export function Shell() {
   const railPref = useUiStore((s) => s.railPref);
   const setRailPref = useUiStore((s) => s.setRailPref);
   const fullscreen = useUiStore((s) => s.fullscreen);
+  const mini = useUiStore((s) => s.mini);
   const videoHole = useUiStore((s) => s.videoHole);
   const { loaded, hasSource } = useCaps();
   const { data: sources } = useSources();
@@ -169,7 +170,8 @@ export function Shell() {
   const collapsed = railPref === 'auto' ? autoCollapsed : railPref === 'collapsed';
   const mode: RailMode = density === 'tv' ? 'tv' : collapsed ? 'collapsed' : 'expanded';
   const width = mode === 'tv' ? dl.layout.railTv : mode === 'collapsed' ? dl.layout.railCollapsed : dl.layout.railExpanded;
-  const route = pathname.startsWith('/player') ? 'player' : 'app';
+  // Video routes leave the video rects transparent so the native surfaces show through.
+  const route = pathname.startsWith('/player') || pathname.startsWith('/multiview') ? 'player' : 'app';
 
   // Keyboard map (PLAN §8.4): G guide, L live list, / search.
   useHotkeys([
@@ -186,7 +188,7 @@ export function Shell() {
       <a href="#main" className={classes.skip}>
         {t('a11y.skipToContent')}
       </a>
-      {!(fullscreen && route === 'player') && !(pathname === '/sources/add' && loaded && !hasSource) && (
+      {!((fullscreen || mini) && route === 'player') && !(pathname === '/sources/add' && loaded && !hasSource) && (
         <aside className={classes.rail} style={{ width }}>
           <Rail mode={mode} onToggle={() => setRailPref(collapsed ? 'expanded' : 'collapsed')} />
         </aside>

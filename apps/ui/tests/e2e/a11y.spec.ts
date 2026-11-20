@@ -18,6 +18,7 @@ const ROUTES = [
   '/settings/updates',
   '/settings/about',
   '/player',
+  '/multiview',
 ];
 
 for (const route of ROUTES) {

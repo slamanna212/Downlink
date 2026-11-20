@@ -172,8 +172,8 @@ async fn add_source_persists_reference_not_secret_and_emits_events() {
     assert_eq!(v["status"], "connected");
     assert_eq!(
         v["caps"],
-        1 | 2 | 4 | 16 | 32,
-        "LIVE|EPG|CATCHUP|DVR|FAVOURITES in the UI bit layout"
+        1 | 2 | 4 | 16 | 32 | 512,
+        "LIVE|EPG|CATCHUP|DVR|FAVOURITES|STREAM_SWITCH (admin fixture) in the UI bit layout"
     );
     assert_eq!(v["host"], format!("127.0.0.1:{}", server.address().port()));
     assert!(!v.to_string().contains(KEY));
@@ -1117,4 +1117,76 @@ async fn status_is_connecting_until_probed_then_connected_offline_or_auth_error(
             .len(),
         3
     );
+}
+
+/// Stream picker (PLAN §3.4, D18): an admin account switches the live channel to a chosen stream
+/// through `change_stream`, and the reported position follows.
+#[tokio::test]
+async fn stream_picker_switches_through_change_stream_for_admins() {
+    let (server, e, sid) = added().await;
+    let src = e.svc.store().source(sid).await.unwrap();
+    assert!(
+        downlink_core::source::Caps::from_db(src.caps)
+            .contains(downlink_core::source::Caps::STREAM_SWITCH),
+        "admin fixture account may switch streams"
+    );
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    let one = chans[0].id; // Channel One: streams [12, 11] in failover order
+    get(
+        &server,
+        "/api/channels/channels/1/streams/",
+        fixture!("channel_streams.json"),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path(format!("/proxy/ts/change_stream/{UUID1}")))
+        .and(header("X-API-Key", KEY))
+        .and(wiremock::matchers::body_json(json!({"stream_id": "11"})))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"success": true})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    e.svc.play_channel(one).await.unwrap();
+    assert_eq!(e.svc.switch_stream(one, 1).await.unwrap(), (2, 2));
+    assert_eq!(e.svc.source_position(one).await.unwrap(), (2, 2));
+    // An index past the list is refused without a server call.
+    assert!(e.svc.switch_stream(one, 9).await.is_err());
+}
+
+/// A non-admin account never gets the stream picker, and the service refuses without asking the server.
+#[tokio::test]
+async fn stream_picker_is_hidden_and_refused_for_non_admins() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/accounts/users/me/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"id": 2, "username": "viewer", "user_level": 1, "stream_limit": 3}),
+        ))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    mount_server(&server).await;
+    let e = env().await;
+    let s = e.svc.add_source(input(&server)).await.unwrap();
+    let v = serde_json::to_value(&s).unwrap();
+    assert_eq!(v["caps"].as_u64().unwrap() & 512, 0, "no STREAM_SWITCH bit");
+    assert_eq!(v["streamLimit"], 3, "stream limit recorded for the multiview budget");
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    assert!(e.svc.switch_stream(chans[0].id, 0).await.is_err());
+    let switched = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path().starts_with("/proxy/ts/change_stream/"))
+        .count();
+    assert_eq!(switched, 0);
 }

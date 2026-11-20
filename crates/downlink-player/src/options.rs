@@ -9,6 +9,18 @@ pub enum Profile {
     Live,
     /// Catch-up, VOD, recordings.
     Seekable,
+    /// A live multiview tile (PLAN §4.11): the live profile, nothing else.
+    Multiview,
+    /// A live multiview tile when more than 4 are on screen: also skips the loop filter on
+    /// non-key frames to keep software decode of many streams affordable.
+    MultiviewDense,
+}
+
+impl Profile {
+    /// Live sessions treat an end of file as a failure (the stream should never end).
+    pub fn is_live(self) -> bool {
+        matches!(self, Self::Live | Self::Multiview | Self::MultiviewDense)
+    }
 }
 
 /// How video reaches the screen.
@@ -314,6 +326,12 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
 /// Profile options, applied per file via `loadfile`.
 pub fn profile_options(profile: Profile, prefs: &Preferences) -> Opts {
     match profile {
+        Profile::Multiview => profile_options(Profile::Live, prefs),
+        Profile::MultiviewDense => {
+            let mut o = profile_options(Profile::Live, prefs);
+            o.push(kv("vd-lavc-skiploopfilter", "nonkey"));
+            o
+        }
         Profile::Live => vec![
             kv("cache", "yes"),
             kv("cache-secs", prefs.live_buffer_secs_clamped().to_string()),
@@ -378,6 +396,16 @@ mod tests {
 
     fn has(o: &Opts, k: &str, v: &str) -> bool {
         o.iter().any(|(a, b)| a == k && b == v)
+    }
+
+    #[test]
+    fn multiview_profiles() {
+        let p = Preferences::default();
+        let mv = profile_options(Profile::Multiview, &p);
+        assert_eq!(mv, profile_options(Profile::Live, &p));
+        let dense = profile_options(Profile::MultiviewDense, &p);
+        assert!(has(&dense, "vd-lavc-skiploopfilter", "nonkey"));
+        assert!(Profile::MultiviewDense.is_live() && !Profile::Seekable.is_live());
     }
 
     #[test]

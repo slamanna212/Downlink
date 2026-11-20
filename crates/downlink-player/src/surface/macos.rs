@@ -84,6 +84,11 @@ impl MacSurface {
         }
     }
 
+    /// Multiview tiles are not supported on macOS yet (`MAX_SURFACES` is 1); slot 0 only.
+    pub fn with_slot(engine: Arc<Engine>, dispatch: MainThreadDispatch, _slot: u32) -> Self {
+        Self::new(engine, dispatch)
+    }
+
     pub fn render_count(&self) -> u64 {
         self.frames.load(Ordering::Relaxed)
     }

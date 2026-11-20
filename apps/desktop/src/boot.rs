@@ -20,7 +20,7 @@ fn phase(name: &str) {
 }
 
 /// Run `f` on the UI thread and wait for its result.
-async fn on_main<T: Send + 'static>(
+pub(crate) async fn on_main<T: Send + 'static>(
     h: &AppHandle,
     f: impl FnOnce(&AppHandle) -> T + Send + 'static,
 ) -> Option<T> {
@@ -148,6 +148,7 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
             tracing::info!(source = ?loaded.source, api = ?loaded.client_api_version, "libmpv loaded");
             let prefs = dto::preferences_from_settings(&settings);
             let sink = sink_ctx.sink();
+            let loaded_for_tiles = loaded.clone();
             let p = tokio::task::spawn_blocking(move || {
                 Player::new(&loaded, prefs, RenderBackend::platform_default(), sink)
             })
@@ -182,7 +183,19 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
                         }
                         None => error = Some("the window is not available".into()),
                     }
-                    playback = Some(Playback::new(service.clone(), p.clone(), &sink_ctx));
+                    let pb = Playback::new(service.clone(), p.clone(), &sink_ctx);
+                    let dh = handle.clone();
+                    let dispatch: MainThreadDispatch = Arc::new(move |f| {
+                        let _ = dh.run_on_main_thread(f);
+                    });
+                    let _ = pb.multiview.set(crate::multiview::Multiview::new(
+                        handle.clone(),
+                        service.clone(),
+                        loaded_for_tiles,
+                        dispatch,
+                        p.clone(),
+                    ));
+                    playback = Some(pb);
                     player = Some(p);
                 }
                 Ok(Err(e)) => error = Some(e.to_string()),

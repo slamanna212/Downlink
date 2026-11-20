@@ -148,7 +148,7 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   Number entry pill top-right with accent caret.
 
 ## 9. Multiview
-Out of 1.0 in PLAN §1.5. The design is ready; update the plan before building.
+In 1.0 (PLAN §1.5, §4.11, D17).
 - Layouts 2-up, 2×2, 1+3, 3×3. Max 4 tiles (9 if hardware allows). 4 px gaps on `--dl-multiview-canvas`.
 - One tile audible: AUDIO badge (accent tint) top-right; others show a muted icon. "Audio follows focus" on.
 - Focused tile: **inset** 3 px accent ring (an outer ring would be clipped) + accent wash.

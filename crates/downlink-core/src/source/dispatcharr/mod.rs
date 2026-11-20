@@ -147,6 +147,8 @@ pub struct DispatcharrClient {
     settings: Mutex<Option<ServerSettings>>,
     has_vod: std::sync::atomic::AtomicBool,
     has_dvr: std::sync::atomic::AtomicBool,
+    /// Admin accounts may switch a live channel's provider stream (`change_stream` is admin-only).
+    can_switch: std::sync::atomic::AtomicBool,
     /// `epg data id -> tvg_id`, reused across the channel pages of one sync (see [`EPG_MAP_TTL`]).
     epg_map: tokio::sync::Mutex<Option<(std::time::Instant, EpgMap)>>,
 }
@@ -239,6 +241,7 @@ impl DispatcharrClient {
             settings: Mutex::new(None),
             has_vod: std::sync::atomic::AtomicBool::new(false),
             has_dvr: std::sync::atomic::AtomicBool::new(false),
+            can_switch: std::sync::atomic::AtomicBool::new(false),
             epg_map: tokio::sync::Mutex::new(None),
         })
     }
@@ -579,7 +582,7 @@ impl DispatcharrClient {
             user_level: me.level(),
             timezone: settings.timezone,
             expires_at: None,
-            max_connections: None,
+            max_connections: me.stream_limit(),
         })
     }
 
@@ -1232,6 +1235,9 @@ impl Source for DispatcharrClient {
         if self.has_dvr.load(Relaxed) {
             c |= Caps::DVR;
         }
+        if self.can_switch.load(Relaxed) {
+            c |= Caps::STREAM_SWITCH;
+        }
         c
     }
 
@@ -1353,6 +1359,13 @@ impl Source for DispatcharrClient {
     async fn next_stream(&self, ch: &ChannelKey) -> Result<bool> {
         match ch.uuid.as_deref() {
             Some(u) => DispatcharrClient::next_stream(self, u).await,
+            None => Ok(false),
+        }
+    }
+
+    async fn change_stream(&self, ch: &ChannelKey, stream_id: &str) -> Result<bool> {
+        match ch.uuid.as_deref() {
+            Some(u) => DispatcharrClient::change_stream(self, u, stream_id).await,
             None => Ok(false),
         }
     }

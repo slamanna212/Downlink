@@ -17,6 +17,7 @@ const importers = {
   settings: () => import('../features/settings/SettingsPage'),
   search: () => import('../features/search/SearchPage'),
   player: () => import('../features/player/PlayerPage'),
+  multiview: () => import('../features/multiview/MultiviewPage'),
 } as const;
 
 /** Warm the chunks the user is most likely to open next. Called once, after the first list is up. */
@@ -64,6 +65,7 @@ export const routes: RouteObject[] = [
       { path: 'settings/:section', ...page(importers.settings, 'SettingsPage') },
       { path: 'search', ...page(importers.search, 'SearchPage') },
       { path: 'player', ...page(importers.player, 'PlayerPage') },
+      { path: 'multiview', ...page(importers.multiview, 'MultiviewPage') },
       { path: 'sources/add', element: <AddSourcePage /> },
       { path: '*', element: <NotFoundPage /> },
     ],

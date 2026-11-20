@@ -47,6 +47,9 @@ interface UiState {
   /** User preference. 'auto' = collapsed on Guide/Player, expanded elsewhere (DESIGN §8). */
   railPref: RailPref;
   setRailPref: (p: RailPref) => void;
+  /** The window is in mini player mode (compact, always on top; PLAN §8.2). */
+  mini: boolean;
+  setMini: (m: boolean) => void;
   /** A mini player outside the player route is showing video: the shell stops painting so it shows through. */
   videoHole: boolean;
   setVideoHole: (on: boolean) => void;
@@ -71,6 +74,8 @@ export const useUiStore = create<UiState>((set) => ({
     writeStored(RAIL_KEY, railPref);
     set({ railPref });
   },
+  mini: false,
+  setMini: (mini) => set({ mini }),
   videoHole: false,
   setVideoHole: (videoHole) => set({ videoHole }),
 }));
