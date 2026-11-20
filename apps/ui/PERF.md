@@ -13,18 +13,24 @@ treat this as a regression guard, not the budget proof. Script: see git history 
 
 ## Results (ms)
 
-| Route | Cache | Before: interactive / FCP / LCP | After: interactive / FCP / LCP |
-|---|---|---|---|
-| `/` Home | cold | 301 / 268 / 384 | 248 / 220 / 280 |
-| `/` Home | warm | 104 / 92 / 376 | 98 / 84 / 372 |
-| `/channels` | cold | 329 / 296 / 600 | 241 / 236 / 564 |
-| `/channels` | warm | 117 / 112 / 436 | 131 / 128 / 440 |
-| `/guide` | cold | 378 / 304 / 596 | 683 / 208 / 820 |
-| `/guide` | warm | 214 / 176 / 428 | 525 / 100 / 652 |
+Interactive / FCP / LCP. "Before" = everything in one 923 kB entry chunk; "after" = route-level splitting with
+the router's own `lazy` (final state).
 
-Landing directly on a lazy route (the guide) now pays a chunk waterfall: the route chunk plus the shared
-Mantine chunks it needs. From Home or Channels the chunk is already preloaded on idle, so the guide opens
-without it. If the app ever starts on the guide, move it back into the initial chunk or `modulepreload` it.
+| Route | Cache | Before | After |
+|---|---|---|---|
+| `/` Home | cold | 301 / 268 / 384 | 252 / 224 / 516 |
+| `/` Home | warm | 104 / 92 / 376 | 111 / 96 / 384 |
+| `/channels` | cold | 329 / 296 / 600 | 272 / 244 / 548 |
+| `/channels` | warm | 117 / 112 / 436 | 139 / 136 / 456 |
+| `/guide` (direct landing) | cold | 378 / 304 / 596 | 314 / 280 / 584 |
+| `/guide` (direct landing) | warm | 214 / 176 / 428 | 159 / 136 / 424 |
+
+Lesson learned: the first split used `React.lazy` + `<Suspense>`. Landing on a lazy route then took 683 ms cold
+and 525 ms warm even though the chunk arrived 10 ms after the entry: React holds back revealing a resolved
+Suspense boundary for about 300 ms after it committed the fallback. Routes now use react-router's `lazy`, which
+fetches the chunk before rendering the route, so there is no fallback and no throttle. (A `modulepreload` /
+early `import()` did not help for the same reason.) Client-side navigation to a not-yet-loaded route waits for
+the chunk instead of showing a skeleton; idle preloading makes that rare.
 
 ## Bundle
 
@@ -33,7 +39,7 @@ without it. If the app ever starts on the guide, move it back into the initial c
 | Entry JS (`index-*.js`) | 923 kB (284 kB gzip) | 487 kB (152 kB gzip) |
 | Initial chunks | entry | entry + `time-*` (dayjs, 190 kB, 63 kB gzip) |
 
-Split per route with `React.lazy`: Guide, Movies/Series browse, VOD detail, Recordings, Settings, Search,
+Split per route with react-router `lazy`: Guide, Movies/Series browse, VOD detail, Recordings, Settings, Search,
 Player. The command palette (`@mantine/spotlight`) and the channel detail drawer are code-split and mounted
 on idle (an early Ctrl/Cmd+K is queued and replayed). Shell, Home, Channels and Add source stay in the
 initial chunk. After the first list is up, Player and Guide are preloaded on idle, then the rest.

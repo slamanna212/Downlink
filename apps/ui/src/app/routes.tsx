@@ -1,12 +1,10 @@
 import { createBrowserRouter, createMemoryRouter, type RouteObject } from 'react-router';
-import { lazy, Suspense, type ReactNode } from 'react';
+import type { ComponentType } from 'react';
 import { Shell } from './Shell';
 import { AddSourcePage } from '../features/sources/AddSourcePage';
 import { HomePage } from '../features/home/HomePage';
 import { ChannelsPage } from '../features/channels/ChannelsPage';
-import { SkeletonList } from '../components/Skeleton/SkeletonRow';
 import { NotFoundPage } from '../pages/pages';
-import { t } from '../lib/i18n';
 import { whenIdle } from '../lib/perf';
 
 // Shell + Home + Channels + Add source stay in the initial chunk; everything else is split per route
@@ -20,15 +18,6 @@ const importers = {
   search: () => import('../features/search/SearchPage'),
   player: () => import('../features/player/PlayerPage'),
 } as const;
-
-const Guide = lazy(() => importers.guide().then((m) => ({ default: m.GuidePage })));
-const VodBrowse = lazy(() => importers.vodBrowse().then((m) => ({ default: m.VodBrowse })));
-const MovieDetail = lazy(() => importers.vodDetail().then((m) => ({ default: m.MovieDetail })));
-const SeriesDetailPage = lazy(() => importers.vodDetail().then((m) => ({ default: m.SeriesDetailPage })));
-const RecordingsPage = lazy(() => importers.recordings().then((m) => ({ default: m.RecordingsPage })));
-const SettingsPage = lazy(() => importers.settings().then((m) => ({ default: m.SettingsPage })));
-const SearchPage = lazy(() => importers.search().then((m) => ({ default: m.SearchPage })));
-const PlayerPage = lazy(() => importers.player().then((m) => ({ default: m.PlayerPage })));
 
 /** Warm the chunks the user is most likely to open next. Called once, after the first list is up. */
 export function preloadRoutes(): void {
@@ -45,24 +34,36 @@ export function preloadRoutes(): void {
   }, 3000);
 }
 
-const suspended = (node: ReactNode) => <Suspense fallback={<SkeletonList rows={6} label={t('loading.generic')} />}>{node}</Suspense>;
+// Routes use the router's own `lazy`: the router fetches the chunk BEFORE it renders the route, so there is
+// no Suspense fallback (React holds a resolved reveal back ~300 ms after committing a fallback).
+const page = (load: () => Promise<{ [k: string]: unknown }>, name: string): Pick<RouteObject, 'lazy'> => ({
+  lazy: async () => ({ Component: (await load())[name] as ComponentType }),
+});
+const withProps = (load: () => Promise<{ [k: string]: unknown }>, name: string, props: Record<string, unknown>): Pick<RouteObject, 'lazy'> => ({
+  lazy: async () => {
+    const C = (await load())[name] as ComponentType<Record<string, unknown>>;
+    return { Component: () => <C {...props} /> };
+  },
+});
+
 export const routes: RouteObject[] = [
   {
     path: '/',
     element: <Shell />,
+    HydrateFallback: () => null,
     children: [
       { index: true, element: <HomePage /> },
       { path: 'channels', element: <ChannelsPage /> },
-      { path: 'guide', element: suspended(<Guide />) },
-      { path: 'movies', element: suspended(<VodBrowse kind="movie" />) },
-      { path: 'movies/:id', element: suspended(<MovieDetail />) },
-      { path: 'series', element: suspended(<VodBrowse kind="series" />) },
-      { path: 'series/:id', element: suspended(<SeriesDetailPage />) },
-      { path: 'recordings', element: suspended(<RecordingsPage />) },
-      { path: 'settings', element: suspended(<SettingsPage />) },
-      { path: 'settings/:section', element: suspended(<SettingsPage />) },
-      { path: 'search', element: suspended(<SearchPage />) },
-      { path: 'player', element: suspended(<PlayerPage />) },
+      { path: 'guide', ...page(importers.guide, 'GuidePage') },
+      { path: 'movies', ...withProps(importers.vodBrowse, 'VodBrowse', { kind: 'movie' }) },
+      { path: 'movies/:id', ...page(importers.vodDetail, 'MovieDetail') },
+      { path: 'series', ...withProps(importers.vodBrowse, 'VodBrowse', { kind: 'series' }) },
+      { path: 'series/:id', ...page(importers.vodDetail, 'SeriesDetailPage') },
+      { path: 'recordings', ...page(importers.recordings, 'RecordingsPage') },
+      { path: 'settings', ...page(importers.settings, 'SettingsPage') },
+      { path: 'settings/:section', ...page(importers.settings, 'SettingsPage') },
+      { path: 'search', ...page(importers.search, 'SearchPage') },
+      { path: 'player', ...page(importers.player, 'PlayerPage') },
       { path: 'sources/add', element: <AddSourcePage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
