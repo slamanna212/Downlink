@@ -575,3 +575,70 @@ async fn caps_vod_and_dvr_follow_the_account() {
 fn path_regex_vod() -> wiremock::matchers::PathRegexMatcher {
     wiremock::matchers::path_regex(r"^/api/vod/(movies|series)/$")
 }
+
+/// Shape observed on a real 0.34.1 server (scrubbed): bare array, padded recording window,
+/// programme times and title under `custom_properties.program`, size in `bytes_written`.
+#[tokio::test]
+async fn reference_server_completed_recording_shape() {
+    let server = MockServer::start().await;
+    get(
+        &server,
+        "/api/channels/recordings/",
+        fx("recordings_completed_synthetic.json"),
+    )
+    .await;
+    let r = client(&server).recordings().await.unwrap();
+    assert_eq!(r.len(), 1);
+    let rec = &r[0];
+    assert_eq!(rec.title, "Synthetic Race Coverage");
+    // Displayed times are the programme's (04:30-06:30Z), not the padded 04:24-06:36.
+    assert_eq!(rec.start_utc, 1_794_112_200);
+    assert_eq!(rec.end_utc, 1_794_119_400);
+    assert_eq!(rec.status, RecStatus::Completed);
+    assert_eq!(rec.size_bytes, Some(123_456_789));
+    assert_eq!(
+        rec.file_url.as_deref(),
+        Some("/api/channels/recordings/19/file/")
+    );
+    assert_eq!(rec.channel_ext_id, "3");
+    let plan = client(&server).recording_plan(rec).await.unwrap();
+    assert_eq!(
+        plan.url,
+        format!("{}/api/channels/recordings/19/file/", server.uri())
+    );
+}
+
+#[tokio::test]
+async fn reference_server_empty_rule_lists() {
+    let server = MockServer::start().await;
+    get(
+        &server,
+        "/api/channels/series-rules/",
+        fx("series_rules_empty.json"),
+    )
+    .await;
+    get(&server, "/api/channels/recurring-rules/", json!([])).await;
+    assert!(
+        client(&server).recording_rules().await.unwrap().is_empty(),
+        "{{\"rules\": []}} envelope and bare [] both tolerated"
+    );
+    // A padded recording with no status derives it from the padded window, not the programme's.
+    let server = MockServer::start().await;
+    let now = downlink_core::sync::now_utc();
+    let iso = |t: i64| {
+        chrono::DateTime::from_timestamp(t, 0)
+            .unwrap()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    get(&server, "/api/channels/recordings/", json!([{
+        "id": 5, "channel": 1, "start_time": iso(now - 120), "end_time": iso(now + 3600),
+        "custom_properties": {"program": {"title": "Padded", "start_time": iso(now + 200), "end_time": iso(now + 3400)}}
+    }])).await;
+    let r = client(&server).recordings().await.unwrap();
+    assert_eq!(
+        r[0].status,
+        RecStatus::Recording,
+        "pre-roll padding has started even though the programme has not"
+    );
+    assert_eq!(r[0].start_utc, now + 200);
+}

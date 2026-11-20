@@ -234,10 +234,19 @@ impl DispatcharrClient {
 
     fn recording_from(&self, v: &Value, now: i64) -> Option<RecordingInfo> {
         let ext_id = s(v, "id")?;
-        let start = v.get("start_time").and_then(parse_time)?;
-        let end = v.get("end_time").and_then(parse_time)?;
+        // The recording's own times include pre/post padding; those drive its state. The
+        // programme's own times are what the user recognises, so they are what we display.
+        let rec_start = v.get("start_time").and_then(parse_time)?;
+        let rec_end = v.get("end_time").and_then(parse_time)?;
         let cp = v.get("custom_properties").cloned().unwrap_or(Value::Null);
         let program = cp.get("program").cloned().unwrap_or(Value::Null);
+        let (start, end) = match (
+            program.get("start_time").and_then(parse_time),
+            program.get("end_time").and_then(parse_time),
+        ) {
+            (Some(s), Some(e)) if e > s => (s, e),
+            _ => (rec_start, rec_end),
+        };
         let title = s(&program, "title")
             .or_else(|| s(&cp, "title"))
             .unwrap_or_else(|| "Recording".to_owned());
@@ -250,9 +259,9 @@ impl DispatcharrClient {
                 RecStatus::Completed
             }
             _ => {
-                if now < start {
+                if now < rec_start {
                     RecStatus::Scheduled
-                } else if now < end {
+                } else if now < rec_end {
                     RecStatus::Recording
                 } else {
                     RecStatus::Completed
@@ -277,7 +286,7 @@ impl DispatcharrClient {
             end_utc: end,
             status,
             rule_label,
-            size_bytes: ["file_size", "size_bytes", "size"]
+            size_bytes: ["bytes_written", "file_size", "size_bytes", "size"]
                 .iter()
                 .find_map(|k| cp.get(*k).and_then(flex_i64)),
             error: (status == RecStatus::Failed).then(|| {
