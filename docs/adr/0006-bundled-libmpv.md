@@ -1,6 +1,6 @@
 # ADR-0006: libmpv bundled in every installer
 
-Status: Accepted (plan decision D11). Loader built; per-platform bundling is still skeleton scripts.
+Status: Accepted (plan decision D11). Loader built; `tools/mpv/linux.sh` is implemented; macOS and Windows scripts are untested.
 
 ## Context
 
@@ -31,6 +31,5 @@ becoming unacceptable.
 ## Implementation notes (2026-11)
 
 - The runtime loader with the bundled, `DOWNLINK_MPV_PATH`, system order is implemented and unit-tested in `downlink-player`.
-- M0 ran against libmpv 0.40.0 (client API 2.5, FFmpeg 7.1.5) through `DOWNLINK_MPV_PATH`. `tools/mpv/*` are skeletons; the clean-machine
-  check has not run, so the "no mpv installed" claim is untested.
+- M0 ran against libmpv 0.40.0 (client API 2.5, FFmpeg 7.1.5) through `DOWNLINK_MPV_PATH`. `tools/mpv/linux.sh` is implemented and was run (it collected 173 libraries plus a MANIFEST and set rpath through `patchelf` when present; pins are in `tools/mpv/pins.env`). `macos.sh` and `windows.ps1` are implemented but untested. The clean-machine CI smoke test has not run (CI is paused), so the "no mpv installed" claim is untested.
 - Because the bundle pins mpv, the `vo=gpu-next` render-API limitation seen in 0.40.0 (ADR-0001) is a pinned, known quantity; revisit it when bumping the pinned build.
