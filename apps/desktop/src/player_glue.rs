@@ -23,6 +23,8 @@ use crate::dto::{SessionInfo, player_state};
 
 #[derive(Debug, Clone)]
 pub enum LastPlay {
+    Vod { kind: String, id: i64 },
+    Recording(i64),
     Channel(i64),
     Catchup(String),
     Restart(i64),
@@ -38,9 +40,17 @@ struct Active {
     generation: u64,
     /// Server-side failover attempts since the user's last play (PLAN §4.5).
     failover_count: u32,
+    /// VOD / recording being played, for position reports.
+    media: Option<Media>,
     /// 1-based provider stream in use and how many the channel has (0 = unknown).
     source_index: u32,
     source_count: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Media {
+    Vod(i64),
+    Recording(i64),
 }
 
 pub struct Playback {
@@ -72,6 +82,17 @@ fn plan_request(plan: &PlayPlan, mode: PlayMode, failover: bool) -> PlayRequest 
         failover_capable: failover,
         mode,
         source_index: 0,
+    }
+}
+
+async fn report_media(svc: &Service, m: Media, pos: f64, duration: Option<f64>) {
+    let (pos, dur) = (pos.max(0.0) as i64, duration.map(|d| d as i64));
+    let r = match m {
+        Media::Vod(id) => svc.report_vod_position(id, pos, dur).await,
+        Media::Recording(id) => svc.report_recording_position(id, pos, dur).await,
+    };
+    if let Err(e) = r {
+        tracing::debug!("position report failed: {}", e.message);
     }
 }
 
@@ -321,7 +342,7 @@ impl Playback {
 
     fn begin(
         &self,
-        channel_id: i64,
+        channel_id: Option<i64>,
         mode: PlayMode,
         programme: Option<ProgrammeDto>,
         last: LastPlay,
@@ -330,12 +351,14 @@ impl Playback {
         let mut a = lock(&self.active);
         a.generation += 1;
         a.failover_count = 0;
+        a.media = None;
         a.source_index = 0;
         a.source_count = 0;
         a.info = SessionInfo {
-            channel_id: Some(channel_id),
+            channel_id,
             mode: Some(mode),
             programme,
+            title: None,
             resume_at: None,
             failure: None,
             transitioned_at: now_ms(),
@@ -352,7 +375,7 @@ impl Playback {
 
     pub async fn play_channel(&self, channel_id: i64) -> Result<(), AppError> {
         self.begin(
-            channel_id,
+            Some(channel_id),
             PlayMode::Live,
             None,
             LastPlay::Channel(channel_id),
@@ -402,10 +425,17 @@ impl Playback {
         play: CatchupPlay,
         programme: Option<ProgrammeDto>,
         last: LastPlay,
+        resume: bool,
     ) -> Result<(), AppError> {
-        self.begin(play.channel_id, PlayMode::Catchup, programme, last);
+        let start_secs = if resume {
+            self.catchup_resume_secs(&play).await
+        } else {
+            None
+        };
+        self.begin(Some(play.channel_id), PlayMode::Catchup, programme, last);
         let failover = self.failover_capable(play.source_id).await;
-        let req = self.to_request(&play.plan, PlayMode::Catchup, failover);
+        let mut req = self.to_request(&play.plan, PlayMode::Catchup, failover);
+        req.start_secs = start_secs;
         let generation = {
             let mut a = lock(&self.active);
             a.catchup = Some(play.clone());
@@ -459,18 +489,146 @@ impl Playback {
         });
     }
 
-    pub async fn play_catchup(&self, programme_id: &str) -> Result<(), AppError> {
+    /// Saved catch-up position (seconds) for this programme, when one is resumable.
+    async fn catchup_resume_secs(&self, play: &CatchupPlay) -> Option<f64> {
+        let ch = self.service.store().channel(play.channel_id).await.ok()??;
+        let key = downlink_core::catchup::resume_key(&ch.ext_id, play.start_utc);
+        let r = self
+            .service
+            .store()
+            .resume(play.source_id, "catchup", &key)
+            .await
+            .ok()??;
+        r.resumable().then_some((r.position_ms / 1000) as f64)
+    }
+
+    /// `resume`: start at the saved position instead of the programme start.
+    pub async fn play_catchup(&self, programme_id: &str, resume: bool) -> Result<(), AppError> {
         let play = self.service.play_catchup(programme_id).await?;
         let programme = self.programme_dto(play.channel_id, play.start_utc).await;
-        self.start_catchup(play, programme, LastPlay::Catchup(programme_id.to_owned()))
-            .await
+        self.start_catchup(
+            play,
+            programme,
+            LastPlay::Catchup(programme_id.to_owned()),
+            resume,
+        )
+        .await
     }
 
     pub async fn restart_programme(&self, channel_id: i64) -> Result<(), AppError> {
         let play = self.service.restart_programme(channel_id).await?;
         let programme = self.programme_dto(play.channel_id, play.start_utc).await;
-        self.start_catchup(play, programme, LastPlay::Restart(channel_id))
+        self.start_catchup(play, programme, LastPlay::Restart(channel_id), false)
             .await
+    }
+
+    async fn report_media(&self, m: Media, pos: f64, duration: Option<f64>) {
+        report_media(&self.service, m, pos, duration).await;
+    }
+
+    pub async fn play_vod(&self, kind: &str, id: i64, resume: bool) -> Result<(), AppError> {
+        self.begin(
+            None,
+            PlayMode::Vod,
+            None,
+            LastPlay::Vod {
+                kind: kind.to_owned(),
+                id,
+            },
+        );
+        let vp = match self
+            .service
+            .play_vod(downlink_core::service::PlayVodArgs {
+                kind: kind.to_owned(),
+                id,
+                resume,
+            })
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                self.fail(&e);
+                return Err(e);
+            }
+        };
+        let start = vp.resume_secs.map(|s| s as f64);
+        self.start_media(&vp.plan, PlayMode::Vod, vp.title, start, Media::Vod(vp.id))
+    }
+
+    pub async fn play_recording(&self, id: i64) -> Result<(), AppError> {
+        self.begin(None, PlayMode::Recording, None, LastPlay::Recording(id));
+        let rp = match self.service.play_recording(id).await {
+            Ok(v) => v,
+            Err(e) => {
+                self.fail(&e);
+                return Err(e);
+            }
+        };
+        let start = rp.resume_secs.map(|s| s as f64);
+        self.start_media(
+            &rp.plan,
+            PlayMode::Recording,
+            rp.title,
+            start,
+            Media::Recording(rp.id),
+        )
+    }
+
+    fn start_media(
+        &self,
+        plan: &PlayPlan,
+        mode: PlayMode,
+        title: String,
+        start_secs: Option<f64>,
+        media: Media,
+    ) -> Result<(), AppError> {
+        let generation = {
+            let mut a = lock(&self.active);
+            a.info.title = Some(title);
+            a.info.resume_at = start_secs;
+            a.media = Some(media);
+            a.generation
+        };
+        let mut req = self.to_request(plan, mode, false);
+        req.start_secs = start_secs;
+        self.player
+            .play(req)
+            .map_err(player_err)
+            .inspect_err(|e| self.fail(e))?;
+        self.spawn_media_reporter(media, generation);
+        Ok(())
+    }
+
+    /// Saves the watch position every 10 s and right away on pause, resume or seek.
+    fn spawn_media_reporter(&self, media: Media, generation: u64) {
+        let svc = self.service.clone();
+        let player = self.player.clone();
+        let active = self.active.clone();
+        tauri::async_runtime::spawn(async move {
+            let (mut last_phase, mut last_pos): (Option<SessionState>, Option<f64>) = (None, None);
+            let mut last_report = std::time::Instant::now();
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                if lock(&active).generation != generation {
+                    break;
+                }
+                let snap = player.snapshot();
+                let (Some(state), Some(pos)) = (snap.state, snap.position_secs) else {
+                    continue;
+                };
+                if !matches!(state, SessionState::Playing | SessionState::Paused) {
+                    continue;
+                }
+                let jumped = last_pos.is_some_and(|p| (pos - p).abs() > 5.0);
+                let force = last_phase.is_some_and(|p| p != state) || jumped;
+                last_phase = Some(state);
+                last_pos = Some(pos);
+                if force || last_report.elapsed() >= Duration::from_secs(10) {
+                    last_report = std::time::Instant::now();
+                    report_media(&svc, media, pos, snap.duration_secs).await;
+                }
+            }
+        });
     }
 
     async fn programme_dto(&self, channel_id: i64, start_utc: i64) -> Option<ProgrammeDto> {
@@ -502,16 +660,24 @@ impl Playback {
             .ok_or_else(|| AppError::local("Nothing to retry."))?;
         match last {
             LastPlay::Channel(id) => self.play_channel(id).await,
-            LastPlay::Catchup(p) => self.play_catchup(&p).await,
+            LastPlay::Catchup(p) => self.play_catchup(&p, true).await,
+            LastPlay::Vod { kind, id } => self.play_vod(&kind, id, true).await,
+            LastPlay::Recording(id) => self.play_recording(id).await,
             LastPlay::Restart(id) => self.restart_programme(id).await,
         }
     }
 
     /// Navigate away / stop button: stop playback and any open session.
     pub async fn stop(&self) -> Result<(), AppError> {
+        // Save the final position of VOD / recordings before the player forgets it.
+        let (media, snap) = (lock(&self.active).media, self.player.snapshot());
+        if let (Some(m), Some(pos)) = (media, snap.position_secs) {
+            self.report_media(m, pos, snap.duration_secs).await;
+        }
         {
             let mut a = lock(&self.active);
             a.generation += 1;
+            a.media = None;
         }
         let r = self.player.stop().map_err(player_err);
         let prev = lock(&self.active).catchup.take();

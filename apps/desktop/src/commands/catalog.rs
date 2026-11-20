@@ -196,11 +196,6 @@ pub async fn get_counts(state: State<'_, AppState>) -> CmdResult<CountsDto> {
     state.service.get_counts().await
 }
 
-#[tauri::command]
-pub async fn schedule_recording(_programme_id: String, _kind: String) -> CmdResult<()> {
-    Err(AppError::local("Recording is not available yet."))
-}
-
 /// Channel DTO by Dispatcharr channel uuid (deep links and the UI use uuids). Core has no uuid
 /// lookup, so this walks the sources' `uuid -> id` maps in the store.
 #[tauri::command]

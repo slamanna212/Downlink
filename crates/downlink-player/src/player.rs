@@ -40,6 +40,7 @@ pub enum PlayMode {
     Live,
     Catchup,
     Vod,
+    Recording,
 }
 
 /// What a long buffering state is waiting on (shown after 3 s, PLAN §4.4).

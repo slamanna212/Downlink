@@ -37,6 +37,7 @@ pub fn spawn(app: AppHandle, mode: String) {
             "offline" => offline(&st, &db).await,
             "zap" => zap(&st).await,
             "failover" => failover(&st).await,
+            "smoke" => smoke(&st).await,
             _ => full(&st, &db).await,
         };
         if let Err(e) = r {
@@ -165,7 +166,7 @@ async fn full(st: &AppState, db: &str) -> Result<(), String> {
     };
     let pid = format!("{xc}:{start}");
     let t0 = Instant::now();
-    pb.play_catchup(&pid).await.map_err(|e| e.message)?;
+    pb.play_catchup(&pid, false).await.map_err(|e| e.message)?;
     let snap = pb.snapshot_wait(
         |s| matches!(s, SessionState::Playing | SessionState::Failed),
         Duration::from_secs(25),
@@ -195,7 +196,7 @@ async fn full(st: &AppState, db: &str) -> Result<(), String> {
         json!({ "step": "after_zap", "openSessions": open_sessions(db), "state": pb.snapshot().state }),
     );
     // Leave a catch-up session open and quit: RunEvent::Exit must release it.
-    pb.play_catchup(&pid).await.map_err(|e| e.message)?;
+    pb.play_catchup(&pid, true).await.map_err(|e| e.message)?;
     pb.snapshot_wait(|s| s == SessionState::Playing, Duration::from_secs(25));
     say(json!({ "step": "before_quit", "openSessions": open_sessions(db) }));
     Ok(())
@@ -318,5 +319,59 @@ async fn failover(st: &AppState) -> Result<(), String> {
     say(
         json!({ "step": "failover_done", "state": pb.snapshot_dto().state, "sourceStats": st.service.source_position(id).await.ok() }),
     );
+    Ok(())
+}
+
+/// `DOWNLINK_E2E=smoke`: the M4 read commands against the real source (the test server has no VOD
+/// or recordings, so empty lists and no errors are expected).
+async fn smoke(st: &AppState) -> Result<(), String> {
+    use downlink_core::service::{VodKindArg, VodListArgs};
+    let svc = &st.service;
+    let cats_m = svc
+        .list_vod_categories(VodKindArg::Movie)
+        .await
+        .map_err(|e| e.message)?;
+    let cats_s = svc
+        .list_vod_categories(VodKindArg::Series)
+        .await
+        .map_err(|e| e.message)?;
+    let movies = svc
+        .list_movies(VodListArgs::default())
+        .await
+        .map_err(|e| e.message)?;
+    let series = svc
+        .list_series(VodListArgs::default())
+        .await
+        .map_err(|e| e.message)?;
+    let recs = svc.list_recordings().await.map_err(|e| e.message)?;
+    let rules = svc.list_recording_rules().await.map_err(|e| e.message)?;
+    say(json!({
+        "step": "smoke",
+        "movieCategories": cats_m.len(), "seriesCategories": cats_s.len(),
+        "movies": movies.len(), "series": series.len(),
+        "recordings": serde_json::to_value(&recs).unwrap_or_default(),
+        "rules": rules.len(),
+    }));
+    // Play the first watchable recording through the real player path, if there is one.
+    let first = recs
+        .in_progress
+        .first()
+        .or(recs.completed.first())
+        .map(|r| r.id);
+    if let (Some(id), Ok(pb)) = (first, st.playback()) {
+        pb.play_recording(id).await.map_err(|e| e.message)?;
+        let snap = pb.snapshot_wait(
+            |s| matches!(s, SessionState::Playing | SessionState::Failed),
+            Duration::from_secs(25),
+        );
+        say(
+            json!({ "step": "play_recording", "id": id, "state": snap.state, "firstFrameMs": snap.first_frame_ms, "mode": snap.mode, "durationSecs": snap.duration_secs }),
+        );
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let dto = pb.snapshot_dto();
+        say(
+            json!({ "step": "recording_state", "error": dto.error.as_ref().map(|e| e.message.clone()), "mode": dto.mode, "title": dto.title, "seekable": dto.seekable, "position": dto.position }),
+        );
+    }
     Ok(())
 }

@@ -13,8 +13,15 @@ pub async fn play_channel(state: State<'_, AppState>, channel_id: i64) -> CmdRes
 }
 
 #[tauri::command]
-pub async fn play_catchup(state: State<'_, AppState>, programme_id: String) -> CmdResult<()> {
-    state.playback()?.play_catchup(&programme_id).await
+pub async fn play_catchup(
+    state: State<'_, AppState>,
+    programme_id: String,
+    resume: Option<bool>,
+) -> CmdResult<()> {
+    state
+        .playback()?
+        .play_catchup(&programme_id, resume.unwrap_or(false))
+        .await
 }
 
 #[tauri::command]
@@ -116,4 +123,22 @@ pub async fn list_audio_devices(state: State<'_, AppState>) -> CmdResult<Vec<Aud
                 .collect()
         })
         .unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn play_vod(
+    state: State<'_, AppState>,
+    kind: String,
+    id: i64,
+    resume: Option<bool>,
+) -> CmdResult<()> {
+    state
+        .playback()?
+        .play_vod(&kind, id, resume.unwrap_or(false))
+        .await
+}
+
+#[tauri::command]
+pub async fn play_recording(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
+    state.playback()?.play_recording(id).await
 }

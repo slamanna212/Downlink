@@ -28,6 +28,7 @@ fn mode_name(m: PlayMode) -> &'static str {
         PlayMode::Live => "live",
         PlayMode::Catchup => "catchup",
         PlayMode::Vod => "vod",
+        PlayMode::Recording => "recording",
     }
 }
 
@@ -47,6 +48,8 @@ pub struct PlayerStateDto {
     pub mode: Option<&'static str>,
     pub channel_id: Option<i64>,
     pub programme: Option<ProgrammeDto>,
+    /// Title of VOD / recording media (null for live and catch-up).
+    pub title: Option<String>,
     pub resume_at: Option<f64>,
     pub position: Option<f64>,
     pub duration: Option<f64>,
@@ -69,6 +72,7 @@ pub struct SessionInfo {
     pub channel_id: Option<i64>,
     pub mode: Option<PlayMode>,
     pub programme: Option<ProgrammeDto>,
+    pub title: Option<String>,
     pub resume_at: Option<f64>,
     pub failure: Option<AppError>,
     pub transitioned_at: i64,
@@ -86,12 +90,15 @@ pub fn player_state(snap: &PlayerSnapshot, info: &SessionInfo) -> PlayerStateDto
         mode: mode.map(mode_name),
         channel_id: info.channel_id,
         programme: info.programme.clone(),
+        title: info.title.clone(),
         resume_at: info.resume_at,
         position: snap.position_secs,
         duration: snap.duration_secs,
         buffered: snap.buffered_secs,
-        seekable: matches!(mode, Some(PlayMode::Catchup | PlayMode::Vod))
-            && snap.duration_secs.is_some(),
+        seekable: matches!(
+            mode,
+            Some(PlayMode::Catchup | PlayMode::Vod | PlayMode::Recording)
+        ) && snap.duration_secs.is_some(),
         volume: snap.volume.unwrap_or(100.0),
         muted: snap.muted,
         hwdec_current: snap.hwdec_current.clone(),
@@ -170,5 +177,50 @@ mod tests {
     fn phases_are_pascal_case() {
         assert_eq!(phase_name(SessionState::Buffering), "Buffering");
         assert_eq!(waiting_name(WaitingOn::FirstKeyframe), "first_keyframe");
+    }
+
+    #[test]
+    fn recording_statuses_match_the_ui_union() {
+        use downlink_core::source::RecStatus;
+        for st in [
+            RecStatus::Scheduled,
+            RecStatus::Recording,
+            RecStatus::Completed,
+            RecStatus::Failed,
+        ] {
+            assert!(["scheduled", "recording", "completed", "failed"].contains(&st.as_str()));
+        }
+    }
+
+    #[test]
+    fn vod_and_recording_state_carry_title_mode_and_seekability() {
+        let snap = PlayerSnapshot {
+            state: Some(SessionState::Playing),
+            duration_secs: Some(5400.0),
+            position_secs: Some(12.0),
+            ..PlayerSnapshot::default()
+        };
+        for (mode, name) in [(PlayMode::Vod, "vod"), (PlayMode::Recording, "recording")] {
+            let info = SessionInfo {
+                mode: Some(mode),
+                title: Some("A title".into()),
+                resume_at: Some(600.0),
+                ..SessionInfo::default()
+            };
+            let v = serde_json::to_value(player_state(&snap, &info)).unwrap_or_default();
+            assert_eq!(v["mode"], name);
+            assert_eq!(v["title"], "A title");
+            assert_eq!(v["seekable"], true);
+            assert_eq!(v["resumeAt"], 600.0);
+            assert!(v["channelId"].is_null());
+        }
+        // Live is never seekable and has no title.
+        let live = SessionInfo {
+            mode: Some(PlayMode::Live),
+            ..SessionInfo::default()
+        };
+        let v = serde_json::to_value(player_state(&snap, &live)).unwrap_or_default();
+        assert_eq!(v["seekable"], false);
+        assert!(v["title"].is_null());
     }
 }
