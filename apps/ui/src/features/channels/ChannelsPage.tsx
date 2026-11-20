@@ -6,7 +6,8 @@ import { Center, SegmentedControl, Text, TextInput, VisuallyHidden } from '@mant
 import { IconLayoutList, IconList, IconSearch } from '@tabler/icons-react';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { invoke } from '../../api/ipc';
-import { useCaps, useChannels, useCounts, useGroups, useNowNextWindow } from '../../api/queries';
+import type { RecordKind } from '../../api/types';
+import { useCaps, useChannels, useCounts, useGroups, useNowNextWindow, useOffline } from '../../api/queries';
 import { dl } from '../../theme';
 import { Icon } from '../../components/Icon/Icon';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
@@ -19,6 +20,7 @@ import { useInteractive } from '../../lib/perf';
 import { t } from '../../lib/i18n';
 import { usePlayerStore } from '../../store/player';
 import { useUiStore } from '../../store/ui';
+import { useDetailStore } from '../../store/detail';
 import { playChannel } from '../player/actions';
 import { ChannelRow } from './ChannelRow';
 import { GroupSidebar, selectionKey, type GroupSelection } from './GroupSidebar';
@@ -30,7 +32,9 @@ export function ChannelsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const qc = useQueryClient();
-  const { loaded, hasSource } = useCaps();
+  const { loaded, hasSource, caps } = useCaps();
+  const offline = useOffline();
+  const showDetail = useDetailStore((s) => s.show);
   const density = useUiStore((s) => s.density);
   const setDensity = useUiStore((s) => s.setDensity);
   const player = usePlayerStore((s) => s.player);
@@ -76,6 +80,10 @@ export function ChannelsPage() {
 
   const favourite = useMutation({
     mutationFn: (v: { channelId: number; favourite: boolean }) => invoke('set_favourite', v),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog'] }),
+  });
+  const record = useMutation({
+    mutationFn: (v: { programmeId: string; kind: RecordKind }) => invoke('schedule_recording', v),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog'] }),
   });
 
@@ -266,6 +274,10 @@ export function ChannelsPage() {
                     onPlay={() => play(v.index)}
                     onToggleFavourite={() => favourite.mutate({ channelId: c.id, favourite: !c.isFavourite })}
                     onFocusRow={() => setActive(v.index)}
+                    canRecord={caps.dvr}
+                    offline={offline}
+                    onRecord={(programmeId, kind) => record.mutate({ programmeId, kind })}
+                    onDetails={() => showDetail(c.id)}
                   />
                 );
               })}
