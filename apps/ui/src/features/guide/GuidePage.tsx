@@ -6,7 +6,7 @@ import { Menu, SegmentedControl, Select } from '@mantine/core';
 import { IconCalendar } from '@tabler/icons-react';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { invoke } from '../../api/ipc';
-import { useCaps, useCounts, useGroups } from '../../api/queries';
+import { useCaps, useCounts, useGroups, useSources } from '../../api/queries';
 import type { Channel, Programme } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
@@ -29,8 +29,7 @@ import {
 } from './guideModel';
 import classes from './Guide.module.css';
 
-const BACK_DAYS = 2;
-const FWD_DAYS = 5;
+const FWD_DAYS = 7;
 const COL_W = dl.guide.channelColumn;
 const HEADER_H = dl.guide.headerHeight;
 const NAV_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'];
@@ -199,16 +198,18 @@ export function GuidePage() {
   const cached = useRef<RenderRange | null>(null);
   const pendingFocus = useRef(false);
 
+  const sources = useSources();
+  const backDays = Math.max(1, sources.data?.[0]?.archiveDays ?? 1);
   const rowH = dl.density[density].guideRow;
   const totalRows = groupId == null ? (counts.data?.all ?? 0) : (groups.data?.find((g) => g.id === groupId)?.count ?? 0);
 
   // Geometry is derived from numbers only; nothing here reads layout.
   const geo: Geometry = useMemo(() => {
     const dayStart = startOfDay(nowEpoch());
-    const rangeStart = addDays(dayStart, -BACK_DAYS);
+    const rangeStart = addDays(dayStart, -backDays);
     const rangeEnd = addDays(dayStart, FWD_DAYS);
     return { rangeStart, rangeEnd, pps: ppsFor(size.w, COL_W, span), colW: COL_W, headerH: HEADER_H, rowH };
-  }, [size.w, span, rowH]);
+  }, [size.w, span, rowH, backDays]);
 
   const viewport = useCallback((): Viewport => ({ scrollLeft: scrollPos.current.left, scrollTop: scrollPos.current.top, viewW: size.w, viewH: size.h }), [size]);
 
@@ -450,7 +451,7 @@ export function GuidePage() {
   const onJump = useStable((t: number) => scrollToTime(t));
   const goNow = useStable(() => scrollToTime(floorToTick(nowEpoch() - 1800)));
   const groupList = useMemo(() => groups.data ?? [], [groups.data]);
-  const jumpDays = useMemo(() => Array.from({ length: BACK_DAYS + FWD_DAYS }, (_, i) => addDays(geo.rangeStart, i)), [geo.rangeStart]);
+  const jumpDays = useMemo(() => Array.from({ length: backDays + FWD_DAYS }, (_, i) => addDays(geo.rangeStart, i)), [geo.rangeStart]);
 
   if (loaded && !hasSource) return <EmptySource />;
 
@@ -502,6 +503,7 @@ export function GuidePage() {
         channel={focusChannel}
         state={focusState}
         canRecord={caps.dvr}
+        canCatchup={caps.catchup}
         recordOpen={recordOpen}
         onRecordOpen={setRecordOpen}
         onRecord={onRecord}

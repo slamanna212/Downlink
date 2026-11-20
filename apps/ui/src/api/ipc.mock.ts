@@ -33,7 +33,7 @@ export function mockSources(empty: boolean, status: Source['status'] = 'connecte
     {
       id: 1, uuid: 'mock-source-1', kind: 'dispatcharr', name: 'Demo server', host: 'demo.invalid',
       caps: Cap.Live | Cap.Epg | Cap.Catchup | Cap.Vod | Cap.Dvr | Cap.Favourites,
-      status, serverVersion: '0.0-mock', lastSyncAt: nowSec() - 600,
+      status, serverVersion: '0.0-mock', lastSyncAt: nowSec() - 600, archiveDays: 7,
     },
   ];
 }
@@ -288,7 +288,7 @@ export function createMockBackend(): Backend {
       const src: Source = {
         id, uuid: `mock-source-${id}`, kind: input.kind, name: input.name || 'New source', host: 'demo.invalid',
         caps: Cap.Live | Cap.Epg | Cap.Favourites | (input.kind === 'dispatcharr' ? Cap.Catchup | Cap.Vod | Cap.Dvr : 0),
-        status: 'connected', serverVersion: '0.0-mock', lastSyncAt: nowSec(),
+        status: 'connected', serverVersion: '0.0-mock', lastSyncAt: nowSec(), archiveDays: 7,
       };
       sources.push(src);
       if (channels.length === 0) channels.push(...mockChannels());

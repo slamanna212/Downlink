@@ -16,6 +16,7 @@ export interface PreviewProps {
   channel: Channel | undefined;
   state: BlockState | null;
   canRecord: boolean;
+  canCatchup: boolean;
   recordOpen: boolean;
   onRecordOpen: (open: boolean) => void;
   onRecord: (kind: 'once' | 'series') => void;
@@ -29,7 +30,7 @@ export interface PreviewProps {
  * Preview pane. It follows focus after a 300 ms dwell. Everything shown is already in memory:
  * dwelling never calls a play command or touches a stream endpoint (CLAUDE rule 4).
  */
-export const GuidePreview = memo(function GuidePreview({ programme, channel, state, canRecord, recordOpen, onRecordOpen, onRecord, onPrimary, onFromStart, onDetails, onFavourite }: PreviewProps) {
+export const GuidePreview = memo(function GuidePreview({ programme, channel, state, canRecord, canCatchup, recordOpen, onRecordOpen, onRecord, onPrimary, onFromStart, onDetails, onFavourite }: PreviewProps) {
   const [shown, setShown] = useState<{ p: Programme | null; ch: Channel | undefined; state: BlockState | null }>({ p: programme, ch: channel, state });
   useEffect(() => {
     const id = setTimeout(() => setShown({ p: programme, ch: channel, state }), dl.previewDwellMs);
@@ -56,29 +57,25 @@ export const GuidePreview = memo(function GuidePreview({ programme, channel, sta
             <p className={classes.desc}>{p.description}</p>
             <div className={classes.actions}>
               {primaryLabel && (
-                <DLButton variant="filled" size="lg" onClick={action === 'details' ? onDetails : onPrimary}>
+                <DLButton variant="filled" size="md" onClick={action === 'details' ? onDetails : onPrimary}>
                   {primaryLabel}
                 </DLButton>
               )}
-              {st === 'now' && (
-                <DLButton variant="default" size="lg" onClick={onFromStart}>
-                  {t('guide.fromStart')}
-                </DLButton>
-              )}
-              <DLButton variant="default" size="lg" onClick={onDetails}>
+              <DLButton variant="default" size="md" onClick={onDetails}>
                 {t('guide.channelDetails')}
               </DLButton>
-              <DLIconButton label={t(ch.isFavourite ? 'channels.favourite.remove' : 'channels.favourite.add')} icon={IconStar} size="lg" variant="default" pressed={ch.isFavourite} filledGlyph={ch.isFavourite} onClick={onFavourite} />
-              {canRecord && st !== 'past-archive' && st !== 'past-none' && (
+              <DLIconButton label={t(ch.isFavourite ? 'channels.favourite.remove' : 'channels.favourite.add')} icon={IconStar} size="md" variant="default" pressed={ch.isFavourite} filledGlyph={ch.isFavourite} onClick={onFavourite} />
+              {((canRecord && st !== 'past-archive' && st !== 'past-none') || (st === 'now' && canCatchup)) && (
                 <Menu opened={recordOpen} onChange={onRecordOpen} position="bottom-start">
                   <Menu.Target>
-                    <DLButton variant="default" size="lg">
+                    <DLButton variant="default" size="md">
                       {t('guide.record')} <IconChevronDown size={14} />
                     </DLButton>
                   </Menu.Target>
                   <Menu.Dropdown>
-                    <Menu.Item onClick={() => onRecord('once')}>{t('guide.recordOnce')}</Menu.Item>
-                    <Menu.Item onClick={() => onRecord('series')}>{t('guide.recordSeries')}</Menu.Item>
+                    {st === 'now' && canCatchup && <Menu.Item onClick={onFromStart}>{t('guide.fromStart')}</Menu.Item>}
+                    {canRecord && <Menu.Item onClick={() => onRecord('once')}>{t('guide.recordOnce')}</Menu.Item>}
+                    {canRecord && <Menu.Item onClick={() => onRecord('series')}>{t('guide.recordSeries')}</Menu.Item>}
                   </Menu.Dropdown>
                 </Menu>
               )}

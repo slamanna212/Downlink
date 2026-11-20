@@ -39,6 +39,8 @@ export interface Source {
   status: SourceStatus;
   serverVersion: string | null;
   lastSyncAt: number | null;
+  /** Longest catch-up window across the source's channels, in days (0 = none). */
+  archiveDays: number;
 }
 
 export interface Group {

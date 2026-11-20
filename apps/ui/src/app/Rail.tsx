@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router';
 import { Box, Group, NavLink, Stack, Text, Tooltip } from '@mantine/core';
-import { IconArrowBarLeft, IconArrowBarRight, IconDownload } from '@tabler/icons-react';
+import { IconArrowBarLeft, IconDownload } from '@tabler/icons-react';
 import { FocusContext } from '@noriginmedia/norigin-spatial-navigation';
 import { useCaps, useSources } from '../api/queries';
 import type { Source, SourceStatus } from '../api/types';
@@ -104,7 +104,14 @@ export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void 
       >
         <Group className={classes.brand} gap="sm" wrap="nowrap" justify={mode === 'expanded' ? 'space-between' : 'center'}>
           <Group gap="sm" wrap="nowrap">
-            <span className={classes.brandMark}>
+            <span
+              className={classes.brandMark}
+              role={mode === 'collapsed' ? 'button' : undefined}
+              tabIndex={mode === 'collapsed' ? 0 : undefined}
+              aria-label={mode === 'collapsed' ? t('nav.expand') : undefined}
+              onClick={mode === 'collapsed' ? onToggle : undefined}
+              onKeyDown={mode === 'collapsed' ? (e) => (e.key === 'Enter' || e.key === ' ') && onToggle() : undefined}
+            >
               <Icon icon={IconDownload} size={16} />
             </span>
             {mode === 'expanded' && <span className={classes.brandName}>{t('app.name')}</span>}
@@ -113,12 +120,6 @@ export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void 
             <DLIconButton label={t('nav.collapse')} icon={IconArrowBarLeft} size="sm" onClick={onToggle} />
           )}
         </Group>
-        {mode === 'collapsed' && (
-          <Group justify="center" mb="xs">
-            <DLIconButton label={t('nav.expand')} icon={IconArrowBarRight} size="sm" onClick={onToggle} />
-          </Group>
-        )}
-
         {visibleNav(caps).map((e) => (
           <RailItem key={e.id} entry={e} mode={mode} />
         ))}
