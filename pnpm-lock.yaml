@@ -6,6 +6,8 @@ settings:
 
 importers:
 
+  .: {}
+
   apps/ui:
     dependencies:
       '@fontsource/geist-mono':

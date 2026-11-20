@@ -2,9 +2,8 @@
 
 > ## Before the first release: TODO for Sam
 >
-> Automatic triggers are paused: `ci.yml` and `release.yml` run only via "Run workflow" (workflow_dispatch).
-> To re-enable, restore the `pull_request:` trigger in `ci.yml` and the `push:` block in `release.yml`
-> (both are noted in comments there).
+> **Heads up: pushing to `main` now publishes a release** (the version in the root `package.json`, currently
+> `0.1.0`) if that release does not exist yet. Use `[skip release]` in the commit message to avoid it.
 >
 > - [ ] Generate the updater keypair (back it up offline; never commit it):
 >   `cargo tauri signer generate -w ~/.tauri/downlink.key`
@@ -12,49 +11,63 @@
 >   `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/downlink.key`
 >   then `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (it prompts for the value).
 > - [ ] Paste the public key (`~/.tauri/downlink.key.pub`) into `plugins.updater.pubkey` in `apps/desktop/tauri.conf.json`.
-> - [ ] (Optional) repo variable `LIBMPV_SRC` for Linux. The Windows libmpv pin lives in `tools/mpv/pins.env`; no `MPV_*` variables are needed.
+> - [ ] Create the `dev` branch when you want dev builds (`dev-prerelease.yml` checks it out).
+> - [ ] (Optional) repo variables: `LINUX_RUNNER` (Linux runner label, default `ubuntu-22.04`), `CI_RUNNER` (runner
+>   for trusted PR actors), `LIBMPV_SRC` (Linux libmpv.so.2 path). The Windows libmpv pin lives in
+>   `tools/mpv/pins.env`; no `MPV_*` variables are needed.
 > - [ ] Apply the config in "tauri.conf.json requirements" below and implement the `--self-test` flag.
 > - [ ] macOS is OFF by default (releases start as Windows + Linux). See "macOS" below to turn it on.
 
-Implements PLAN §10. Workflows: `.github/workflows/ci.yml` (gates) and `.github/workflows/release.yml`
-(build, sign, publish, smoke).
+Implements PLAN §10. Modelled on the Apogee repo's workflows.
 
-## How a release happens
+## How releases work
 
-| Trigger | Channel | Tag | Result |
-|---|---|---|---|
-| push to `main` | dev | `vX.Y.Z-dev.<shortsha>` (pre-release) | assets on that pre-release; rolling `dev` release gets the newest `latest.json` |
-| push tag `vX.Y.Z` | stable | `vX.Y.Z` | full release, unversioned copies, `latest.json` |
+| Workflow | Trigger | Builds | Version | Result |
+|---|---|---|---|---|
+| `release.yml` | push to `main` (not README.md / `docs/**`, not `[skip release]`) or manual | `main` | root `package.json` `version` | `vX.Y.Z` release; pre-release if the version has a `-suffix`, else stable and "latest"; skipped if the release already exists |
+| `dev-prerelease.yml` | manual only ("Run workflow") | `dev` branch | `<package.json base>-dev.<shortsha>` | pre-release `vX.Y.Z-dev.<sha>` published immediately, rolling `dev` release gets the new `latest.json` |
+| `pr-ci.yml` | pull requests to `dev` | PR head | none | quality gates only (`ci.yml`) |
+| `ci.yml` | called by the above; manual | any | none | fmt, clippy, deny, nextest, UI lint/typecheck/test/build |
+| `build.yml` | called by `release.yml` and `dev-prerelease.yml` | any | input | the shared build and publish pipeline |
 
-Pipeline (`release.yml`):
+**The root `package.json` `version` is the single source of truth.** `tauri.conf.json`, the workspace
+`Cargo.toml` and `apps/ui/package.json` are overwritten at build time by `tools/release/set-version.mjs`, so
+they can never drift (their committed values are irrelevant to releases).
 
-0. **ci**: calls `ci.yml` as a reusable workflow; nothing below runs unless it passes. `ci.yml` itself
-   only triggers on pull requests and via this call, so CI runs once per push.
-1. **prepare**: derives version/tag, generates notes with git-cliff, creates a *draft* release. Dev builds
-   embed `X.Y.Z-dev.<sha>` as their version (via a merged `--config`) so the updater orders them below
-   the eventual `X.Y.Z`. A stable tag must equal the `tauri.conf.json` version or the run fails.
-2. **mpv-macos** (arm64 + x86_64 runners) then **build-macos** merges them with `lipo` into a universal tree.
-3. **build-windows / build-macos / build-linux**: stage libmpv, build UI, `tauri-action` builds and uploads
-   to the draft (`uploadUpdaterJson: false`). Linux additionally signs the deb and rpm (Tauri signs only
-   NSIS, AppImage and app.tar.gz), writes `SHA256SUMS-linux-x86_64.txt`, uploads both.
-4. **publish**: downloads every asset, builds `latest.json` with `tools/release/make-latest-json.py`
-   (all six platform keys of §10.3, fails if any asset or `.sig` is missing), makes unversioned copies
-   (stable only), attests provenance, publishes the draft, updates the rolling `dev` release (dev only).
-5. **smoke**: installs the published artefacts on a clean runner, asserts no mpv/libmpv, runs
-   `--self-test` (see below).
-
-Why our own `latest.json`: parallel `tauri-action` jobs race on one manifest and cannot emit the deb/rpm keys.
-
-### Cutting a stable release
+### Cutting a release
 
 ```bash
-tools/release/bump-version.sh 0.2.0     # Cargo.toml (workspace), tauri.conf.json, apps/ui/package.json, Cargo.lock
+tools/release/bump-version.sh 0.2.0      # edits only the root package.json
 git commit -am "chore: release v0.2.0"
-git tag v0.2.0 && git push && git push origin v0.2.0
+git push                                 # on main: release.yml publishes v0.2.0
 ```
 
-Then hand-edit the release notes (user-visible "What's new" first; git-cliff output below it).
-Run `git cliff --current` locally to preview.
+Any push to `main` with an unchanged version is a no-op (release exists). A commit that must not trigger
+anything (CI tweaks, etc.) can contain `[skip release]`. Hand-edit the release notes afterwards (git-cliff
+output is the starting point; user-visible "What's new" first).
+
+### Pipeline
+
+1. `check-version` (release/dev callers): reads the version, checks the release does not exist, sets the
+   pre-release flag. `ci`: the full quality gates must pass.
+2. `build.yml`:
+   - **prepare**: git-cliff notes, creates a *draft* release, detects the signing key.
+   - **mpv-macos** then **build-macos** (only with `ENABLE_MACOS`), **build-windows**, **build-linux**: stage libmpv,
+     inject the version, build the UI, `tauri-action` builds and uploads to the draft (`uploadUpdaterJson: false`).
+     Linux also signs deb and rpm (Tauri signs only NSIS, AppImage, app.tar.gz) and uploads
+     `SHA256SUMS-linux-x86_64.txt`.
+   - **publish**: builds `latest.json` with `tools/release/make-latest-json.py` (fails if an asset or `.sig`
+     is missing; no darwin keys without macOS), makes unversioned copies (stable non-pre-release only), attests
+     provenance, publishes the draft (and refreshes the rolling `dev` release on the dev channel).
+   - **smoke**: installs the published artefacts on a clean runner and runs `--self-test` (see below).
+   - **cleanup**: if a build or publish failed, a still-draft release and its tag are deleted (as in Apogee).
+
+Differences from Apogee: one reusable `build.yml` instead of duplicated jobs; our own `latest.json`
+(parallel `tauri-action` jobs race on one manifest and cannot emit deb/rpm keys); stable releases are published
+automatically rather than left as drafts.
+
+Linux runner: `build.yml`/`ci.yml` use `vars.LINUX_RUNNER` (default `ubuntu-22.04`). A non-GitHub-hosted runner
+skips the apt dependency install, so provision it yourself. The glibc baseline is 22.04.
 
 ## Repository secrets and variables
 
@@ -65,19 +78,20 @@ Run `git cliff --current` locally to preview.
 | `ENABLE_MACOS` | variable | `true` turns on the macOS jobs (libmpv, build, smoke) and the darwin keys in `latest.json`; default off |
 | `MACOS_DEVELOPER_ID` | variable | `true` switches macOS builds from ad-hoc to Developer ID + notarisation (needs the Apple secrets) |
 | `APPLE_*` | secrets | see "macOS" below; only used when `MACOS_DEVELOPER_ID` is `true` |
+| `LINUX_RUNNER` | variable (optional) | Linux runner label for build and CI (default `ubuntu-22.04`) |
+| `CI_RUNNER` | variable (optional) | runner for PR CI from trusted actors (repo owner, Dependabot); unset = GitHub-hosted |
 | `LIBMPV_SRC` | variable (optional) | absolute path of the `libmpv.so.2` to bundle on Linux; default is the runner's linker cache |
 
 `GITHUB_TOKEN` is used for everything else. Workflow permissions are least-privilege per job
-(`contents: write`; `id-token` + `attestations: write` only in `publish`).
+(`contents: write`; `id-token` + `attestations: write` for the build/publish call).
 
 ## Testing dev builds before the updater key exists
 
-If `TAURI_SIGNING_PRIVATE_KEY` is empty, dev builds still build and publish all installers (NSIS `.exe`,
-`.deb`, `.AppImage`, `.rpm`, `.dmg`, plus `SHA256SUMS-linux-x86_64.txt`) to the `vX.Y.Z-dev.<sha>`
-pre-release, with a workflow warning annotation. The build gets `bundle.createUpdaterArtifacts=false`
+If `TAURI_SIGNING_PRIVATE_KEY` is empty, builds (main and dev) still publish all installers (NSIS `.exe`,
+`.deb`, `.AppImage`, `.rpm`, `.dmg` when macOS is on, plus `SHA256SUMS-linux-x86_64.txt`), with a workflow
+warning annotation. The build gets `bundle.createUpdaterArtifacts=false`
 (merged by `.github/actions/setup-build`), no `.sig` files are made, and `latest.json` and the rolling
-`dev` release are skipped, so in-app updates do not work until the key is added. A stable tag without the
-key fails in `prepare`. Libmpv pins (Windows tag/asset/SHA-256, Linux, macOS) are read from
+`dev` release update are skipped, so in-app updates do not work until the key is added. Libmpv pins (Windows tag/asset/SHA-256, Linux, macOS) are read from
 `tools/mpv/pins.env` by the staging scripts.
 
 ## macOS

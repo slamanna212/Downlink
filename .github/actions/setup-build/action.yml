@@ -2,7 +2,7 @@ name: Setup Tauri build
 description: Toolchains, UI build and the merged release tauri config shared by every release build job.
 inputs:
   channel-version:
-    description: Version to embed in the build (X.Y.Z or X.Y.Z-dev.<sha>); overrides tauri.conf.json at build time.
+    description: Version to embed in the build (X.Y.Z[-pre]); written into tauri.conf.json, Cargo.toml and apps/ui/package.json (build-time only).
     required: true
   overlay:
     description: windows | macos | linux. Merges apps/desktop/tauri.release.<overlay>.conf.json (libmpv bundle paths).
@@ -31,6 +31,10 @@ runs:
         node-version: "22"
         cache: pnpm
 
+    - name: Inject release version (tauri.conf.json, Cargo.toml, apps/ui/package.json)
+      shell: bash
+      run: node tools/release/set-version.mjs "${{ inputs.channel-version }}"
+
     - name: Install tauri-cli
       shell: bash
       run: cargo install tauri-cli --version "^2" --locked
@@ -44,19 +48,17 @@ runs:
     - name: Write merged release config
       shell: bash
       env:
-        VERSION: ${{ inputs.channel-version }}
         OVERLAY: ${{ inputs.overlay }}
         SIGNED: ${{ inputs.signed }}
       run: |
         overlay="apps/desktop/tauri.release.${OVERLAY}.conf.json"
         [ -f "$overlay" ] || { echo "::error::missing $overlay (see docs/release.md, tauri.conf.json requirements)"; exit 1; }
-        jq -n --arg v "$VERSION" '{version: $v}' > "$RUNNER_TEMP/version.json"
         # Without a signing key the build must not try to create updater artefacts.
         if [[ "$SIGNED" == true ]]; then
           echo '{}' > "$RUNNER_TEMP/signing.json"
         else
           echo '{"bundle":{"createUpdaterArtifacts":false}}' > "$RUNNER_TEMP/signing.json"
         fi
-        # Deep merge: overlay, then the version override, then the signing override.
-        jq -s '.[0] * .[1] * .[2]' "$overlay" "$RUNNER_TEMP/version.json" "$RUNNER_TEMP/signing.json" > release-config.json
+        # Deep merge: overlay, then the signing override. (The version is injected by set-version.mjs below.)
+        jq -s '.[0] * .[1]' "$overlay" "$RUNNER_TEMP/signing.json" > release-config.json
         cat release-config.json

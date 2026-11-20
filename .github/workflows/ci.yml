@@ -1,13 +1,19 @@
-# Quality gates from CLAUDE.md / PLAN §11.3, on every PR and push to main.
 name: CI
 
-# Pushes to main are gated by release.yml, which calls this workflow first (workflow_call),
-# so CI runs exactly once per push and a red main never publishes.
+# Quality gates (CLAUDE.md / PLAN §11.3). Reusable: called by pr-ci.yml (PRs to dev), release.yml and
+# dev-prerelease.yml (before building). Also runnable by hand.
 on:
-  # Automatic triggers are paused until the app is further along (Sam, 2026-11-19).
-  # Re-enable by restoring `pull_request:`.
   workflow_dispatch:
   workflow_call:
+    inputs:
+      ref:
+        description: Git ref to test (empty = the caller's ref).
+        type: string
+        default: ""
+      linux-runner:
+        description: Runner label for the Linux legs.
+        type: string
+        default: ubuntu-22.04
 
 permissions:
   contents: read
@@ -29,12 +35,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, windows-latest, macos-latest]
+        os: ["${{ inputs.linux-runner || 'ubuntu-22.04' }}", windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Install Linux build dependencies (PLAN §13.2)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -71,9 +79,11 @@ jobs:
 
   ui:
     name: UI
-    runs-on: ubuntu-22.04
+    runs-on: ${{ inputs.linux-runner || 'ubuntu-22.04' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}

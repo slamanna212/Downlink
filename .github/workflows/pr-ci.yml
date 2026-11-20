@@ -1,0 +1,21 @@
+# PRs targeting dev run the full quality gates (ci.yml). Nobody opens PRs against main; main only moves via push
+# (release.yml). Like Apogee, trusted actors may use a dedicated runner, but only if repo variable CI_RUNNER is
+# set; everyone else gets a GitHub-hosted runner so forks never execute on private infrastructure.
+name: PR CI
+
+on:
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    with:
+      linux-runner: ${{ (vars.CI_RUNNER != '' && (github.actor == github.repository_owner || github.actor == 'dependabot[bot]')) && vars.CI_RUNNER || 'ubuntu-22.04' }}

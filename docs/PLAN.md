@@ -1216,8 +1216,13 @@ listings.
 | `macos-latest` (arm64), target `universal-apple-darwin` | `.dmg`, `.app.tar.gz` + `.sig` (universal libmpv from §4.10) |
 | `ubuntu-22.04` (pinned container for libmpv collection) | AppImage, `.deb`, `.rpm` + `.sig`, `SHA256SUMS-linux-x86_64.txt` |
 
-`tauri-apps/tauri-action` builds, uploads and generates `latest.json`; a final job copies the
-unversioned assets and creates the attestation.
+`tauri-apps/tauri-action` builds and uploads to a draft release; a final job generates `latest.json`
+(`tools/release/make-latest-json.py`), copies the unversioned assets, creates the attestation and publishes.
+Workflow layout follows Apogee: `release.yml` (push to `main`), `dev-prerelease.yml` (manual, `dev` branch),
+`pr-ci.yml` (PRs to `dev`), plus reusable `ci.yml` and `build.yml`. The Linux runner label is the repo variable
+`LINUX_RUNNER` (default `ubuntu-22.04`). macOS jobs run only when repo variable `ENABLE_MACOS` is `true`
+(releases start as Windows + Linux; macOS follows with a Developer ID, §10.5). Without
+`TAURI_SIGNING_PRIVATE_KEY` builds still publish installers, minus `.sig` files and `latest.json`.
 
 `tauri.conf.json`: `bundle.targets = ["nsis", "dmg", "app", "appimage", "deb", "rpm"]`,
 `bundle.createUpdaterArtifacts = true`, `bundle.macOS.signingIdentity = "-"` (ad-hoc) until a
@@ -1232,10 +1237,11 @@ Developer ID exists.
   → the universal `.app.tar.gz`), `linux-x86_64` (AppImage), `linux-x86_64-deb`, `linux-x86_64-rpm`.
 - **Channels**:
   - **stable**: endpoint `https://github.com/slamanna212/Downlink/releases/latest/download/latest.json`
-    (GitHub's `latest` excludes pre-releases). Tags `vX.Y.Z`.
-  - **dev**: pre-releases tagged `vX.Y.Z-dev.<shortsha>` (Apogee's scheme), published on every push to
-    `main`. A rolling `dev` release always holds the newest dev `latest.json`; endpoint
-    `…/releases/download/dev/latest.json`.
+    (GitHub's `latest` excludes pre-releases). Every push to `main` publishes `vX.Y.Z` from the root
+    `package.json` version unless that release already exists (a `-suffix` version publishes as a pre-release).
+  - **dev**: pre-releases tagged `vX.Y.Z-dev.<shortsha>` (Apogee's scheme), built from the `dev` branch only
+    when triggered by hand (`dev-prerelease.yml`). A rolling `dev` release always holds the newest dev
+    `latest.json`; endpoint `…/releases/download/dev/latest.json`.
   - Chosen in Settings → Updates. Switching dev → stable only offers a build newer than the installed
     one (no automatic downgrade).
 - **UX**: check on startup and every 6 h. Download in the background. Never interrupt playback:
@@ -1249,7 +1255,10 @@ Developer ID exists.
 ### 10.4 Versioning and changelog
 
 Semver. Conventional Commits; `git-cliff` generates release notes, user-visible section hand-edited.
-Version bumped in `tauri.conf.json`, `Cargo.toml` and `package.json` in one commit.
+The **root `package.json` `version` is the single source of truth** (bumped with
+`tools/release/bump-version.sh`); `tauri.conf.json`, `Cargo.toml` and `apps/ui/package.json` are overwritten from it
+at build time (`tools/release/set-version.mjs`) so they cannot drift. `[skip release]` in a commit message and
+docs-only changes skip the release workflow.
 README and About show "Works with Dispatcharr ≥ 0.32.0, tested with <latest>".
 
 ### 10.5 Signing (decide before 1.0)

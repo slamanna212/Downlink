@@ -1,0 +1,521 @@
+# Reusable build + publish pipeline (PLAN §10), called by release.yml (main, prod) and
+# dev-prerelease.yml (dev branch, manual). Creates a draft release, builds Windows + Linux (+ macOS when
+# vars.ENABLE_MACOS == 'true'), then publishes. See docs/release.md.
+name: Build and publish
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build (empty = the caller's ref).
+        type: string
+        default: ""
+      version:
+        description: Release version (X.Y.Z or X.Y.Z-pre), injected into tauri.conf.json/Cargo/ui at build time.
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+      prerelease:
+        description: Publish as a GitHub pre-release.
+        type: boolean
+        default: false
+      channel:
+        description: "stable (main) or dev (dev branch; also refreshes the rolling dev latest.json)."
+        type: string
+        default: stable
+      linux-runner:
+        type: string
+        default: ubuntu-22.04
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "10" # lockfileVersion 9.0 is readable by pnpm 9 and 10
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+      signed: ${{ steps.meta.outputs.signed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0 # git-cliff needs history and tags
+
+      - id: meta
+        name: Detect updater signing key
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [[ -n "$SIGNING_KEY" ]]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Unsigned build::TAURI_SIGNING_PRIVATE_KEY is not set. Installers are built and published, but without updater signatures or latest.json, so in-app updates will not work. See docs/release.md."
+          fi
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: git-cliff
+
+      - name: Generate release notes (git-cliff)
+        run: |
+          git cliff --unreleased --tag "${{ inputs.tag }}" --strip header -o notes.md
+          [ -s notes.md ] || echo "No user-visible changes." > notes.md
+
+      - id: create
+        name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          # The callers already checked that the release does not exist; clear any stale draft from a failed run.
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          flags=(--draft --target "$(git rev-parse HEAD)" --title "$TAG" --notes-file notes.md)
+          [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
+          gh release create "$TAG" "${flags[@]}"
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+                 --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -n1)"
+          echo "release_id=$id" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # macOS is disabled unless repo variable ENABLE_MACOS == 'true'.
+  # macOS libmpv must be universal: collect on both architectures, merge in build-macos.
+  mpv-macos:
+    name: libmpv (macOS ${{ matrix.arch }})
+    if: vars.ENABLE_MACOS == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { runner: macos-latest, arch: arm64 }
+          - { runner: macos-15-intel, arch: x86_64 }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Collect libmpv dylib tree
+        env:
+          ARCH_DIR: ${{ matrix.arch }}
+        run: ./tools/mpv/macos.sh tools/mpv/out/macos collect
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mpv-macos-${{ matrix.arch }}
+          path: tools/mpv/out/macos/${{ matrix.arch }}
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  build-windows:
+    name: Build (Windows NSIS)
+    needs: prepare
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Stage libmpv (pinned in tools/mpv/pins.env)
+        shell: pwsh
+        # Pins (tag, asset, SHA-256) come from tools/mpv/pins.env; no repo variables needed.
+        run: ./tools/mpv/windows.ps1 -OutDir tools/mpv/out/windows/mpv
+
+      - uses: ./.github/actions/setup-build
+        with:
+          channel-version: ${{ inputs.version }}
+          signed: ${{ needs.prepare.outputs.signed }}
+          overlay: windows
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: cargo tauri
+          args: --bundles nsis --config ${{ github.workspace }}/release-config.json
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          uploadUpdaterJson: false
+
+  # ---------------------------------------------------------------------------
+  build-macos:
+    name: Build (macOS universal)
+    needs: [prepare, mpv-macos]
+    if: vars.ENABLE_MACOS == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: mpv-macos-arm64
+          path: tools/mpv/out/macos/arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: mpv-macos-x86_64
+          path: tools/mpv/out/macos/x86_64
+      - name: Merge libmpv into a universal set (tools/mpv/out/macos/universal)
+        run: ./tools/mpv/macos.sh tools/mpv/out/macos merge
+
+      - uses: ./.github/actions/setup-build
+        with:
+          channel-version: ${{ inputs.version }}
+          signed: ${{ needs.prepare.outputs.signed }}
+          overlay: macos
+          rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      # --- Developer ID path (PLAN §10.5). Gated by repo variable MACOS_DEVELOPER_ID == 'true'; otherwise the
+      # build is ad-hoc signed (signingIdentity "-" in tauri.conf.json).
+      - name: Import Developer ID certificate
+        if: vars.MACOS_DEVELOPER_ID == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          kc="$RUNNER_TEMP/build.keychain-db"
+          kcpass="$(uuidgen)"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kcpass" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kcpass" "$kc"
+          security import "$RUNNER_TEMP/cert.p12" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$kc"
+          security set-key-partition-list -S apple-tool:,apple: -k "$kcpass" "$kc"
+          security list-keychains -d user -s "$kc" login.keychain-db
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Sign bundled dylibs inside-out (hardened runtime)
+        if: vars.MACOS_DEVELOPER_ID == 'true'
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          # Every dylib is a leaf (install names are @loader_path-relative), so signing each one first
+          # satisfies inside-out ordering; Tauri signs the app bundle afterwards.
+          for f in tools/mpv/out/macos/universal/*.dylib; do
+            codesign --force --timestamp --options runtime --sign "$APPLE_SIGNING_IDENTITY" "$f"
+          done
+
+      - name: Build, sign and notarise (Developer ID)
+        if: vars.MACOS_DEVELOPER_ID == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: cargo tauri
+          args: --target universal-apple-darwin --bundles app,dmg --config ${{ github.workspace }}/release-config.json
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          uploadUpdaterJson: false
+
+      - name: Verify signature and notarisation
+        if: vars.MACOS_DEVELOPER_ID == 'true'
+        run: |
+          app="$(find target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -n1)"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+          xcrun stapler validate "$app"
+
+      # --- Ad-hoc path (default).
+      - name: Build (ad-hoc signed)
+        if: vars.MACOS_DEVELOPER_ID != 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: cargo tauri
+          args: --target universal-apple-darwin --bundles app,dmg --config ${{ github.workspace }}/release-config.json
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          uploadUpdaterJson: false
+
+  # ---------------------------------------------------------------------------
+  build-linux:
+    name: Build (Linux AppImage, deb, rpm)
+    needs: prepare
+    # glibc baseline 22.04 (PLAN §4.10). Override with repo variable LINUX_RUNNER (e.g. a self-hosted runner label).
+    runs-on: ${{ inputs.linux-runner }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install build dependencies
+        if: runner.environment == 'github-hosted'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libmpv-dev pkg-config build-essential patchelf file
+
+      - name: Stage libmpv (tools/mpv/linux.sh -> tools/mpv/out/linux/lib)
+        env:
+          # Repo variable LIBMPV_SRC pins the exact libmpv.so.2 to bundle (see tools/mpv/PINNED.md).
+          # Fallback: whatever libmpv.so.2 the runner's linker cache knows about.
+          LIBMPV_SRC_VAR: ${{ vars.LIBMPV_SRC }}
+        run: |
+          src="${LIBMPV_SRC_VAR:-$(ldconfig -p | awk '/libmpv\.so\.2 /{print $NF; exit}')}"
+          if [ -z "$src" ]; then
+            echo "::error::no libmpv.so.2 found; set repo variable LIBMPV_SRC (PINNED.md)"; exit 1
+          fi
+          LIBMPV_SRC="$src" ./tools/mpv/linux.sh tools/mpv/out/linux/lib
+
+      - uses: ./.github/actions/setup-build
+        with:
+          channel-version: ${{ inputs.version }}
+          signed: ${{ needs.prepare.outputs.signed }}
+          overlay: linux
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NO_STRIP: "true"
+        with:
+          projectPath: apps/desktop
+          tauriScript: cargo tauri
+          args: --bundles appimage,deb,rpm --config ${{ github.workspace }}/release-config.json
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          uploadUpdaterJson: false
+
+      # Tauri signs only AppImage / NSIS / app.tar.gz. The updater also needs .sig files for deb and rpm.
+      - name: Sign deb and rpm, write SHA256SUMS, upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          SIGNED: ${{ needs.prepare.outputs.signed }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          bundle=target/release/bundle
+          mkdir -p out
+          cp "$bundle"/appimage/*.AppImage "$bundle"/deb/*.deb "$bundle"/rpm/*.rpm out/
+          cd out
+          if [[ "$SIGNED" == true ]]; then
+            for f in *.deb *.rpm; do
+              cargo tauri signer sign "$f"   # reads key + password from the TAURI_SIGNING_* env vars
+            done
+          fi
+          sha256sum -- *.AppImage *.deb *.rpm > SHA256SUMS-linux-x86_64.txt
+          gh release upload "$TAG" -- *.deb *.rpm SHA256SUMS-linux-x86_64.txt --clobber
+          if [[ "$SIGNED" == true ]]; then gh release upload "$TAG" -- *.deb.sig *.rpm.sig --clobber; fi
+
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish (latest.json, copies, attestation)
+    needs: [prepare, build-windows, build-macos, build-linux]
+    # build-macos is skipped when ENABLE_MACOS is off; that must not block publishing.
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.build-windows.result == 'success' && needs.build-linux.result == 'success' && (needs.build-macos.result == 'success' || needs.build-macos.result == 'skipped') }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      VERSION: ${{ inputs.version }}
+      CHANNEL: ${{ inputs.channel }}
+      PRERELEASE: ${{ inputs.prerelease }}
+      RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+      SIGNED: ${{ needs.prepare.outputs.signed }}
+      ENABLE_MACOS: ${{ vars.ENABLE_MACOS }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Download release assets
+        run: |
+          mkdir assets
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate \
+            --jq '.[] | [.id, .name] | @tsv' |
+          while IFS=$'\t' read -r id name; do
+            gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "assets/$name"
+          done
+          ls -l assets
+
+      - name: Build latest.json
+        if: needs.prepare.outputs.signed == 'true'
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" --jq .body > notes.md
+          mac=()
+          [[ "$ENABLE_MACOS" == true ]] || mac=(--no-macos)
+          python3 tools/release/make-latest-json.py \
+            --version "$VERSION" --repo "$GITHUB_REPOSITORY" --tag "$TAG" \
+            --assets assets --notes notes.md --out latest.json "${mac[@]}"
+
+      - name: Unversioned asset copies (stable, non-pre-release only)
+        if: inputs.channel == 'stable' && !inputs.prerelease
+        run: |
+          [[ "$ENABLE_MACOS" == true ]] || export SKIP_MACOS=1
+          ./tools/release/unversioned-copies.sh assets
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            assets/*.exe
+            assets/*.dmg
+            assets/*.tar.gz
+            assets/*.AppImage
+            assets/*.deb
+            assets/*.rpm
+
+      - name: Upload copies and latest.json to the release
+        run: |
+          shopt -s nullglob
+          if [[ "$CHANNEL" == stable && "$PRERELEASE" != true ]]; then
+            gh release upload "$TAG" assets/Downlink_x64-setup.exe \
+              assets/Downlink_amd64.AppImage assets/Downlink_amd64.deb assets/Downlink-x86_64.rpm --clobber
+            if [[ "$ENABLE_MACOS" == true ]]; then gh release upload "$TAG" assets/Downlink_universal.dmg --clobber; fi
+          fi
+          if [[ "$SIGNED" == true ]]; then gh release upload "$TAG" latest.json --clobber; fi
+
+      - name: Publish release
+        run: |
+          if [[ "$CHANNEL" == stable && "$PRERELEASE" != true ]]; then
+            gh release edit "$TAG" --draft=false --prerelease=false --latest
+          else
+            gh release edit "$TAG" --draft=false --prerelease --latest=false
+          fi
+
+      # Rolling `dev` release: always holds the newest dev latest.json (endpoint .../releases/download/dev/latest.json).
+      - name: Update rolling dev release
+        if: inputs.channel == 'dev' && needs.prepare.outputs.signed == 'true'
+        run: |
+          sha="$(git rev-parse HEAD)"
+          git tag -f dev "$sha"
+          git push -f origin refs/tags/dev
+          if ! gh release view dev >/dev/null 2>&1; then
+            gh release create dev --prerelease --latest=false --target "$sha" \
+              --title "Dev channel (rolling)" \
+              --notes "Rolling pointer for the dev update channel. Holds the newest dev latest.json. Install builds from the vX.Y.Z-dev.<sha> pre-releases."
+          fi
+          gh release upload dev latest.json --clobber
+
+  # ---------------------------------------------------------------------------
+  # PLAN §4.10: run each artefact on a clean machine with no mpv and assert the bundled libmpv works.
+  # Requires the desktop app's `--self-test` flag (docs/release.md, "Desktop app requirements").
+  smoke:
+    name: Smoke (${{ matrix.os }})
+    needs: [prepare, publish]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(vars.ENABLE_MACOS == 'true' && '["ubuntu-22.04","windows-latest","macos-latest"]' || '["ubuntu-22.04","windows-latest"]') }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Self-test output path
+        shell: bash
+        run: echo "DOWNLINK_SELF_TEST_OUT=$RUNNER_TEMP/self-test.json" >> "$GITHUB_ENV"
+
+      - name: Linux (AppImage and deb)
+        if: runner.os == 'Linux'
+        run: |
+          if command -v mpv; then echo "::error::mpv present on clean machine"; exit 1; fi
+          if ldconfig -p | grep -q libmpv; then echo "::error::libmpv present on clean machine"; exit 1; fi
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --pattern '*_amd64.AppImage' --pattern '*_amd64.deb' --dir dl
+          chmod +x dl/*.AppImage
+          # AppImage: bundled libmpv only
+          env -u LD_LIBRARY_PATH -u DOWNLINK_MPV_PATH \
+            timeout 120 xvfb-run -a dl/*.AppImage --appimage-extract-and-run --self-test
+          cat "$DOWNLINK_SELF_TEST_OUT"
+          # deb: installs without pulling in libmpv, runs from the private dir
+          sudo apt-get install -y ./dl/*_amd64.deb
+          if ldconfig -p | grep -q 'libmpv\.so'; then echo "::error::deb pulled in a system libmpv"; exit 1; fi
+          pkg="$(dpkg-deb -f dl/*_amd64.deb Package)"
+          bin="$(dpkg -L "$pkg" | grep '^/usr/bin/' | head -n1)"
+          env -u LD_LIBRARY_PATH -u DOWNLINK_MPV_PATH timeout 120 xvfb-run -a "$bin" --self-test
+          cat "$DOWNLINK_SELF_TEST_OUT"
+
+      - name: Windows (NSIS)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Get-Command mpv -ErrorAction SilentlyContinue) { throw 'mpv present on clean machine' }
+          gh release download $env:TAG -R $env:GITHUB_REPOSITORY --pattern '*_x64-setup.exe' --dir dl
+          $installer = (Get-ChildItem dl -Filter *_x64-setup.exe)[0].FullName
+          Start-Process $installer -ArgumentList '/S' -Wait
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Downlink" -Filter *.exe |
+            Where-Object { $_.Name -notmatch 'uninstall' } | Select-Object -First 1
+          if (-not $exe) { throw 'installed executable not found' }
+          $p = Start-Process $exe.FullName -ArgumentList '--self-test' -Wait -PassThru
+          if (Test-Path $env:DOWNLINK_SELF_TEST_OUT) { Get-Content $env:DOWNLINK_SELF_TEST_OUT }
+          if ($p.ExitCode -ne 0) { throw "self-test failed ($($p.ExitCode))" }
+
+      - name: macOS (dmg)
+        if: runner.os == 'macOS'
+        run: |
+          if command -v mpv; then echo "::error::mpv present on clean machine"; exit 1; fi
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --pattern '*_universal.dmg' --dir dl
+          hdiutil attach dl/*_universal.dmg -mountpoint /Volumes/Downlink -nobrowse -quiet
+          cp -R /Volumes/Downlink/Downlink.app /Applications/
+          hdiutil detach /Volumes/Downlink -quiet
+          app=/Applications/Downlink.app
+          for lib in "$app"/Contents/Frameworks/libmpv*.dylib; do
+            archs="$(lipo -archs "$lib")"
+            echo "$lib: $archs"
+            [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || { echo "::error::$lib is not universal"; exit 1; }
+          done
+          codesign --verify --deep --strict "$app"
+          exe="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+          timeout 120 "$app/Contents/MacOS/$exe" --self-test
+          cat "$DOWNLINK_SELF_TEST_OUT"
+
+  # ---------------------------------------------------------------------------
+  # Like Apogee's finalize job: a failed build must not leave a half-filled release (or its tag) behind.
+  cleanup:
+    name: Delete incomplete release
+    needs: [prepare, build-windows, build-macos, build-linux, publish]
+    if: ${{ always() && needs.prepare.result == 'success' && (needs.build-windows.result == 'failure' || needs.build-linux.result == 'failure' || needs.build-macos.result == 'failure' || needs.publish.result == 'failure') }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Delete the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          # Only ever delete a release that is still a draft.
+          draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo unknown)"
+          if [[ "$draft" == true ]]; then
+            gh release delete "$TAG" --cleanup-tag --yes --repo "$GITHUB_REPOSITORY"
+          fi
+          echo "::error::A platform build or publish failed; removed incomplete draft release $TAG"
+          exit 1
