@@ -937,9 +937,10 @@ fn load_current(inner: &Inner, s: &mut Shared) -> Result<(), PlayerError> {
     let opts = options::loadfile_options(req.profile, &prefs, &req.headers, req.start_secs);
     s.load_started = Some(Instant::now());
     s.first_frame_ms = None;
-    inner
-        .eng()
-        .command(&["loadfile", &req.url, "replace", "-1", &opts])
+    inner.eng().command_named(
+        "loadfile",
+        &[("url", &req.url), ("flags", "replace"), ("options", &opts)],
+    )
 }
 
 fn on_failure(inner: &Inner, s: &mut Shared, cause: FailureCause) {

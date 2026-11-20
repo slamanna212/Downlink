@@ -366,7 +366,7 @@ pub fn quote(value: &str) -> String {
     format!("%{}%{}", value.len(), value)
 }
 
-/// Build the `options` argument of `loadfile <url> replace -1 <options>`.
+/// Build the `options` named argument of `loadfile` (see `Engine::command_named`).
 ///
 /// Auth headers are attached **per file only** (CLAUDE.md rule 5), never as a global option.
 pub fn loadfile_options(

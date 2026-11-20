@@ -110,16 +110,26 @@ fn clip(name: &str) -> Option<Vec<u8>> {
 }
 
 fn player() -> Option<Player> {
-    let loaded = load(None).ok()?;
-    let p = Player::new(
+    let loaded = match load(None) {
+        Ok(l) => l,
+        Err(e) if std::env::var("DOWNLINK_REQUIRE_MPV").is_ok_and(|v| v == "1") => {
+            panic!("DOWNLINK_REQUIRE_MPV=1 but libmpv failed to load: {e}")
+        }
+        Err(_) => return None,
+    };
+    let p = match Player::new(
         &loaded,
         Preferences::default(),
         RenderBackend::RenderApi,
         Arc::new(|_| {}),
-    )
-    .ok()?;
+    ) {
+        Ok(p) => p,
+        Err(e) => panic!("player init failed: {e}"),
+    };
     // No render context in tests: decode and "display" into nothing.
-    p.engine().set_property("vo", "null").ok()?;
+    if let Err(e) = p.engine().set_property("vo", "null") {
+        panic!("vo=null failed: {e}");
+    }
     Some(p)
 }
 
@@ -164,7 +174,9 @@ fn play_clip(name: &str, secs: f64) -> Option<(Player, Server)> {
         None
     })?;
     let srv = serve(data, secs, 2.0, None);
-    p.play(req(srv.port, false)).ok()?;
+    if let Err(e) = p.play(req(srv.port, false)) {
+        panic!("play failed: {e}");
+    }
     let snap = p.wait_for(|s| s == SessionState::Playing, Duration::from_secs(20));
     assert_eq!(
         snap.state,

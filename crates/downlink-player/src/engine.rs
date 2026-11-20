@@ -168,6 +168,54 @@ impl Engine {
         self.check("mpv_command", rc)
     }
 
+    /// `mpv_command_node` with named string arguments (`{"name": cmd, key: value, ...}`).
+    ///
+    /// Named arguments do not depend on positional order, which changed between mpv releases
+    /// (0.38 inserted `index` before `options` in `loadfile`).
+    pub fn command_named(&self, name: &str, args: &[(&str, &str)]) -> Result<(), PlayerError> {
+        let mut keys: Vec<CString> = Vec::with_capacity(args.len() + 1);
+        let mut vals: Vec<CString> = Vec::with_capacity(args.len() + 1);
+        keys.push(cstr("name")?);
+        vals.push(cstr(name)?);
+        for (k, v) in args {
+            keys.push(cstr(k)?);
+            vals.push(cstr(v)?);
+        }
+        let mut key_ptrs: Vec<*mut c_char> = keys.iter().map(|c| c.as_ptr().cast_mut()).collect();
+        let mut nodes: Vec<ffi::MpvNode> = vals
+            .iter()
+            .map(|c| ffi::MpvNode {
+                u: ffi::MpvNodeValue {
+                    string: c.as_ptr().cast_mut(),
+                },
+                format: ffi::FORMAT_STRING,
+            })
+            .collect();
+        let num = c_int::try_from(nodes.len())
+            .map_err(|_| PlayerError::InvalidArgument("too many command arguments".into()))?;
+        let mut list = ffi::MpvNodeList {
+            num,
+            values: nodes.as_mut_ptr(),
+            keys: key_ptrs.as_mut_ptr(),
+        };
+        let mut map = ffi::MpvNode {
+            u: ffi::MpvNodeValue { list: &mut list },
+            format: ffi::FORMAT_NODE_MAP,
+        };
+        let mut result = ffi::MpvNode {
+            u: ffi::MpvNodeValue { int64: 0 },
+            format: 0,
+        };
+        // SAFETY: handle valid. `map` points at `list`, whose `values`/`keys` arrays (and the
+        // strings they reference, owned by `vals`/`keys`) outlive the call; mpv only reads them.
+        // `result` is zero-initialised (MPV_FORMAT_NONE) and freed with mpv_free_node_contents,
+        // which is a no-op for NONE.
+        let rc = unsafe { (self.api.command_node)(self.handle, &mut map, &mut result) };
+        // SAFETY: `result` was either left as NONE or filled in by mpv_command_node.
+        unsafe { (self.api.free_node_contents)(&mut result) };
+        self.check("mpv_command_node", rc)
+    }
+
     pub fn observe(&self, id: u64, name: &str, format: c_int) -> Result<(), PlayerError> {
         let n = cstr(name)?;
         // SAFETY: handle valid; `n` NUL-terminated and copied by mpv.

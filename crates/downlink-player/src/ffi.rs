@@ -22,6 +22,7 @@ pub const FORMAT_STRING: c_int = 1;
 pub const FORMAT_FLAG: c_int = 3;
 pub const FORMAT_INT64: c_int = 4;
 pub const FORMAT_DOUBLE: c_int = 5;
+pub const FORMAT_NODE_MAP: c_int = 8;
 
 // --- event ids -------------------------------------------------------------------------------
 pub const EVENT_NONE: c_int = 0;
@@ -90,6 +91,27 @@ pub struct MpvRenderParam {
     pub data: *mut c_void,
 }
 
+/// `mpv_node`. Only the string and map shapes are built here (named-argument commands).
+#[repr(C)]
+pub struct MpvNode {
+    pub u: MpvNodeValue,
+    pub format: c_int,
+}
+
+#[repr(C)]
+pub union MpvNodeValue {
+    pub string: *mut c_char,
+    pub list: *mut MpvNodeList,
+    pub int64: i64,
+}
+
+#[repr(C)]
+pub struct MpvNodeList {
+    pub num: c_int,
+    pub values: *mut MpvNode,
+    pub keys: *mut *mut c_char,
+}
+
 pub type GetProcAddressFn =
     unsafe extern "C" fn(ctx: *mut c_void, name: *const c_char) -> *mut c_void;
 
@@ -141,6 +163,8 @@ api! {
     set_property_string: "mpv_set_property_string" => fn(*mut MpvHandle, *const c_char, *const c_char) -> c_int,
     get_property_string: "mpv_get_property_string" => fn(*mut MpvHandle, *const c_char) -> *mut c_char,
     command: "mpv_command" => fn(*mut MpvHandle, *mut *const c_char) -> c_int,
+    command_node: "mpv_command_node" => fn(*mut MpvHandle, *mut MpvNode, *mut MpvNode) -> c_int,
+    free_node_contents: "mpv_free_node_contents" => fn(*mut MpvNode),
     observe_property: "mpv_observe_property" => fn(*mut MpvHandle, u64, *const c_char, c_int) -> c_int,
     request_log_messages: "mpv_request_log_messages" => fn(*mut MpvHandle, *const c_char) -> c_int,
     wait_event: "mpv_wait_event" => fn(*mut MpvHandle, c_double) -> *mut MpvEvent,
