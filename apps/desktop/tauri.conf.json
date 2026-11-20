@@ -7,7 +7,7 @@
     "devUrl": "http://localhost:1420",
     "frontendDist": "../ui/dist",
     "beforeDevCommand": {
-      "script": "pnpm dev",
+      "script": "pnpm install --frozen-lockfile && pnpm dev",
       "cwd": "../ui"
     },
     "beforeBuildCommand": {

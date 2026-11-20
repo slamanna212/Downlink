@@ -12,7 +12,7 @@
       "options": {
         "cwd": "${workspaceFolder}/apps/desktop",
         "env": {
-          "DOWNLINK_DEV_CONFIG": "{\"build\":{\"beforeDevCommand\":{\"script\":\"pnpm dev\",\"cwd\":\"${workspaceFolder}/apps/ui\"}}}"
+          "DOWNLINK_DEV_CONFIG": "{\"build\":{\"beforeDevCommand\":{\"script\":\"pnpm install --frozen-lockfile && pnpm dev\",\"cwd\":\"${workspaceFolder}/apps/ui\"}}}"
         }
       },
       "problemMatcher": [],
