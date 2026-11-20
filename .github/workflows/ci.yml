@@ -20,8 +20,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Node 22 LTS, pnpm 10 (PLAN §11.1). pnpm-lock.yaml is lockfileVersion 9.0, which pnpm 9 and 10 both read.
-  NODE_VERSION: "22"
+  # Node 24 LTS, pnpm 10 (PLAN §11.1). pnpm-lock.yaml is lockfileVersion 9.0, which pnpm 9 and 10 both read.
+  NODE_VERSION: "24"
   PNPM_VERSION: "10"
 
 jobs:
@@ -29,7 +29,7 @@ jobs:
     name: Rust
     runs-on: ${{ inputs.linux-runner || 'ubuntu-24.04' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux build dependencies (PLAN §13.2)
         if: runner.environment == 'github-hosted'
@@ -49,10 +49,10 @@ jobs:
           tool: cargo-nextest,cargo-deny
 
       # The UI must exist before the desktop crate compiles (tauri frontendDist = ../ui/dist).
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -69,11 +69,11 @@ jobs:
     name: UI
     runs-on: ${{ inputs.linux-runner || 'ubuntu-24.04' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -87,7 +87,7 @@ jobs:
     name: Lint workflows and scripts
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: actionlint
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
