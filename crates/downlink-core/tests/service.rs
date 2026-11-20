@@ -519,3 +519,224 @@ fn app_error_serialises_camel_case_for_the_ui() {
     assert_eq!(v["code"], "server");
     assert!(v["message"].is_string());
 }
+
+// ---- failover / counts / channel DTOs / home + search shapes -----------------------------------
+
+#[tokio::test]
+async fn failover_walks_the_stream_list_with_a_hard_attempt_limit() {
+    let (server, e, _) = added().await;
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    let one = chans[0].id; // Channel One: streams [11, 12]
+    get(
+        &server,
+        "/api/channels/channels/1/streams/",
+        fixture!("channel_streams.json"),
+    )
+    .await;
+    Mock::given(method("POST"))
+        .and(path(format!("/proxy/ts/next_stream/{UUID1}")))
+        .and(header("X-API-Key", KEY))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"success": true})))
+        .expect(2)
+        .mount(&server)
+        .await;
+
+    let list = e.svc.channel_streams(one).await.unwrap();
+    let v = serde_json::to_value(&list).unwrap();
+    assert_eq!(v["sourceCount"], 2);
+    assert_eq!(
+        v["streams"][0]["streamId"], "12",
+        "failover order from the server, never reordered"
+    );
+    assert_eq!(v["streams"][0]["name"], "Source B");
+    assert!(
+        !v.to_string().contains("provider.test"),
+        "provider URLs never leave core"
+    );
+
+    e.svc.play_channel(one).await.unwrap();
+    assert_eq!(e.svc.source_position(one).await.unwrap(), (1, 2));
+    // attempt 1: reconnect the same URL, no server change
+    let s1 = e.svc.failover_next(one, 1).await.unwrap();
+    assert!(!s1.switched);
+    assert_eq!((s1.source_index, s1.source_count), (1, 2));
+    assert_eq!(
+        s1.plan.url,
+        format!("{}/proxy/ts/stream/{UUID1}", server.uri())
+    );
+    // attempts 2 and 3: ask the server for the next stream (wraps around)
+    let s2 = e.svc.failover_next(one, 2).await.unwrap();
+    assert!(s2.switched);
+    assert_eq!(s2.source_index, 2);
+    let s3 = e.svc.failover_next(one, 3).await.unwrap();
+    assert!(s3.switched);
+    assert_eq!(s3.source_index, 1);
+    // never loop forever
+    let err = e.svc.failover_next(one, 4).await.unwrap_err();
+    assert_eq!(err.code, downlink_core::ErrorCode::Stream);
+    assert!(e.svc.failover_next(one, 0).await.is_err());
+    // zero stream-endpoint requests were made by any of this except via the proxy plan (no GETs).
+    let streams_gets = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.method.as_str() == "GET" && r.url.path().starts_with("/proxy/"))
+        .count();
+    assert_eq!(streams_gets, 0);
+}
+
+#[tokio::test]
+async fn failover_on_an_inactive_channel_does_not_pretend_to_switch() {
+    let (server, e, _) = added().await;
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    Mock::given(method("POST"))
+        .and(path(format!("/proxy/ts/next_stream/{UUID1}")))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let s = e.svc.failover_next(chans[0].id, 2).await.unwrap();
+    assert!(!s.switched);
+    assert_eq!(s.source_index, 1);
+    // single-stream channel: nothing to switch to, plan still returned
+    let six = chans.iter().find(|c| c.name == "Channel Six").unwrap();
+    assert!(!e.svc.failover_next(six.id, 3).await.unwrap().switched);
+}
+
+#[tokio::test]
+async fn counts_channel_by_id_and_filters() {
+    let (_server, e, _) = added().await;
+    let c = e.svc.get_counts().await.unwrap();
+    assert_eq!((c.all, c.favourites), (3, 0));
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    e.svc.set_favourite(chans[0].id, true).await.unwrap();
+    assert_eq!(e.svc.get_counts().await.unwrap().favourites, 1);
+    let v = serde_json::to_value(e.svc.get_counts().await.unwrap()).unwrap();
+    assert_eq!(
+        (v["all"].as_i64(), v["favourites"].as_i64()),
+        (Some(3), Some(1))
+    );
+    // adult opt-in raises the totals; a hidden channel's favourite never counts
+    e.svc.set_content_filters(true, true).await.unwrap();
+    assert_eq!(e.svc.get_counts().await.unwrap().all, 5);
+
+    let one = e.svc.get_channel(chans[0].id).await.unwrap();
+    assert!(one.logo.as_deref().unwrap().starts_with("dlimg://") && one.is_favourite);
+    assert_eq!(one.name, "Channel One");
+    assert!(e.svc.get_channel(99_999).await.is_err());
+}
+
+#[tokio::test]
+async fn home_and_search_carry_full_channel_dtos_in_the_ui_shapes() {
+    let (_server, e, sid) = added().await;
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    let one = &chans[0];
+    let now = downlink_core::sync::now_utc();
+    // A programme airing now and one resume position for catch-up.
+    let mk = |s: i64, t: &str| downlink_core::store::ProgrammeRow {
+        channel_id: one.id,
+        start_utc: s,
+        end_utc: s + 3600,
+        ext_id: None,
+        title: Some(t.into()),
+        subtitle: None,
+        description: None,
+        season: None,
+        episode: None,
+        flags: 0,
+    };
+    let past = now - 7200;
+    e.svc
+        .store()
+        .upsert_programmes(&[mk(now - 600, "Airing Now"), mk(past, "Yesterday Show")])
+        .await
+        .unwrap();
+    e.svc.set_favourite(one.id, true).await.unwrap();
+    e.svc.play_channel(one.id).await.unwrap(); // becomes the 'live' continue item and a recent
+    let ch = e.svc.store().channel(one.id).await.unwrap().unwrap();
+    e.svc
+        .set_watch_position(
+            sid,
+            "catchup",
+            &downlink_core::catchup::resume_key(&ch.ext_id, past),
+            900_000,
+            Some(3_600_000),
+        )
+        .await
+        .unwrap();
+
+    let home = serde_json::to_value(e.svc.get_home().await.unwrap()).unwrap();
+    let cw = home["continueWatching"].as_array().unwrap();
+    assert_eq!(cw[0]["kind"], "live");
+    assert_eq!(cw[0]["title"], "Airing Now");
+    assert!(
+        cw[0]["channel"]["logo"]
+            .as_str()
+            .unwrap()
+            .starts_with("dlimg://")
+    );
+    assert!(cw[0]["progress"].is_null());
+    let cu = cw.iter().find(|i| i["kind"] == "catchup").unwrap();
+    for k in [
+        "id",
+        "channel",
+        "programme",
+        "title",
+        "subtitle",
+        "art",
+        "progress",
+        "remainingSecs",
+    ] {
+        assert!(cu.get(k).is_some(), "missing {k}: {cu}");
+    }
+    assert_eq!(cu["title"], "Yesterday Show");
+    assert_eq!(cu["progress"], 0.25);
+    assert_eq!(cu["remainingSecs"], 2700);
+    assert_eq!(cu["programme"]["id"], format!("{}:{past}", one.id));
+    assert!(cu["channel"]["logo"].is_string());
+    let on_now = home["onNow"].as_array().unwrap();
+    assert_eq!(on_now[0]["now"]["title"], "Airing Now");
+    assert!(on_now[0]["channel"]["logo"].is_string());
+    assert!(home["favourites"][0]["logo"].is_string() && home["recents"][0]["logo"].is_string());
+
+    // Search: programme hits carry {programme, channel} with the channel's logo.
+    e.svc
+        .store()
+        .upsert_programmes(&[mk(now + 1800, "Colour Futures")])
+        .await
+        .unwrap();
+    let sr = serde_json::to_value(e.svc.search("colour", 10).await.unwrap()).unwrap();
+    let hit = &sr["programmes"][0];
+    assert_eq!(hit["programme"]["title"], "Colour Futures");
+    assert!(
+        hit["channel"]["logo"]
+            .as_str()
+            .unwrap()
+            .starts_with("dlimg://"),
+        "{hit}"
+    );
+    assert_eq!(hit["channel"]["id"], one.id);
+
+    let progs = e
+        .svc
+        .get_programmes(one.id, past - 10, now + 7200)
+        .await
+        .unwrap();
+    assert!(progs.len() >= 3);
+}

@@ -35,6 +35,17 @@ use crate::userstate;
 
 pub use dto::*;
 
+/// What `failover_next` hands the desktop: a fresh plan and where we are in the stream list.
+#[derive(Debug)]
+pub struct FailoverStep {
+    pub plan: PlayPlan,
+    /// 1-based index of the provider stream now believed to be in use.
+    pub source_index: usize,
+    pub source_count: usize,
+    /// The server was asked to (and did) switch to its next stream.
+    pub switched: bool,
+}
+
 /// A credential-free form of a playlist URL for display: no userinfo, no query.
 fn display_url(u: &str) -> String {
     match url::Url::parse(u) {
@@ -73,6 +84,8 @@ pub struct Service {
     dispatcharr: RwLock<HashMap<i64, Arc<DispatcharrClient>>>,
     status: Mutex<HashMap<i64, SourceStatus>>,
     registered_logos: Mutex<HashSet<String>>,
+    /// Failover position (0-based) believed to be in use, per channel row id.
+    current_stream: Mutex<HashMap<i64, usize>>,
     log_tail: LogTail,
     app_version: String,
 }
@@ -106,6 +119,7 @@ impl Service {
             dispatcharr: RwLock::new(HashMap::new()),
             status: Mutex::new(HashMap::new()),
             registered_logos: Mutex::new(HashSet::new()),
+            current_stream: Mutex::new(HashMap::new()),
             log_tail: LogTail::new(),
             app_version,
         })
@@ -144,18 +158,21 @@ impl Service {
         }
     }
 
+    /// `Connecting` until the first probe/sync of this run; then the recorded outcome, with a
+    /// successful-but-old sync shown as stale.
     fn status_of(&self, row: &SourceRow) -> SourceStatus {
-        if let Some(s) = self
+        match self
             .status
             .lock()
             .ok()
             .and_then(|g| g.get(&row.id).copied())
         {
-            return s;
-        }
-        match row.last_sync_at {
-            Some(t) if now_utc() - t <= STALE_AFTER_SECS => SourceStatus::Connected,
-            _ => SourceStatus::Stale,
+            None => SourceStatus::Connecting,
+            Some(SourceStatus::Connected) => match row.last_sync_at {
+                Some(t) if now_utc() - t <= STALE_AFTER_SECS => SourceStatus::Connected,
+                _ => SourceStatus::Stale,
+            },
+            Some(s) => s,
         }
     }
 
@@ -340,13 +357,12 @@ impl Service {
     // ---- sources ----------------------------------------------------------------------------
 
     pub async fn list_sources(&self) -> Result<Vec<SourceDto>> {
-        Ok(self
-            .store
-            .list_sources()
-            .await?
-            .iter()
-            .map(|r| SourceDto::from_row(r, self.status_of(r)))
-            .collect())
+        let mut out = Vec::new();
+        for r in self.store.list_sources().await? {
+            let days = refresh::max_catchup_days(&self.store, r.id).await?;
+            out.push(SourceDto::from_row(&r, self.status_of(&r), days));
+        }
+        Ok(out)
     }
 
     /// Connect and count what is there, without saving anything.
@@ -496,7 +512,8 @@ impl Service {
         }
         self.sync_source(row.id).await?;
         let row = self.store.source(row.id).await?;
-        Ok(SourceDto::from_row(&row, self.status_of(&row)))
+        let days = refresh::max_catchup_days(&self.store, row.id).await?;
+        Ok(SourceDto::from_row(&row, self.status_of(&row), days))
     }
 
     fn delete_secrets(&self, uuid: &str) {
@@ -924,13 +941,98 @@ impl Service {
         )
         .await?;
         let progs = catalog::search_programmes(&self.store, &f, query, now_utc(), limit).await?;
+        // Each hit carries its full channel DTO (logo included) so the UI needs no second call.
+        let ids: Vec<i64> = {
+            let mut seen = HashSet::new();
+            progs
+                .iter()
+                .map(|p| p.channel_id)
+                .filter(|i| seen.insert(*i))
+                .collect()
+        };
+        let chan_rows = catalog::channels_by_ids(&self.store, &f, &ids).await?;
+        let chan_dtos: HashMap<i64, ChannelDto> = self
+            .to_channel_dtos(&chan_rows)
+            .await?
+            .into_iter()
+            .map(|c| (c.id, c))
+            .collect();
+        let programmes = progs
+            .iter()
+            .filter_map(|p| {
+                Some(ProgrammeHitDto {
+                    programme: p.into(),
+                    channel: chan_dtos.get(&p.channel_id)?.clone(),
+                })
+            })
+            .collect();
         Ok(SearchDto {
             channels: self.to_channel_dtos(&rows).await?,
-            programmes: progs.iter().map(Into::into).collect(),
+            programmes,
         })
     }
 
-    /// Home screen: continue watching, favourites, what is on now, recents.
+    /// One channel as the UI sees it (logo `dlimg://` URL, favourite flag).
+    pub async fn get_channel(&self, channel_id: i64) -> Result<ChannelDto> {
+        let row = self
+            .store
+            .channel(channel_id)
+            .await?
+            .ok_or_else(|| AppError::local("That channel is no longer in the list."))?;
+        self.to_channel_dtos(std::slice::from_ref(&row))
+            .await?
+            .pop()
+            .ok_or_else(|| AppError::local("That channel is no longer in the list."))
+    }
+
+    /// Channel totals under the user's catalog filters (adult/radio/DRM hiding).
+    pub async fn get_counts(&self) -> Result<CountsDto> {
+        let f = self.filter().await?;
+        let all = catalog::count_channels(&self.store, &f).await?;
+        let favourites = catalog::count_channels(
+            &self.store,
+            &ChannelFilter {
+                favourites_only: true,
+                ..f
+            },
+        )
+        .await?;
+        Ok(CountsDto { all, favourites })
+    }
+
+    /// Programmes of one channel overlapping `[start, end)`.
+    pub async fn get_programmes(
+        &self,
+        channel_id: i64,
+        start: i64,
+        end: i64,
+    ) -> Result<Vec<ProgrammeDto>> {
+        let rows = epg::window(
+            &self.store,
+            &[channel_id],
+            crate::source::TimeWindow {
+                start_utc: start,
+                end_utc: end,
+            },
+        )
+        .await?;
+        Ok(rows.iter().map(Into::into).collect())
+    }
+
+    async fn programme_dto(&self, channel_id: i64, start_utc: i64) -> Result<Option<ProgrammeDto>> {
+        let row: Option<crate::store::ProgrammeRow> = sqlx::query_as(
+            "SELECT channel_id, start_utc, end_utc, ext_id, title, subtitle, description, season, episode, flags
+             FROM programme WHERE channel_id = ? AND start_utc = ?",
+        )
+        .bind(channel_id)
+        .bind(start_utc)
+        .fetch_optional(self.store.pool())
+        .await?;
+        Ok(row.as_ref().map(Into::into))
+    }
+
+    /// Home screen: continue watching, favourites, what is on now per favourite, recents. Every
+    /// item carries full channel/programme DTOs (logos included).
     pub async fn get_home(&self) -> Result<HomeDto> {
         let f = self.filter().await?;
         let fav_rows = catalog::list_channels(
@@ -955,54 +1057,43 @@ impl Service {
         let recents = self.to_channel_dtos(&recent_rows).await?;
 
         let now = now_utc();
-        let mut ids: Vec<i64> = favourites.iter().chain(&recents).map(|c| c.id).collect();
-        ids.dedup();
-        let mut seen = HashSet::new();
-        ids.retain(|i| seen.insert(*i));
-        let nn = epg::now_next_many(&self.store, &ids, now).await?;
+        let fav_ids: Vec<i64> = favourites.iter().map(|c| c.id).collect();
+        let nn = epg::now_next_many(&self.store, &fav_ids, now).await?;
         let on_now = favourites
             .iter()
-            .chain(&recents)
-            .filter(|c| seen.remove(&c.id)) // first occurrence only
-            .filter_map(|c| {
-                let p = nn.get(&c.id)?.now.as_ref()?;
-                Some(OnNowDto {
-                    channel: c.clone(),
-                    programme: p.into(),
-                })
+            .map(|c| OnNowItemDto {
+                channel: c.clone(),
+                now: nn.get(&c.id).and_then(|n| n.now.as_ref()).map(Into::into),
             })
             .collect();
 
         let mut continue_watching = Vec::new();
-        for r in self.store.continue_watching(20).await? {
-            let mut item = ContinueWatchingDto {
-                kind: r.kind.clone(),
-                item_key: r.item_key.clone(),
-                source_id: r.source_id,
-                position_ms: r.position_ms,
-                duration_ms: r.duration_ms,
-                updated_at: r.updated_at,
-                channel_id: None,
-                programme_id: None,
-                title: None,
-            };
-            if r.kind == "catchup"
-                && let Some((ext, start)) = r.item_key.split_once(':')
-                && let Ok(start) = start.parse::<i64>()
-                && let Some(ch) = self.store.channel_by_ext(r.source_id, ext).await?
-            {
-                item.channel_id = Some(ch.id);
-                item.programme_id = Some(format!("{}:{start}", ch.id));
-                item.title = sqlx::query_scalar(
-                    "SELECT title FROM programme WHERE channel_id = ? AND start_utc = ?",
-                )
-                .bind(ch.id)
-                .bind(start)
-                .fetch_optional(self.store.pool())
+        // The channel last watched live comes first.
+        if let Some(c) = recents.first() {
+            let p = epg::now_next(&self.store, c.id, now)
                 .await?
-                .flatten();
+                .now
+                .as_ref()
+                .map(ProgrammeDto::from);
+            continue_watching.push(ContinueItemDto {
+                kind: "live".into(),
+                id: format!("live:{}", c.id),
+                channel: Some(c.clone()),
+                programme: p.clone(),
+                title: p
+                    .as_ref()
+                    .and_then(|p| p.title.clone())
+                    .unwrap_or_else(|| c.name.clone()),
+                subtitle: Some(c.name.clone()),
+                art: c.logo.clone(),
+                progress: None,
+                remaining_secs: None,
+            });
+        }
+        for r in self.store.continue_watching(20).await? {
+            if let Some(item) = self.continue_item(&f, &r).await? {
+                continue_watching.push(item);
             }
-            continue_watching.push(item);
         }
         Ok(HomeDto {
             continue_watching,
@@ -1010,6 +1101,63 @@ impl Service {
             on_now,
             recents,
         })
+    }
+
+    async fn continue_item_vod(
+        &self,
+        _r: &crate::store::ResumeRow,
+        _progress: Option<f64>,
+        _remaining: Option<i64>,
+    ) -> Result<Option<ContinueItemDto>> {
+        Ok(None)
+    }
+
+    async fn continue_item(
+        &self,
+        f: &ChannelFilter,
+        r: &crate::store::ResumeRow,
+    ) -> Result<Option<ContinueItemDto>> {
+        let progress = r
+            .duration_ms
+            .filter(|d| *d > 0)
+            .map(|d| (r.position_ms as f64 / d as f64).clamp(0.0, 1.0));
+        let remaining = r
+            .duration_ms
+            .filter(|d| *d > 0)
+            .map(|d| ((d - r.position_ms).max(0)) / 1000);
+        match r.kind.as_str() {
+            "catchup" => {
+                let Some((ext, start)) = r.item_key.split_once(':') else {
+                    return Ok(None);
+                };
+                let Ok(start) = start.parse::<i64>() else {
+                    return Ok(None);
+                };
+                let Some(ch) = self.store.channel_by_ext(r.source_id, ext).await? else {
+                    return Ok(None);
+                };
+                let rows = catalog::channels_by_ids(&self.store, f, &[ch.id]).await?;
+                let Some(cd) = self.to_channel_dtos(&rows).await?.pop() else {
+                    return Ok(None);
+                };
+                let prog = self.programme_dto(ch.id, start).await?;
+                Ok(Some(ContinueItemDto {
+                    kind: "catchup".into(),
+                    id: format!("catchup:{}:{start}", ch.id),
+                    title: prog
+                        .as_ref()
+                        .and_then(|p| p.title.clone())
+                        .unwrap_or_else(|| cd.name.clone()),
+                    subtitle: Some(cd.name.clone()),
+                    art: cd.logo.clone(),
+                    channel: Some(cd),
+                    programme: prog,
+                    progress,
+                    remaining_secs: remaining,
+                }))
+            }
+            _ => self.continue_item_vod(r, progress, remaining).await,
+        }
     }
 
     pub async fn set_favourite(&self, channel_id: i64, favourite: bool) -> Result<()> {
@@ -1044,15 +1192,24 @@ impl Service {
     /// Live play plan (from SQLite; redirect/unknown channels make the one allowed play-time
     /// request). Records a recent. The caller hands the plan to the player.
     pub async fn play_channel(&self, channel_id: i64) -> Result<PlayPlan> {
+        let plan = self.live_plan(channel_id).await?;
+        if let Ok(mut g) = self.current_stream.lock() {
+            g.insert(channel_id, 0);
+        }
+        self.store.touch_recent(channel_id, now_utc()).await?;
+        Ok(plan)
+    }
+
+    async fn live_plan(&self, channel_id: i64) -> Result<PlayPlan> {
         let ch = self
             .store
             .channel(channel_id)
             .await?
             .ok_or_else(|| AppError::local("That channel is no longer in the list."))?;
         let src = self.store.source(ch.source_id).await?;
-        let plan = if SourceKind::parse(&src.kind) == Some(SourceKind::Dispatcharr) {
+        if SourceKind::parse(&src.kind) == Some(SourceKind::Dispatcharr) {
             let plan = catalog::resolve_play_plan(&self.store, self, channel_id).await?;
-            plan.resolve_at_play(src.tls_insecure).await?
+            plan.resolve_at_play(src.tls_insecure).await
         } else {
             if ch.is_drm {
                 return Err(AppError::media("DRM — not supported"));
@@ -1060,10 +1217,120 @@ impl Service {
             self.client(ch.source_id)
                 .await?
                 .play(ChannelKey::from_row(&ch))
-                .await?
-        };
-        self.store.touch_recent(channel_id, now_utc()).await?;
-        Ok(plan)
+                .await
+        }
+    }
+
+    /// The channel's provider streams in failover order (Dispatcharr: names from the server, no
+    /// provider URLs). Other sources report a single stream.
+    pub async fn channel_streams(&self, channel_id: i64) -> Result<StreamListDto> {
+        let ch = self
+            .store
+            .channel(channel_id)
+            .await?
+            .ok_or_else(|| AppError::local("That channel is no longer in the list."))?;
+        let client = self.client(ch.source_id).await?;
+        let mut streams: Vec<AltStreamDto> = client
+            .channel_stream_names(&ch.ext_id)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(index, (stream_id, name))| AltStreamDto {
+                index,
+                stream_id,
+                name,
+            })
+            .collect();
+        if streams.is_empty() {
+            // Fall back to the failover ids stored at sync (names unknown), or a single entry.
+            let ids = self.store.channel_stream_ids(channel_id).await?;
+            streams = if ids.is_empty() {
+                vec![AltStreamDto {
+                    index: 0,
+                    stream_id: ch.ext_id.clone(),
+                    name: ch.name.clone(),
+                }]
+            } else {
+                ids.into_iter()
+                    .enumerate()
+                    .map(|(index, stream_id)| AltStreamDto {
+                        index,
+                        name: format!("Stream {}", index + 1),
+                        stream_id,
+                    })
+                    .collect()
+            };
+        }
+        let cur = self
+            .current_stream
+            .lock()
+            .ok()
+            .and_then(|g| g.get(&channel_id).copied());
+        Ok(StreamListDto {
+            channel_id,
+            source_index: cur.map(|c| c.min(streams.len().saturating_sub(1)) + 1),
+            source_count: streams.len(),
+            streams,
+        })
+    }
+
+    /// `(1-based index in use, count)` for PlayerState, from local data only.
+    pub async fn source_position(&self, channel_id: i64) -> Result<(usize, usize)> {
+        let count = self
+            .store
+            .channel_stream_ids(channel_id)
+            .await?
+            .len()
+            .max(1);
+        let cur = self
+            .current_stream
+            .lock()
+            .ok()
+            .and_then(|g| g.get(&channel_id).copied())
+            .unwrap_or(0);
+        Ok((cur.min(count - 1) + 1, count))
+    }
+
+    /// Next step after a playback failure (PLAN §4.5). `attempt` is the number of retries already
+    /// made, starting at 1 for the first retry:
+    /// 1. reconnect the same URL (no server change);
+    /// 2. and 3. ask the server for the channel's next provider stream (Dispatcharr), then a fresh
+    ///    plan for the player;
+    ///
+    /// Beyond that a plain sentence: never loop forever.
+    pub async fn failover_next(&self, channel_id: i64, attempt: u32) -> Result<FailoverStep> {
+        if attempt == 0 || attempt > 3 {
+            return Err(AppError::stream(
+                "No working stream was found for this channel.",
+            ));
+        }
+        let ch = self
+            .store
+            .channel(channel_id)
+            .await?
+            .ok_or_else(|| AppError::local("That channel is no longer in the list."))?;
+        let (_, count) = self.source_position(channel_id).await?;
+        let mut switched = false;
+        if attempt >= 2 && count > 1 {
+            let client = self.client(ch.source_id).await?;
+            switched = client
+                .next_stream(&ChannelKey::from_row(&ch))
+                .await
+                .unwrap_or(false);
+            if switched && let Ok(mut g) = self.current_stream.lock() {
+                let e = g.entry(channel_id).or_insert(0);
+                *e = (*e + 1) % count;
+            }
+        }
+        let plan = self.live_plan(channel_id).await?;
+        let (source_index, source_count) = self.source_position(channel_id).await?;
+        Ok(FailoverStep {
+            plan,
+            source_index,
+            source_count,
+            switched,
+        })
     }
 
     /// Archive playback of a programme (`ProgrammeDto::id`). Times come from the programme row.

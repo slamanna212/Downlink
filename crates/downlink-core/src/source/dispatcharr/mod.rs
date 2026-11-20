@@ -802,6 +802,42 @@ impl DispatcharrClient {
         Ok((hits, has_next))
     }
 
+    /// `POST /proxy/ts/next_stream/{channel_uuid}`: switch an *active* channel to its next provider
+    /// stream. A control endpoint, not a stream endpoint. `Ok(false)` when the channel is not
+    /// active (404): nothing to switch.
+    pub async fn next_stream(&self, channel_uuid: &str) -> Result<bool> {
+        let r = self
+            .call(
+                Method::POST,
+                &format!("proxy/ts/next_stream/{channel_uuid}"),
+                &[],
+                Some(&json!({})),
+            )
+            .await?;
+        if r.status == StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        r.ok("the next stream")?;
+        Ok(true)
+    }
+
+    /// `POST /proxy/ts/change_stream/{channel_uuid}` with `{"stream_id": id}`.
+    pub async fn change_stream(&self, channel_uuid: &str, stream_id: &str) -> Result<bool> {
+        let r = self
+            .call(
+                Method::POST,
+                &format!("proxy/ts/change_stream/{channel_uuid}"),
+                &[],
+                Some(&json!({ "stream_id": stream_id })),
+            )
+            .await?;
+        if r.status == StatusCode::NOT_FOUND {
+            return Ok(false);
+        }
+        r.ok("that stream")?;
+        Ok(true)
+    }
+
     // ---- images -----------------------------------------------------------------------------
 
     pub async fn logo(&self, logo_id: &str) -> Result<Logo> {
@@ -1137,6 +1173,25 @@ impl Source for DispatcharrClient {
 
     async fn catchup_position(&self, s: &SessionId, position_secs: u64) -> Result<()> {
         DispatcharrClient::catchup_position(self, s, position_secs).await
+    }
+
+    async fn next_stream(&self, ch: &ChannelKey) -> Result<bool> {
+        match ch.uuid.as_deref() {
+            Some(u) => DispatcharrClient::next_stream(self, u).await,
+            None => Ok(false),
+        }
+    }
+
+    async fn channel_stream_names(&self, ch_ext_id: &str) -> Result<Vec<(String, String)>> {
+        let id: i64 = ch_ext_id
+            .parse()
+            .map_err(|_| AppError::local("Not a channel id."))?;
+        Ok(self
+            .channel_streams(id)
+            .await?
+            .into_iter()
+            .map(|s| (s.id, s.name))
+            .collect())
     }
 
     async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {

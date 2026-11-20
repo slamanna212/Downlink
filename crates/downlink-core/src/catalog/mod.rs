@@ -265,13 +265,15 @@ pub async fn channel_by_number(
         .await?)
 }
 
-/// Total visible channel count for a filter (ignores `search`).
+/// Total visible channel count for a filter (ignores `search`; honours `favourites_only`).
 pub async fn count_channels(store: &Store, f: &ChannelFilter) -> Result<i64> {
     let vis = visibility_sql(f);
     Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-        "SELECT count(*) FROM channel c WHERE {vis} AND (?1 IS NULL OR c.source_id = ?1)"
+        "SELECT count(*) FROM channel c WHERE {vis} AND (?1 IS NULL OR c.source_id = ?1)
+           AND (?2 = 0 OR c.id IN (SELECT channel_id FROM favourite WHERE deleted = 0))"
     )))
     .bind(f.source_id)
+    .bind(f.favourites_only)
     .fetch_one(store.pool())
     .await?)
 }

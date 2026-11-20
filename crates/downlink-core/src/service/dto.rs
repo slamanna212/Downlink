@@ -10,6 +10,8 @@ use crate::store::{ChannelRow, ProgrammeRow, SourceRow};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SourceStatus {
+    /// Not probed yet since launch.
+    Connecting,
     Connected,
     Syncing,
     Offline,
@@ -30,10 +32,12 @@ pub struct SourceDto {
     pub status: SourceStatus,
     pub server_version: Option<String>,
     pub last_sync_at: Option<i64>,
+    /// Longest catch-up window across the source's channels, in days (0 = none).
+    pub archive_days: i64,
 }
 
 impl SourceDto {
-    pub fn from_row(r: &SourceRow, status: SourceStatus) -> Self {
+    pub fn from_row(r: &SourceRow, status: SourceStatus, archive_days: i64) -> Self {
         let host = r
             .base_url
             .as_deref()
@@ -54,6 +58,7 @@ impl SourceDto {
             status,
             server_version: r.server_version.clone(),
             last_sync_at: r.last_sync_at,
+            archive_days,
         }
     }
 }
@@ -280,40 +285,78 @@ pub struct GuideDto {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProgrammeHitDto {
+    pub programme: ProgrammeDto,
+    pub channel: ChannelDto,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchDto {
     pub channels: Vec<ChannelDto>,
-    pub programmes: Vec<ProgrammeDto>,
+    pub programmes: Vec<ProgrammeHitDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ContinueWatchingDto {
+pub struct CountsDto {
+    pub all: i64,
+    pub favourites: i64,
+}
+
+/// One "continue watching" tile: `kind` is live | catchup | movie | episode | recording.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContinueItemDto {
     pub kind: String,
-    pub item_key: String,
-    pub source_id: i64,
-    pub position_ms: i64,
-    pub duration_ms: Option<i64>,
-    pub updated_at: i64,
-    /// Set for catch-up items: the channel and the programme (`ProgrammeDto::id`) to resume.
-    pub channel_id: Option<i64>,
-    pub programme_id: Option<String>,
-    pub title: Option<String>,
+    /// `live:<channelId>`, `catchup:<channelId>:<startUtc>`, `movie:<id>`, `episode:<id>`, `recording:<id>`.
+    pub id: String,
+    pub channel: Option<ChannelDto>,
+    pub programme: Option<ProgrammeDto>,
+    pub title: String,
+    pub subtitle: Option<String>,
+    /// `dlimg://` artwork or null.
+    pub art: Option<String>,
+    /// 0..1, null for live.
+    pub progress: Option<f64>,
+    pub remaining_secs: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OnNowDto {
+pub struct OnNowItemDto {
     pub channel: ChannelDto,
-    pub programme: ProgrammeDto,
+    pub now: Option<ProgrammeDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HomeDto {
-    pub continue_watching: Vec<ContinueWatchingDto>,
+    pub continue_watching: Vec<ContinueItemDto>,
     pub favourites: Vec<ChannelDto>,
-    pub on_now: Vec<OnNowDto>,
+    /// Current programme per favourite.
+    pub on_now: Vec<OnNowItemDto>,
     pub recents: Vec<ChannelDto>,
+}
+
+/// One entry of a channel's failover list.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AltStreamDto {
+    /// 0-based failover position.
+    pub index: usize,
+    pub stream_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamListDto {
+    pub channel_id: i64,
+    /// 1-based index of the stream believed to be in use, when known.
+    pub source_index: Option<usize>,
+    pub source_count: usize,
+    pub streams: Vec<AltStreamDto>,
 }
 
 /// The parts of `Diagnostics` core can fill; the desktop layer adds `playerState`,

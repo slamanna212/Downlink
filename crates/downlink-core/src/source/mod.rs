@@ -347,6 +347,16 @@ pub trait Source: Send + Sync {
     async fn guide_feed(&self) -> Result<Option<GuideFeed>> {
         Ok(None)
     }
+    /// Ask the server to move an active channel to its next provider stream (failover). `false`
+    /// when the source has no such notion or the channel is not active.
+    async fn next_stream(&self, _ch: &ChannelKey) -> Result<bool> {
+        Ok(false)
+    }
+    /// `(stream id, name)` of a channel's provider streams in failover order (names only; provider
+    /// URLs are never returned).
+    async fn channel_stream_names(&self, _ch_ext_id: &str) -> Result<Vec<(String, String)>> {
+        Ok(Vec::new())
+    }
     /// Authenticated image fetch (same-origin only).
     async fn fetch_image(&self, _url: &str) -> Result<crate::images::RawImage> {
         Err(AppError::local("This source has no images."))
