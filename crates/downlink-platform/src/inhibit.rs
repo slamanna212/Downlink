@@ -42,8 +42,16 @@ mod imp {
     }
 
     const TARGETS: [(&str, &str, &str); 2] = [
-        ("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver", "org.freedesktop.ScreenSaver"),
-        ("org.gnome.SessionManager", "/org/gnome/SessionManager", "org.gnome.SessionManager"),
+        (
+            "org.freedesktop.ScreenSaver",
+            "/org/freedesktop/ScreenSaver",
+            "org.freedesktop.ScreenSaver",
+        ),
+        (
+            "org.gnome.SessionManager",
+            "/org/gnome/SessionManager",
+            "org.gnome.SessionManager",
+        ),
     ];
 
     pub fn set(s: &mut State, active: bool) {
@@ -57,10 +65,22 @@ mod imp {
         if active {
             for (i, (dest, path, iface)) in TARGETS.iter().enumerate() {
                 let reply = if i == 0 {
-                    conn.call_method(Some(*dest), *path, Some(*iface), "Inhibit", &("Downlink", "Playing video"))
+                    conn.call_method(
+                        Some(*dest),
+                        *path,
+                        Some(*iface),
+                        "Inhibit",
+                        &("Downlink", "Playing video"),
+                    )
                 } else {
                     // app_id, toplevel xid, reason, flags (8 = inhibit idle)
-                    conn.call_method(Some(*dest), *path, Some(*iface), "Inhibit", &("downlink", 0u32, "Playing video", 8u32))
+                    conn.call_method(
+                        Some(*dest),
+                        *path,
+                        Some(*iface),
+                        "Inhibit",
+                        &("downlink", 0u32, "Playing video", 8u32),
+                    )
                 };
                 if let Ok(m) = reply
                     && let Ok(cookie) = m.body().deserialize::<u32>()
@@ -100,7 +120,11 @@ mod imp {
             let (tx, rx) = channel::<bool>();
             std::thread::spawn(move || {
                 while let Ok(on) = rx.recv() {
-                    let flags = if on { ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED } else { ES_CONTINUOUS };
+                    let flags = if on {
+                        ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED
+                    } else {
+                        ES_CONTINUOUS
+                    };
                     // SAFETY: plain Win32 call with documented flag combinations.
                     unsafe { SetThreadExecutionState(flags) };
                 }

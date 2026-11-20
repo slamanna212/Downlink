@@ -5,7 +5,9 @@ use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use souvlaki::{MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig};
+use souvlaki::{
+    MediaControlEvent, MediaControls, MediaMetadata, MediaPlayback, MediaPosition, PlatformConfig,
+};
 
 use crate::PlatformError;
 
@@ -104,8 +106,14 @@ mod tests {
 
     #[test]
     fn maps_transport_events() {
-        assert_eq!(map_event(&MediaControlEvent::Toggle), Some(MediaCommand::Toggle));
-        assert_eq!(map_event(&MediaControlEvent::Raise), Some(MediaCommand::Raise));
+        assert_eq!(
+            map_event(&MediaControlEvent::Toggle),
+            Some(MediaCommand::Toggle)
+        );
+        assert_eq!(
+            map_event(&MediaControlEvent::Raise),
+            Some(MediaCommand::Raise)
+        );
         assert_eq!(map_event(&MediaControlEvent::SetVolume(0.5)), None);
     }
 }
