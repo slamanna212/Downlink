@@ -239,14 +239,6 @@ impl Playback {
                 return Err(e);
             }
         };
-        let programme = self
-            .service
-            .get_now_next(&[channel_id])
-            .await
-            .ok()
-            .and_then(|v| v.into_iter().next())
-            .and_then(|nn| nn.now);
-        lock(&self.active).info.programme = programme;
         let source_id = self
             .service
             .store()
@@ -263,6 +255,15 @@ impl Playback {
             .play(self.to_request(&plan, PlayMode::Live, failover))
             .map_err(player_err)
             .inspect_err(|e| self.fail(e))?;
+        // Zap path: nothing above awaits the programme lookup; fill it in after loadfile went out.
+        let programme = self
+            .service
+            .get_now_next(&[channel_id])
+            .await
+            .ok()
+            .and_then(|v| v.into_iter().next())
+            .and_then(|nn| nn.now);
+        lock(&self.active).info.programme = programme;
         Ok(())
     }
 

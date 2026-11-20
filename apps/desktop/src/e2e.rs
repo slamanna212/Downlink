@@ -33,10 +33,10 @@ pub fn spawn(app: AppHandle, mode: String) {
         let db = std::env::var("DOWNLINK_DATA_DIR")
             .map(|d| format!("{d}/downlink.sqlite"))
             .unwrap_or_default();
-        let r = if mode == "offline" {
-            offline(&st, &db).await
-        } else {
-            full(&st, &db).await
+        let r = match mode.as_str() {
+            "offline" => offline(&st, &db).await,
+            "zap" => zap(&st).await,
+            _ => full(&st, &db).await,
         };
         if let Err(e) = r {
             say(json!({ "step": "error", "message": e }));
@@ -229,5 +229,61 @@ async fn offline(st: &AppState, _db: &str) -> Result<(), String> {
             json!({ "step": "play_while_offline", "error": r.err().map(|e| json!({ "code": e.code, "message": e.message })), "state": pb.snapshot().state }),
         );
     }
+    Ok(())
+}
+
+fn percentile(sorted: &[u64], p: f64) -> Option<u64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    sorted
+        .get(((sorted.len() as f64 - 1.0) * p).round() as usize)
+        .copied()
+}
+
+/// `DOWNLINK_E2E=zap`: N zaps through `Playback::play_channel` between the channels named in
+/// `DOWNLINK_E2E_ZAP` (comma separated, default two), `DOWNLINK_E2E_ZAP_COUNT` zaps (default 20).
+/// Measures the command phase (call -> `loadfile` issued) and first frame separately.
+async fn zap(st: &AppState) -> Result<(), String> {
+    let names =
+        std::env::var("DOWNLINK_E2E_ZAP").unwrap_or_else(|_| "Channel One,Test News".into());
+    let count: usize = std::env::var("DOWNLINK_E2E_ZAP_COUNT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20);
+    let pb = st.playback().map_err(|e| e.message)?;
+    let mut ids = Vec::new();
+    for n in names.split(',') {
+        ids.push((n.to_owned(), channel_id(st, n.trim()).await?));
+    }
+    let (mut cmd_ms, mut first_ms, mut failed) = (Vec::new(), Vec::new(), 0);
+    for i in 0..count {
+        let (name, id) = &ids[i % ids.len()];
+        let t0 = Instant::now();
+        pb.play_channel(*id).await.map_err(|e| e.message)?;
+        let cmd = t0.elapsed().as_millis() as u64;
+        let snap = pb.snapshot_wait(
+            |s| matches!(s, SessionState::Playing | SessionState::Failed),
+            Duration::from_secs(20),
+        );
+        match (snap.state, snap.first_frame_ms) {
+            (Some(SessionState::Playing), Some(ff)) => {
+                cmd_ms.push(cmd);
+                first_ms.push(ff);
+            }
+            _ => failed += 1,
+        }
+        say(
+            json!({ "step": "zap", "i": i, "channel": name, "commandMs": cmd, "firstFrameMs": snap.first_frame_ms, "state": snap.state }),
+        );
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
+    cmd_ms.sort_unstable();
+    first_ms.sort_unstable();
+    say(json!({
+        "step": "zap_summary", "zaps": count, "failed": failed,
+        "commandMs": { "p50": percentile(&cmd_ms, 0.5), "p95": percentile(&cmd_ms, 0.95) },
+        "firstFrameMs": { "p50": percentile(&first_ms, 0.5), "p95": percentile(&first_ms, 0.95) },
+    }));
     Ok(())
 }
