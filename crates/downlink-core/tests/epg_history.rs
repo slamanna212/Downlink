@@ -25,6 +25,8 @@ fn fx(name: &str) -> Value {
 /// to the requested `start`/`end`. The set of tvg ids comes from the captured fixture.
 struct Grid {
     tvg_ids: Vec<String>,
+    /// `(id prefix, tvg_id)`: dummy-EPG rows, keyed by channel uuid like the real server.
+    dummies: Vec<(String, String)>,
 }
 
 impl Respond for Grid {
@@ -46,6 +48,13 @@ impl Respond for Grid {
                     "end_time": chrono::DateTime::from_timestamp(t + 3600, 0).unwrap().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
                 }));
             }
+            for (prefix, key) in &self.dummies {
+                rows.push(json!({
+                    "id": format!("{prefix}-{t}"), "tvg_id": key, "title": "Placeholder",
+                    "start_time": chrono::DateTime::from_timestamp(t, 0).unwrap().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    "end_time": chrono::DateTime::from_timestamp(t + 3600, 0).unwrap().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                }));
+            }
             t += 3600;
         }
         ResponseTemplate::new(200).set_body_json(json!({ "data": rows }))
@@ -53,6 +62,14 @@ impl Respond for Grid {
 }
 
 async fn server(channels: Value, epg_data: Option<Value>) -> MockServer {
+    server_with(channels, epg_data, vec![]).await
+}
+
+async fn server_with(
+    channels: Value,
+    epg_data: Option<Value>,
+    dummies: Vec<(String, String)>,
+) -> MockServer {
     let s = MockServer::start().await;
     let get = |p: &'static str, body: Value| {
         let s = &s;
@@ -102,7 +119,10 @@ async fn server(channels: Value, epg_data: Option<Value>) -> MockServer {
         .collect();
     Mock::given(method("GET"))
         .and(path("/api/epg/grid/"))
-        .respond_with(Grid { tvg_ids: grid_tvgs })
+        .respond_with(Grid {
+            tvg_ids: grid_tvgs,
+            dummies,
+        })
         .mount(&s)
         .await;
     s
@@ -247,4 +267,77 @@ async fn channels_with_an_epg_assignment_but_no_tvg_id_join_through_the_epg_data
             .await
             .unwrap();
     assert_eq!(tvg.as_deref(), Some("channel-one.test"));
+}
+
+async fn now_rows(svc: &Service, sid: i64, name: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM programme p JOIN channel c ON c.id = p.channel_id
+         WHERE c.name = ?3 AND c.source_id = ?2 AND p.start_utc <= ?1 AND p.end_utc > ?1",
+    )
+    .bind(downlink_core::sync::now_utc())
+    .bind(sid)
+    .bind(name)
+    .fetch_one(svc.store().pool())
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn the_epg_assignment_wins_over_the_channels_own_tvg_id() {
+    let mut channels = fx("channels_page.json");
+    // XC News keeps its own tvg_id (xc-news.test, which the grid never sends) but is assigned to
+    // EPG data row 12, whose tvg_id is channel-one.test: the grid tags rows with the EPG's id.
+    for c in channels["results"].as_array_mut().unwrap() {
+        if c["name"] == "XC News" {
+            c["epg_data_id"] = json!(12);
+            c["effective_epg_data_id"] = json!(12);
+        }
+    }
+    let epg_data = json!([{"id": 12, "tvg_id": "channel-one.test", "name": "Channel One", "icon_url": null, "epg_source": 1}]);
+    let server = server(channels, Some(epg_data)).await;
+    let (svc, sid, _d) = service(&server).await;
+    assert_eq!(now_rows(&svc, sid, "XC News").await, 1);
+    assert_eq!(
+        now_rows(&svc, sid, "Channel One").await,
+        1,
+        "unassigned-in-list channels keep their own tvg_id"
+    );
+    let tvg: Option<String> =
+        sqlx::query_scalar("SELECT tvg_id FROM channel WHERE name = 'XC News'")
+            .fetch_one(svc.store().pool())
+            .await
+            .unwrap();
+    assert_eq!(tvg.as_deref(), Some("channel-one.test"));
+    let epg_calls = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path() == "/api/epg/epgdata/")
+        .count();
+    assert!(
+        epg_calls <= 1,
+        "the EPG data list is reused, got {epg_calls} fetches"
+    );
+}
+
+#[tokio::test]
+async fn custom_dummy_rows_join_on_uuid_and_standard_placeholders_are_dropped() {
+    let channels = fx("channels_page.json");
+    let dummies = vec![
+        // Custom dummy EPG source assigned to XC Sports: real titles, keyed by channel uuid.
+        (
+            "dummy-custom-13".to_owned(),
+            "87ce3574-7ca3-435a-9041-8367d0ce55df".to_owned(),
+        ),
+        // Standard placeholder for XC News (no EPG at all).
+        (
+            "dummy-standard-12".to_owned(),
+            "ad4b6481-646d-4cfe-ac11-de1bfe747822".to_owned(),
+        ),
+    ];
+    let server = server_with(channels, None, dummies).await;
+    let (svc, sid, _d) = service(&server).await;
+    assert_eq!(now_rows(&svc, sid, "XC Sports").await, 1);
+    assert_eq!(now_rows(&svc, sid, "XC News").await, 0);
 }

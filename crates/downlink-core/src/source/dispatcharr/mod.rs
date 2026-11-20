@@ -147,7 +147,15 @@ pub struct DispatcharrClient {
     settings: Mutex<Option<ServerSettings>>,
     has_vod: std::sync::atomic::AtomicBool,
     has_dvr: std::sync::atomic::AtomicBool,
+    /// `epg data id -> tvg_id`, reused across the channel pages of one sync (see [`EPG_MAP_TTL`]).
+    epg_map: tokio::sync::Mutex<Option<(std::time::Instant, EpgMap)>>,
 }
+
+/// `epg data id -> tvg_id`.
+type EpgMap = std::sync::Arc<HashMap<i64, String>>;
+
+/// How long one fetched EPG data list serves channel pages before it is fetched again.
+const EPG_MAP_TTL: Duration = Duration::from_secs(120);
 
 impl std::fmt::Debug for DispatcharrClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -231,6 +239,7 @@ impl DispatcharrClient {
             settings: Mutex::new(None),
             has_vod: std::sync::atomic::AtomicBool::new(false),
             has_dvr: std::sync::atomic::AtomicBool::new(false),
+            epg_map: tokio::sync::Mutex::new(None),
         })
     }
 
@@ -618,27 +627,20 @@ impl DispatcharrClient {
             )
             .await?;
         let dtos = Self::parse_items::<ChannelDto>(items, "channels");
-        // Channels with an EPG assignment but no `tvg_id` of their own still need a guide join key.
-        let needs_epg = dtos.iter().any(|d| {
-            d.epg_id().is_some()
-                && d.effective_tvg_id
-                    .as_deref()
-                    .or(d.tvg_id.as_deref())
-                    .is_none_or(str::is_empty)
-        });
-        let epg_map = if needs_epg {
+        // The grid tags programmes with the *EPG row's* tvg_id, which can differ from the
+        // channel's own (Dispatcharr matches EPG by name, or the user picks one by hand). The
+        // assignment wins; the channel's tvg_id is only the join key when it has none.
+        let epg_map = if dtos.iter().any(|d| d.epg_id().is_some()) {
             self.epg_data_map().await
         } else {
-            HashMap::new()
+            std::sync::Arc::default()
         };
         let channels: Vec<SourceChannel> = dtos
             .into_iter()
             .map(|d| {
                 let epg = d.epg_id();
                 let mut c = d.into_source();
-                if c.tvg_id.as_deref().is_none_or(str::is_empty)
-                    && let Some(t) = epg.and_then(|e| epg_map.get(&e))
-                {
+                if let Some(t) = epg.and_then(|e| epg_map.get(&e)) {
                     c.tvg_id = Some(t.clone());
                 }
                 c
@@ -651,9 +653,16 @@ impl DispatcharrClient {
         })
     }
 
-    /// `epg data id -> tvg_id` (tolerant: an unreadable list just means no fallback joins).
-    async fn epg_data_map(&self) -> HashMap<i64, String> {
-        match self
+    /// `epg data id -> tvg_id` (tolerant: an unreadable list just means no EPG joins). Cached
+    /// for [`EPG_MAP_TTL`] so a multi-page channel sync fetches the list once.
+    async fn epg_data_map(&self) -> EpgMap {
+        let mut cache = self.epg_map.lock().await;
+        if let Some((at, m)) = cache.as_ref()
+            && at.elapsed() < EPG_MAP_TTL
+        {
+            return m.clone();
+        }
+        let m: HashMap<i64, String> = match self
             .fetch_all("api/epg/epgdata/", &[], "its guide channels")
             .await
         {
@@ -663,9 +672,13 @@ impl DispatcharrClient {
                 .collect(),
             Err(e) => {
                 tracing::debug!(error = %e, "epg data list unavailable");
-                HashMap::new()
+                // Not cached: the next page retries.
+                return std::sync::Arc::default();
             }
-        }
+        };
+        let m = std::sync::Arc::new(m);
+        *cache = Some((std::time::Instant::now(), m.clone()));
+        m
     }
 
     pub async fn group_list(&self) -> Result<Vec<SourceGroup>> {
@@ -753,6 +766,10 @@ impl DispatcharrClient {
         };
         Ok(Self::parse_items::<ProgramDto>(items, "programmes")
             .into_iter()
+            // Standard dummy blocks are 4 h placeholders titled with the channel name, generated
+            // for channels with no EPG at all; the guide's own empty row says that better.
+            // Custom dummy-EPG rows carry real titles and stay (they key on the channel uuid).
+            .filter(|p| !p.id.starts_with("dummy-standard-"))
             .filter_map(ProgramDto::into_programme)
             .collect())
     }

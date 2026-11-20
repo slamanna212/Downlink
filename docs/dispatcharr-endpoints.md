@@ -21,7 +21,7 @@ Auth for every call: `X-API-Key: <key>` (401 with a missing or wrong key). JWT: 
 | 6 | `POST …/{id}/position/` `{…}` | Body is `{"position_secs": <number>}`. Returns 404 `{"error":"No active playback for this session"}` until the player has made its first GET on `playback_url`; it cannot be called right after create. |
 | 10 | Recording state | `custom_properties.status` is absent for scheduled one-off/series recordings; extend takes `extra_minutes`; recurring rules need both dates and use 0 = Monday (see DVR). |
 | 7 | Programme ids are strings | Observed integers for XMLTV EPG in grid, current-programs and search. Keep the string-tolerant decode (dummy EPG ids may still be strings). |
-| 8 | Grid associates programmes to channels | `/api/epg/grid/` rows carry **only `tvg_id`** (no channel id/uuid). Several channels sharing one `tvg_id` receive the same rows; join on `tvg_id` client-side. |
+| 8 | Grid associates programmes to channels | `/api/epg/grid/` rows carry **only `tvg_id`** (no channel id/uuid). Several channels sharing one `tvg_id` receive the same rows; join on `tvg_id` client-side. The `tvg_id` is the **assigned EPG row's** (`epgdata.tvg_id` via `effective_epg_data_id`), not the channel's own, so the client keys channels by their assignment. Dummy-EPG rows carry the channel **uuid** as `tvg_id` with ids `dummy-custom-…` (real titles, kept) or `dummy-standard-…` (channel-name placeholders for channels with no EPG, dropped). |
 | 9 | Catch-up `playback_url` | Relative path `/proxy/catchup/<channel_uuid>?session_id=<id>`; prefix the server base URL. That path is a stream endpoint (rule 4): only request it on an actual play. |
 
 ## Connect sequence

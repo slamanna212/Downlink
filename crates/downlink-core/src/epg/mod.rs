@@ -121,7 +121,8 @@ pub struct GuideCounts {
 }
 
 /// Fetch a window and replace it in SQLite. The fetch happens first, so a failed request leaves
-/// the cache untouched. Rows are joined to channels on `tvg_id` (several channels may share one).
+/// the cache untouched. Rows are joined to channels on `tvg_id` (several channels may share one),
+/// falling back to the channel uuid.
 pub async fn sync_guide(
     src: &dyn Source,
     store: &Store,
@@ -136,13 +137,21 @@ pub async fn sync_guide(
         }
     };
     let by_tvg = store.channels_by_tvg(source_id).await?;
+    // Dispatcharr's dummy-EPG rows carry the channel uuid in place of a tvg_id.
+    let by_uuid = store.channels_by_uuid(source_id).await?;
     let mut rows = Vec::with_capacity(fetched.len());
     let mut unmatched = 0;
     for p in &fetched {
-        match by_tvg.get(&p.channel_ref) {
-            Some(ids) => rows.extend(ids.iter().map(|id| to_row(*id, p))),
-            None => unmatched += 1,
+        if let Some(ids) = by_tvg.get(&p.channel_ref) {
+            rows.extend(ids.iter().map(|id| to_row(*id, p)));
+        } else if let Some(id) = by_uuid.get(&p.channel_ref) {
+            rows.push(to_row(*id, p));
+        } else {
+            unmatched += 1;
         }
+    }
+    if unmatched > 0 {
+        tracing::debug!(unmatched, "guide rows matched no channel");
     }
     store
         .delete_programmes_overlapping(source_id, w.start_utc, w.end_utc)
