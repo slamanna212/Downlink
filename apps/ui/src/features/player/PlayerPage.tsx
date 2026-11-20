@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useIdle } from '@mantine/hooks';
 import { Progress, Slider } from '@mantine/core';
 import {
@@ -13,6 +13,7 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconRefresh,
+  IconStar,
   IconRewindBackward10,
   IconRewindForward10,
   IconVolume,
@@ -27,6 +28,7 @@ import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { Icon } from '../../components/Icon/Icon';
+import { notifyInfo } from '../../components/Notify/notify';
 import { SeekBar } from '../../components/SeekBar/SeekBar';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { appendDigit, matchChannelNumber, NUMBER_ENTRY_TIMEOUT_MS } from '../../lib/numberEntry';
@@ -189,6 +191,11 @@ export function PlayerPage() {
   const channels = useChannels({});
   const sources = useSources();
   const channel = useMemo(() => channels.data?.find((c) => c.id === player.channelId), [channels.data, player.channelId]);
+  const channelRef = useRef<Channel | undefined>(channel);
+  useEffect(() => {
+    channelRef.current = channel;
+  });
+  const qc = useQueryClient();
   const ids = useMemo(() => (player.channelId != null ? [player.channelId] : []), [player.channelId]);
   const nn = useNowNextWindow(ids, `player|${player.channelId}`);
   const now = useNowEpoch(15_000);
@@ -234,6 +241,16 @@ export function PlayerPage() {
     setFullscreen(enabled);
     void invoke('set_fullscreen', { enabled });
   }, [fullscreen, setFullscreen]);
+  const toggleFavourite = useCallback(() => {
+    const st = usePlayerStore.getState().player;
+    const ch = channelRef.current;
+    if (st.channelId == null || !ch) return;
+    const favourite = !ch.isFavourite;
+    void invoke('set_favourite', { channelId: ch.id, favourite }).then(() => {
+      void qc.invalidateQueries({ queryKey: ['catalog'] });
+      notifyInfo(t(favourite ? 'player.favouriteAdded' : 'player.favouriteRemoved', { name: ch.name }));
+    });
+  }, [qc]);
   const seekBy = useCallback(
     (delta: number) => {
       const st = usePlayerStore.getState().player;
@@ -274,6 +291,12 @@ export function PlayerPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Fullscreen: F11, and Ctrl+Cmd+F on macOS (F itself is favourite, PLAN §8.4).
+      if (e.key === 'F11' || (e.ctrlKey && e.metaKey && (e.key === 'f' || e.key === 'F'))) {
+        e.preventDefault();
+        toggleFullscreen();
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
@@ -293,7 +316,7 @@ export function PlayerPage() {
         togglePause();
       } else if (e.key === 'm' || e.key === 'M') toggleMute();
       else if (e.key === 'i' || e.key === 'I') setInfoOpen((v) => !v);
-      else if (e.key === 'f' || e.key === 'F') toggleFullscreen();
+      else if (e.key === 'f' || e.key === 'F') toggleFavourite();
       else if (e.key === 'ArrowLeft') seekBy(-10);
       else if (e.key === 'ArrowRight') seekBy(10);
       else if (e.key === 's' || e.key === 'S') restart();
@@ -307,7 +330,7 @@ export function PlayerPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [entry, infoOpen, fullscreen, commitEntry, clearEntry, togglePause, toggleMute, toggleFullscreen, goBack, seekBy, restart, goLive]);
+  }, [entry, infoOpen, fullscreen, toggleFavourite, commitEntry, clearEntry, togglePause, toggleMute, toggleFullscreen, goBack, seekBy, restart, goLive]);
 
   useEffect(() => () => { if (entryTimer.current) clearTimeout(entryTimer.current); }, []);
 
@@ -322,7 +345,13 @@ export function PlayerPage() {
   const showResume = timeshift && resumeUseful(player.resumeAt, player.duration) && resumeDismissed !== player.programme?.id;
 
   return (
-    <div ref={rootRef} className={classes.root} data-video-rect data-idle={barHidden || undefined}>
+    <div
+      ref={rootRef}
+      className={classes.root}
+      onDoubleClick={(e) => {
+        if (!(e.target as HTMLElement).closest('button, input, [role="slider"], [role="dialog"]')) toggleFullscreen();
+      }}
+      data-video-rect data-idle={barHidden || undefined}>
       {!inTauri() && <div className={classes.devVideo} aria-hidden>video surface (libmpv, under webview)</div>}
       {player.state === 'Idle' || player.state === 'Stopped' ? (
         <div className={classes.layer}>
@@ -453,6 +482,17 @@ export function PlayerPage() {
                 thumbLabel={t('player.volume')}
               />
               <span className={classes.spacer} />
+              {channel && (
+                <DLIconButton
+                  label={channel.isFavourite ? t('player.favouriteRemove') : t('player.favouriteAdd')}
+                  icon={IconStar}
+                  variant="overlay"
+                  size="lg"
+                  pressed={channel.isFavourite}
+                  filledGlyph={channel.isFavourite}
+                  onClick={toggleFavourite}
+                />
+              )}
               <DLIconButton
                 label={t('player.info')}
                 icon={IconInfoCircle}

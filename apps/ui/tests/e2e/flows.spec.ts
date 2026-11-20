@@ -131,3 +131,20 @@ test('Ctrl+K opens the command palette from anywhere, even right after load and 
   await page.keyboard.type('harb');
   await expect(page.getByText('Harbor News 24').first()).toBeVisible();
 });
+
+test('player: F toggles favourite with a confirmation, F11 and double-click toggle full screen', async ({ page }) => {
+  await page.goto('/channels');
+  await settle(page);
+  await focusFirstRow(page);
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/player$/);
+  await expect(page.locator('[data-video-rect]')).toBeVisible();
+  await page.waitForTimeout(250);
+  await page.keyboard.press('f');
+  await expect(page.getByText(/favourites\.$/)).toBeVisible();
+  await expect(page.locator('html')).not.toHaveAttribute('data-fullscreen', 'true');
+  const calls0 = (await calls(page)).filter((c) => c === 'set_fullscreen').length;
+  await page.keyboard.press('F11');
+  await page.locator('[data-video-rect]').dblclick({ position: { x: 300, y: 300 } });
+  await expect.poll(async () => (await calls(page)).filter((c) => c === 'set_fullscreen').length).toBe(calls0 + 2);
+});
