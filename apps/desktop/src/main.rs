@@ -3,6 +3,8 @@
 
 mod commands;
 mod dto;
+#[cfg(feature = "e2e")]
+mod e2e;
 mod logging;
 mod player_glue;
 mod protocol;
@@ -180,6 +182,11 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(feature = "spike")]
     if let (Some(p), Ok(urls)) = (player.clone(), std::env::var("DOWNLINK_SPIKE_URLS")) {
         spike::spawn_autorun(handle.clone(), p, surf.clone(), urls);
+    }
+
+    #[cfg(feature = "e2e")]
+    if let Ok(mode) = std::env::var("DOWNLINK_E2E") {
+        e2e::spawn(handle.clone(), mode);
     }
 
     app.manage(AppState {

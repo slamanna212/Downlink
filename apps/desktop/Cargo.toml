@@ -14,6 +14,8 @@ workspace = true
 # `frontendDist` at ./spike; see spike/run.sh.
 custom-protocol = ["tauri/custom-protocol"]
 spike = ["custom-protocol"]
+# Developer end-to-end driver (src/e2e.rs); never part of release builds.
+e2e = []
 
 [dependencies]
 downlink-player = { path = "../../crates/downlink-player" }

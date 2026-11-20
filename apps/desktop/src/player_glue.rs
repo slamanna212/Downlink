@@ -141,6 +141,15 @@ impl Playback {
         player_state(&snap, &a.info)
     }
 
+    #[cfg(feature = "e2e")]
+    pub fn snapshot_wait(
+        &self,
+        pred: impl Fn(SessionState) -> bool,
+        t: Duration,
+    ) -> PlayerSnapshot {
+        self.player.wait_for(pred, t)
+    }
+
     pub fn snapshot(&self) -> PlayerSnapshot {
         self.player.snapshot()
     }
