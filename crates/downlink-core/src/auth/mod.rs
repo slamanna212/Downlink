@@ -48,6 +48,10 @@ pub enum SecretKind {
     ApiKey,
     Password,
     RefreshToken,
+    /// An M3U playlist URL (may embed credentials).
+    PlaylistUrl,
+    /// An XMLTV guide URL (may embed credentials).
+    XmltvUrl,
 }
 
 impl SecretKind {
@@ -56,6 +60,8 @@ impl SecretKind {
             Self::ApiKey => "api_key",
             Self::Password => "password",
             Self::RefreshToken => "refresh_token",
+            Self::PlaylistUrl => "playlist_url",
+            Self::XmltvUrl => "xmltv_url",
         }
     }
 }

@@ -67,6 +67,23 @@ pub fn synthetic_id(tvg_id: Option<&str>, name: &str, group: &str, url_host: &st
     digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
+/// Make base ids unique within one refresh: the first holder keeps the id, later duplicates get
+/// `#2`, `#3`… in playlist order, so a refresh of an unchanged playlist maps rows to the same ids.
+pub fn stable_ids(base: &[String]) -> Vec<String> {
+    let mut seen: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    base.iter()
+        .map(|b| {
+            let n = seen.entry(b.as_str()).or_insert(0);
+            *n += 1;
+            if *n == 1 {
+                b.clone()
+            } else {
+                format!("{b}#{n}")
+            }
+        })
+        .collect()
+}
+
 pub fn sort_key(name: &str) -> String {
     name.trim().to_lowercase()
 }

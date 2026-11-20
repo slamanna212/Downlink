@@ -21,16 +21,33 @@ use crate::catchup::{self, CatchupPlay, PositionReporter};
 use crate::epg::{self, refresh};
 use crate::error::{AppError, Result};
 use crate::images::{ImageBytes, ImageCache, ImageFetcher, ImageSize, RawImage, parse_dlimg};
+use crate::m3u::load::Location;
 use crate::sessions::{self, SessionStopper};
 use crate::source::dispatcharr::{
     ClientOptions, Credentials, DispatcharrClient, logo_url, normalise_base_url,
 };
-use crate::source::{PlayPlan, Source, SourceId, SourceKind, all_channels};
+use crate::source::m3u::M3uSource;
+use crate::source::xtream::XtreamClient;
+use crate::source::{ChannelKey, PlayPlan, SourceClient, SourceId, SourceKind, all_channels};
 use crate::store::{NewSource, SourceRow, Store};
 use crate::sync::{self, now_utc};
 use crate::userstate;
 
 pub use dto::*;
+
+/// A credential-free form of a playlist URL for display: no userinfo, no query.
+fn display_url(u: &str) -> String {
+    match url::Url::parse(u) {
+        Ok(mut p) => {
+            let _ = p.set_username("");
+            let _ = p.set_password(None);
+            p.set_query(None);
+            p.set_fragment(None);
+            p.to_string()
+        }
+        Err(_) => String::new(),
+    }
+}
 pub use logtail::LogTail;
 
 const SETTINGS_KEY: &str = "settings";
@@ -51,7 +68,9 @@ pub struct Service {
     secrets: Arc<dyn SecretStore>,
     images: ImageCache,
     events: broadcast::Sender<Event>,
-    clients: RwLock<HashMap<i64, Arc<DispatcharrClient>>>,
+    clients: RwLock<HashMap<i64, Arc<dyn SourceClient>>>,
+    /// The same Dispatcharr clients, concretely (auth headers for play plans).
+    dispatcharr: RwLock<HashMap<i64, Arc<DispatcharrClient>>>,
     status: Mutex<HashMap<i64, SourceStatus>>,
     registered_logos: Mutex<HashSet<String>>,
     log_tail: LogTail,
@@ -84,6 +103,7 @@ impl Service {
             secrets,
             events,
             clients: RwLock::new(HashMap::new()),
+            dispatcharr: RwLock::new(HashMap::new()),
             status: Mutex::new(HashMap::new()),
             registered_logos: Mutex::new(HashSet::new()),
             log_tail: LogTail::new(),
@@ -141,20 +161,8 @@ impl Service {
 
     // ---- connections ------------------------------------------------------------------------
 
-    async fn client(&self, source_id: i64) -> Result<Arc<DispatcharrClient>> {
-        if let Some(c) = self.clients.read().await.get(&source_id) {
-            return Ok(c.clone());
-        }
-        let row = self.store.source(source_id).await?;
-        if SourceKind::parse(&row.kind) != Some(SourceKind::Dispatcharr) {
-            return Err(AppError::local("This kind of source is not available yet."));
-        }
-        let base = row
-            .base_url
-            .as_deref()
-            .ok_or_else(|| AppError::local("This source has no address."))?;
-        let secret = row
-            .secret_ref
+    async fn secret_of(&self, row: &SourceRow) -> Result<SecretString> {
+        row.secret_ref
             .as_deref()
             .map(|r| self.secrets.get(r))
             .transpose()?
@@ -163,61 +171,150 @@ impl Service {
                 AppError::auth(
                     "The saved credentials for this source were not found. Sign in again.",
                 )
-            })?;
-        let creds = match (&row.username, row.secret_ref.as_deref()) {
-            (Some(u), Some(r)) if r.ends_with("/password") => Credentials::Password {
-                username: u.clone(),
-                password: secret,
-            },
-            _ => Credentials::ApiKey(secret),
+            })
+    }
+
+    fn optional_secret(&self, row: &SourceRow, kind: SecretKind) -> Option<String> {
+        let r = crate::auth::secret_ref(&row.uuid, kind);
+        self.secrets
+            .get(&r)
+            .ok()
+            .flatten()
+            .map(|s| s.expose().to_owned())
+    }
+
+    /// A live connection for a source, built from its row and keychain entries on first use.
+    async fn client(&self, source_id: i64) -> Result<Arc<dyn SourceClient>> {
+        if let Some(c) = self.clients.read().await.get(&source_id) {
+            return Ok(c.clone());
+        }
+        let row = self.store.source(source_id).await?;
+        let kind =
+            SourceKind::parse(&row.kind).ok_or_else(|| AppError::local("Unknown source type."))?;
+        let c: Arc<dyn SourceClient> = match kind {
+            SourceKind::Dispatcharr => {
+                let base = row
+                    .base_url
+                    .as_deref()
+                    .ok_or_else(|| AppError::local("This source has no address."))?;
+                let secret = self.secret_of(&row).await?;
+                let creds = match (&row.username, row.secret_ref.as_deref()) {
+                    (Some(u), Some(r)) if r.ends_with("/password") => Credentials::Password {
+                        username: u.clone(),
+                        password: secret,
+                    },
+                    _ => Credentials::ApiKey(secret),
+                };
+                let c = Arc::new(DispatcharrClient::new(
+                    SourceId(row.id),
+                    base,
+                    creds,
+                    ClientOptions {
+                        insecure_tls: row.tls_insecure,
+                        ..Default::default()
+                    },
+                )?);
+                self.dispatcharr.write().await.insert(source_id, c.clone());
+                c
+            }
+            SourceKind::Xtream => {
+                let base = row
+                    .base_url
+                    .as_deref()
+                    .ok_or_else(|| AppError::local("This source has no address."))?;
+                let pw = self.secret_of(&row).await?;
+                Arc::new(XtreamClient::new(
+                    SourceId(row.id),
+                    base,
+                    row.username.as_deref().unwrap_or_default(),
+                    pw,
+                    row.tls_insecure,
+                )?)
+            }
+            SourceKind::M3u => {
+                let location = match row.secret_ref.as_deref() {
+                    Some(_) => Location::parse(self.secret_of(&row).await?.expose())?,
+                    None => Location::parse(row.base_url.as_deref().unwrap_or_default())?,
+                };
+                let xmltv = self
+                    .optional_secret(&row, SecretKind::XmltvUrl)
+                    .into_iter()
+                    .collect();
+                Arc::new(M3uSource::new(
+                    SourceId(row.id),
+                    location,
+                    xmltv,
+                    row.tls_insecure,
+                )?)
+            }
         };
-        let c = Arc::new(DispatcharrClient::new(
-            SourceId(row.id),
-            base,
-            creds,
-            ClientOptions {
-                insecure_tls: row.tls_insecure,
-                ..Default::default()
-            },
-        )?);
         self.clients.write().await.insert(source_id, c.clone());
         Ok(c)
     }
 
-    fn probe_client(input: &AddSourceInput, id: i64) -> Result<DispatcharrClient> {
-        let creds = match (&input.api_key, &input.username, &input.password) {
-            (Some(k), _, _) if !k.trim().is_empty() => {
-                Credentials::ApiKey(SecretString::new(k.trim()))
+    /// An unsaved connection for `test_source` / `add_source`.
+    fn probe_client(input: &AddSourceInput, id: i64) -> Result<Arc<dyn SourceClient>> {
+        match SourceKind::parse(&input.kind) {
+            Some(SourceKind::Dispatcharr) => {
+                let creds = match (&input.api_key, &input.username, &input.password) {
+                    (Some(k), _, _) if !k.trim().is_empty() => {
+                        Credentials::ApiKey(SecretString::new(k.trim()))
+                    }
+                    (_, Some(u), Some(p)) if !u.trim().is_empty() && !p.is_empty() => {
+                        Credentials::Password {
+                            username: u.trim().to_owned(),
+                            password: SecretString::new(p.clone()),
+                        }
+                    }
+                    _ => {
+                        return Err(AppError::local(
+                            "Enter an API key, or a username and password.",
+                        ));
+                    }
+                };
+                Ok(Arc::new(DispatcharrClient::new(
+                    SourceId(id),
+                    &input.url,
+                    creds,
+                    ClientOptions {
+                        insecure_tls: input.allow_self_signed,
+                        ..Default::default()
+                    },
+                )?))
             }
-            (_, Some(u), Some(p)) if !u.trim().is_empty() && !p.is_empty() => {
-                Credentials::Password {
-                    username: u.trim().to_owned(),
-                    password: SecretString::new(p.clone()),
-                }
+            Some(SourceKind::Xtream) => {
+                let (u, p) = match (&input.username, &input.password) {
+                    (Some(u), Some(p)) if !u.trim().is_empty() && !p.is_empty() => (u.trim(), p),
+                    _ => return Err(AppError::local("Enter the username and password.")),
+                };
+                Ok(Arc::new(XtreamClient::new(
+                    SourceId(id),
+                    &input.url,
+                    u,
+                    SecretString::new(p.clone()),
+                    input.allow_self_signed,
+                )?))
             }
-            _ => {
-                return Err(AppError::local(
-                    "Enter an API key, or a username and password.",
-                ));
-            }
-        };
-        DispatcharrClient::new(
-            SourceId(id),
-            &input.url,
-            creds,
-            ClientOptions {
-                insecure_tls: input.allow_self_signed,
-                ..Default::default()
-            },
-        )
+            Some(SourceKind::M3u) => Ok(Arc::new(Self::m3u_from_input(input, id)?)),
+            None => Err(AppError::local("Unknown source type.")),
+        }
+    }
+
+    fn m3u_from_input(input: &AddSourceInput, id: i64) -> Result<M3uSource> {
+        let location = Location::parse(&input.url)?;
+        let xmltv = input
+            .xmltv_url
+            .iter()
+            .map(|u| u.trim().to_owned())
+            .filter(|u| !u.is_empty())
+            .collect();
+        M3uSource::new(SourceId(id), location, xmltv, input.allow_self_signed)
     }
 
     fn check_kind(input: &AddSourceInput) -> Result<()> {
-        match SourceKind::parse(&input.kind) {
-            Some(SourceKind::Dispatcharr) => Ok(()),
-            Some(_) => Err(AppError::local("This kind of source is not available yet.")),
-            None => Err(AppError::local("Unknown source type.")),
-        }
+        SourceKind::parse(&input.kind)
+            .map(|_| ())
+            .ok_or_else(|| AppError::local("Unknown source type."))
     }
 
     // ---- sources ----------------------------------------------------------------------------
@@ -238,12 +335,26 @@ impl Service {
         let c = Self::probe_client(&input, 0)?;
         let info = c.connect().await?;
         let groups = c.groups().await?;
-        let (channels, _) = all_channels(&c, 500).await?;
-        let programmes = c
-            .guide(epg::visible_window(now_utc()))
-            .await
-            .map(|p| p.len())
-            .unwrap_or(0);
+        let (channels, _) = all_channels(c.as_ref(), 500).await?;
+        let programmes = match c.guide_feed().await {
+            Ok(Some(feed)) => {
+                let path = feed.file.path().to_path_buf();
+                tokio::task::spawn_blocking(move || {
+                    crate::xmltv::parse_programmes(&path, chrono_tz::Tz::UTC, |_| {})
+                        .map(|s| s.programmes as usize)
+                })
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or(0)
+            }
+            Ok(None) => c
+                .guide(epg::visible_window(now_utc()))
+                .await
+                .map(|p| p.len())
+                .unwrap_or(0),
+            Err(_) => 0,
+        };
         Ok(TestSourceResult {
             channels: channels.iter().filter(|c| !c.hidden).count() as i64,
             groups: groups.len() as i64,
@@ -253,53 +364,131 @@ impl Service {
         })
     }
 
-    /// Verify, save (secret to the keychain, reference to SQLite), then do the first sync.
+    /// Verify, save (secrets to the keychain, references to SQLite), then do the first sync.
     pub async fn add_source(&self, input: AddSourceInput) -> Result<SourceDto> {
         Self::check_kind(&input)?;
         let name = input.name.trim();
         if name.is_empty() {
             return Err(AppError::local("Give the source a name."));
         }
-        let base = normalise_base_url(&input.url)?;
-        // Fail fast: nothing is persisted if the server or credentials are wrong.
-        Self::probe_client(&input, 0)?.connect().await?;
-
-        let (kind, secret) = match (&input.api_key, &input.password) {
-            (Some(k), _) if !k.trim().is_empty() => {
-                (SecretKind::ApiKey, SecretString::new(k.trim()))
-            }
-            (_, Some(p)) => (SecretKind::Password, SecretString::new(p.clone())),
-            _ => {
-                return Err(AppError::local(
-                    "Enter an API key, or a username and password.",
-                ));
-            }
+        let kind = SourceKind::parse(&input.kind).unwrap_or(SourceKind::Dispatcharr);
+        // Fail fast: nothing is persisted if the server, file or credentials are wrong.
+        let m3u_probe = if kind == SourceKind::M3u {
+            Some(Arc::new(Self::m3u_from_input(&input, 0)?))
+        } else {
+            None
         };
+        let probe: Arc<dyn SourceClient> = match &m3u_probe {
+            Some(m) => m.clone(),
+            None => Self::probe_client(&input, 0)?,
+        };
+        probe.connect().await?;
+
+        // What goes where: the keychain gets every secret (keys, passwords, URLs that may embed
+        // credentials); SQLite gets only a credential-free address for display.
+        let mut secrets: Vec<(SecretKind, SecretString)> = Vec::new();
+        let (base_url, username, primary): (String, Option<String>, Option<usize>) = match kind {
+            SourceKind::Dispatcharr => {
+                let base = normalise_base_url(&input.url)?.to_string();
+                match (&input.api_key, &input.password) {
+                    (Some(k), _) if !k.trim().is_empty() => {
+                        secrets.push((SecretKind::ApiKey, SecretString::new(k.trim())));
+                        (base, None, Some(0))
+                    }
+                    (_, Some(p)) => {
+                        secrets.push((SecretKind::Password, SecretString::new(p.clone())));
+                        (
+                            base,
+                            Some(input.username.clone().unwrap_or_default().trim().to_owned()),
+                            Some(0),
+                        )
+                    }
+                    _ => {
+                        return Err(AppError::local(
+                            "Enter an API key, or a username and password.",
+                        ));
+                    }
+                }
+            }
+            SourceKind::Xtream => {
+                let base = crate::source::xtream::normalise_base(&input.url)?.to_string();
+                secrets.push((
+                    SecretKind::Password,
+                    SecretString::new(input.password.clone().unwrap_or_default()),
+                ));
+                (
+                    base,
+                    Some(input.username.clone().unwrap_or_default().trim().to_owned()),
+                    Some(0),
+                )
+            }
+            SourceKind::M3u => match Location::parse(&input.url)? {
+                Location::File(p) => (format!("file://{}", p.display()), None, None),
+                Location::Url(u) => {
+                    secrets.push((SecretKind::PlaylistUrl, SecretString::new(u.clone())));
+                    (display_url(&u), None, Some(0))
+                }
+            },
+        };
+        if let Some(x) = input
+            .xmltv_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+        {
+            secrets.push((SecretKind::XmltvUrl, SecretString::new(x)));
+        }
+
         let row = self
             .store
             .insert_source(&NewSource {
-                kind: SourceKind::Dispatcharr.as_str().to_owned(),
+                kind: kind.as_str().to_owned(),
                 name: name.to_owned(),
-                base_url: Some(base.to_string()),
+                base_url: Some(base_url),
                 secret_ref: None,
-                username: matches!(kind, SecretKind::Password)
-                    .then(|| input.username.clone().unwrap_or_default().trim().to_owned()),
+                username,
                 tls_insecure: input.allow_self_signed,
                 created_at: now_utc(),
             })
             .await?;
         let saved = async {
-            let r = put_source_secret(self.secrets.as_ref(), &row.uuid, kind, &secret)?;
-            self.store.set_source_secret_ref(row.id, Some(&r)).await
+            let mut primary_ref = None;
+            for (i, (k, v)) in secrets.iter().enumerate() {
+                let r = put_source_secret(self.secrets.as_ref(), &row.uuid, *k, v)?;
+                if Some(i) == primary {
+                    primary_ref = Some(r);
+                }
+            }
+            self.store
+                .set_source_secret_ref(row.id, primary_ref.as_deref())
+                .await
         }
         .await;
         if let Err(e) = saved {
+            self.delete_secrets(&row.uuid);
             let _ = self.store.delete_source(row.id).await;
             return Err(e);
+        }
+        // Reuse the verified probe for M3U so a large playlist is not downloaded twice.
+        if let Some(m) = m3u_probe {
+            m.set_id(SourceId(row.id));
+            self.clients.write().await.insert(row.id, m);
         }
         self.sync_source(row.id).await?;
         let row = self.store.source(row.id).await?;
         Ok(SourceDto::from_row(&row, self.status_of(&row)))
+    }
+
+    fn delete_secrets(&self, uuid: &str) {
+        for k in [
+            SecretKind::ApiKey,
+            SecretKind::Password,
+            SecretKind::RefreshToken,
+            SecretKind::PlaylistUrl,
+            SecretKind::XmltvUrl,
+        ] {
+            let _ = self.secrets.delete(&crate::auth::secret_ref(uuid, k));
+        }
     }
 
     /// Stop its sessions, delete its rows and its keychain entries.
@@ -318,8 +507,10 @@ impl Service {
         if let Some(r) = row.secret_ref.as_deref() {
             self.secrets.delete(r)?;
         }
+        self.delete_secrets(&row.uuid);
         self.store.delete_source(source_id).await?;
         self.clients.write().await.remove(&source_id);
+        self.dispatcharr.write().await.remove(&source_id);
         if let Ok(mut g) = self.status.lock() {
             g.remove(&source_id);
         }
@@ -379,24 +570,76 @@ impl Service {
         self.progress(source_id, "channels", 1, 4);
         sync::sync_channels(client.as_ref(), &self.store, source_id, info.user_level).await?;
         self.progress(source_id, "guide", 2, 4);
-        if let Err(e) = epg::sync_guide(
-            client.as_ref(),
-            &self.store,
-            source_id,
-            epg::visible_window(now_utc()),
-        )
-        .await
-        {
+        if let Err(e) = self.sync_guide_for(source_id, client.as_ref()).await {
             // The guide is not critical: channels stay usable.
             tracing::warn!(error = %e, "guide sync failed");
         }
         self.progress(source_id, "state", 3, 4);
-        if let Err(e) = userstate::sync_state(&self.store, client.as_ref(), now_utc()).await {
+        if client.kind() == SourceKind::Dispatcharr
+            && let Err(e) = userstate::sync_state(&self.store, client.as_ref(), now_utc()).await
+        {
             tracing::warn!(error = %e, "state sync failed");
         }
         self.progress(source_id, "done", 4, 4);
         self.emit(Event::CatalogUpdated(self.counts(source_id).await?));
         Ok(())
+    }
+
+    /// Whole-feed guides (XMLTV) for M3U/Xtream; windowed grid for Dispatcharr.
+    async fn sync_guide_for(&self, source_id: i64, client: &dyn SourceClient) -> Result<()> {
+        let now = now_utc();
+        match client.guide_feed().await {
+            Ok(Some(feed)) => {
+                let row = self.store.source(source_id).await?;
+                let tz = refresh::parse_tz(feed.default_tz.as_deref().or(row.server_tz.as_deref()));
+                let days = refresh::max_catchup_days(&self.store, source_id)
+                    .await?
+                    .max(0);
+                let keep = crate::source::TimeWindow {
+                    start_utc: epg::retention_cutoff(now, days),
+                    end_utc: now + 7 * 86_400,
+                };
+                let r = crate::xmltv::ingest::ingest(
+                    &self.store,
+                    source_id,
+                    feed.file.path().to_path_buf(),
+                    tz,
+                    keep,
+                )
+                .await;
+                match r {
+                    Ok(rep) => {
+                        tracing::info!(
+                            programmes = rep.programmes,
+                            by_name = rep.matches.by_name,
+                            unmatched = rep.matches.unmatched.len(),
+                            "guide ingested"
+                        );
+                        self.store.set_sync_ok(source_id, "guide", now).await?;
+                        Ok(())
+                    }
+                    Err(e) => {
+                        self.store
+                            .set_sync_error(source_id, "guide", &e.message)
+                            .await?;
+                        Err(e)
+                    }
+                }
+            }
+            Ok(None) => {
+                if client.kind() == SourceKind::Dispatcharr {
+                    epg::sync_guide(client, &self.store, source_id, epg::visible_window(now))
+                        .await?;
+                }
+                Ok(())
+            }
+            Err(e) => {
+                self.store
+                    .set_sync_error(source_id, "guide", &e.message)
+                    .await?;
+                Err(e)
+            }
+        }
     }
 
     /// Background guide fill: catch-up history and the days ahead (cancellable).
@@ -538,8 +781,12 @@ impl Service {
         c: &crate::store::ChannelRow,
     ) -> Option<String> {
         let logo_id = c.logo_key.as_deref()?;
-        let base = bases.get(&c.source_id)?;
-        let url = logo_url(base, logo_id).ok()?;
+        // M3U/Xtream logos are absolute public URLs; Dispatcharr's are ids on its own server.
+        let url = if logo_id.starts_with("http://") || logo_id.starts_with("https://") {
+            logo_id.to_owned()
+        } else {
+            logo_url(bases.get(&c.source_id)?, logo_id).ok()?
+        };
         let known = self
             .registered_logos
             .lock()
@@ -780,8 +1027,18 @@ impl Service {
             .await?
             .ok_or_else(|| AppError::local("That channel is no longer in the list."))?;
         let src = self.store.source(ch.source_id).await?;
-        let plan = catalog::resolve_play_plan(&self.store, self, channel_id).await?;
-        let plan = plan.resolve_at_play(src.tls_insecure).await?;
+        let plan = if SourceKind::parse(&src.kind) == Some(SourceKind::Dispatcharr) {
+            let plan = catalog::resolve_play_plan(&self.store, self, channel_id).await?;
+            plan.resolve_at_play(src.tls_insecure).await?
+        } else {
+            if ch.is_drm {
+                return Err(AppError::media("DRM — not supported"));
+            }
+            self.client(ch.source_id)
+                .await?
+                .play(ChannelKey::from_row(&ch))
+                .await?
+        };
         self.store.touch_recent(channel_id, now_utc()).await?;
         Ok(plan)
     }
@@ -900,7 +1157,12 @@ impl Service {
 #[async_trait]
 impl AuthProvider for Service {
     async fn auth_header(&self, source: &SourceRow) -> Result<(String, SecretString)> {
-        self.client(source.id).await?.auth_header().await
+        // Only Dispatcharr sources use auth headers; build the client if it is not live yet.
+        self.client(source.id).await?;
+        let c = self.dispatcharr.read().await.get(&source.id).cloned();
+        c.ok_or_else(|| AppError::local("This source does not use header authentication."))?
+            .auth_header()
+            .await
     }
 }
 

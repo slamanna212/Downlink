@@ -86,12 +86,21 @@ pub async fn play_catchup(
     let plan = client
         .catchup(key, &to_programme(&row, ch.tvg_id.as_deref().unwrap_or("")))
         .await?;
-    let session = plan
-        .session
-        .clone()
-        .ok_or_else(|| AppError::server("The server did not start an archive session."))?;
-    // Persist immediately so a crash cannot orphan the session (rule 6).
-    sessions::track(store, ch.source_id, KIND_CATCHUP, &session.0).await?;
+    // Server-session sources (Dispatcharr) must hand back an id; template-path sources
+    // (M3U/Xtream) have no session: `session` is then empty and nothing is tracked or deleted.
+    let session = match plan.session.clone() {
+        Some(s) => {
+            // Persist immediately so a crash cannot orphan the session (rule 6).
+            sessions::track(store, ch.source_id, KIND_CATCHUP, &s.0).await?;
+            s
+        }
+        None if client.kind() != crate::source::SourceKind::Dispatcharr => SessionId(String::new()),
+        None => {
+            return Err(AppError::server(
+                "The server did not start an archive session.",
+            ));
+        }
+    };
     Ok(CatchupPlay {
         plan,
         session,
@@ -161,7 +170,7 @@ impl PositionReporter {
         position_secs: u64,
         force: bool,
     ) -> Result<bool> {
-        if !self.due(now_ms, force) {
+        if self.session.0.is_empty() || !self.due(now_ms, force) {
             return Ok(false);
         }
         self.last_report_ms = Some(now_ms);

@@ -2,6 +2,7 @@
 //! [`Caps`] bitflag; no UI or player code branches on source kind (CLAUDE.md rule 9).
 
 pub mod dispatcharr;
+pub mod m3u;
 pub mod play;
 pub mod xtream;
 

@@ -78,13 +78,23 @@ async fn run(
     let (channels, _count) = all_channels(src, 500).await?;
     // Effective stream profile (PLAN §3.5): metadata only. If unavailable (e.g. a low-privilege
     // key), keep the last stored flag rather than guessing.
-    let profiles = match src.profile_info().await {
-        Ok(p) => Some(p),
-        Err(e) => {
-            tracing::warn!(error = %e, "stream profiles unavailable; keeping stored redirect flags");
-            None
+    // Stream profiles are a Dispatcharr concept; other sources never redirect-resolve.
+    let dispatcharr = src.kind() == crate::source::SourceKind::Dispatcharr;
+    let profiles = if !dispatcharr {
+        None
+    } else {
+        match src.profile_info().await {
+            Ok(p) => Some(p),
+            Err(e) => {
+                tracing::warn!(error = %e, "stream profiles unavailable; keeping stored redirect flags");
+                None
+            }
         }
     };
+    let group_names: std::collections::HashMap<&str, &str> = groups
+        .iter()
+        .map(|g| (g.ext_id.as_str(), g.name.as_str()))
+        .collect();
     let previous = store.redirect_flags(source_id).await?;
 
     let mut counts = SyncCounts::default();
@@ -101,14 +111,24 @@ async fn run(
             }
             None => {}
         }
-        let redirect = match &profiles {
-            Some(p) => p.mode(c.stream_profile_id),
-            None => previous
-                .get(&c.ext_id)
-                .copied()
-                .unwrap_or(StreamMode::Unknown),
+        let mut c = c.clone();
+        let redirect = if !dispatcharr {
+            let g = c
+                .group_ext_id
+                .as_deref()
+                .and_then(|g| group_names.get(g).copied());
+            catalog::classify(&mut c, g);
+            StreamMode::Proxy
+        } else {
+            match &profiles {
+                Some(p) => p.mode(c.stream_profile_id),
+                None => previous
+                    .get(&c.ext_id)
+                    .copied()
+                    .unwrap_or(StreamMode::Unknown),
+            }
         };
-        rows.push(normalise::channel_row(c, redirect));
+        rows.push(normalise::channel_row(&c, redirect));
     }
 
     let group_rows: Vec<(String, String)> = groups

@@ -42,6 +42,30 @@ pub fn sync_filter(c: &SourceChannel, account_level: Option<UserLevel>) -> Optio
     None
 }
 
+/// Heuristic classification for sources that do not flag adult/radio themselves (M3U, Xtream
+/// categories). Classification lives here with the filtering; sync calls it. Only sets flags,
+/// never clears ones the source provided.
+pub fn classify(c: &mut SourceChannel, group_name: Option<&str>) {
+    let words = |s: &str| -> Vec<String> {
+        s.to_lowercase()
+            .split(|ch: char| !(ch.is_alphanumeric() || ch == '+'))
+            .filter(|w| !w.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    let g = group_name.map(words).unwrap_or_default();
+    let n = words(&c.name);
+    if g.iter()
+        .any(|w| matches!(w.as_str(), "adult" | "adults" | "xxx" | "18+" | "porn"))
+        || n.iter().any(|w| w == "xxx")
+    {
+        c.is_adult = true;
+    }
+    if g.iter().any(|w| matches!(w.as_str(), "radio" | "radios")) {
+        c.is_radio = true;
+    }
+}
+
 /// What the user has chosen to see.
 #[derive(Debug, Clone, Default)]
 pub struct ChannelFilter {
