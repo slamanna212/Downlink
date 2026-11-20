@@ -7,6 +7,7 @@ import { invoke } from '../../api/ipc';
 import { useCaps } from '../../api/queries';
 import type { Recording, RecordingRule } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
+import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { EmptySource } from '../../pages/EmptySource';
@@ -144,10 +145,7 @@ export function RecordingsPage() {
       {loading ? (
         <SkeletonList rows={5} label={t('loading.generic')} />
       ) : errored ? (
-        <div className={classes.box} role="alert">
-          <span>{t('rec.error')}</span>
-          <DLButton variant="default" onClick={() => void (tab === 'rules' ? rules.refetch() : recs.refetch())}>{t('vod.retry')}</DLButton>
-        </div>
+        <ErrorState message={t('rec.error')} onRetry={() => void (tab === 'rules' ? rules.refetch() : recs.refetch())} />
       ) : !list || list.length === 0 ? (
         <p className={classes.msg} style={{ paddingInline: '2.5rem' }}>{t(`rec.empty.${tab}`)}</p>
       ) : (

@@ -63,3 +63,7 @@
   z-index: 5;
   padding: var(--mantine-spacing-sm) var(--mantine-spacing-xl) 0;
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .route { transform: none; }
+}

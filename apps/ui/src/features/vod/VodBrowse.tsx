@@ -7,7 +7,7 @@ import { IconSearch } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
 import { useCaps } from '../../api/queries';
 import type { Movie, Series, VodKind } from '../../api/types';
-import { DLButton } from '../../components/DLButton/DLButton';
+import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { Icon } from '../../components/Icon/Icon';
 import { Poster } from '../../components/Poster/Poster';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
@@ -164,10 +164,7 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
         {list.isLoading ? (
           <SkeletonList rows={6} label={t('loading.generic')} />
         ) : list.isError ? (
-          <div className={classes.msgBox} role="alert">
-            <span>{t('vod.error')}</span>
-            <DLButton variant="default" onClick={() => void list.refetch()}>{t('vod.retry')}</DLButton>
-          </div>
+          <ErrorState message={t('vod.error')} onRetry={() => void list.refetch()} />
         ) : tiles.length === 0 ? (
           <p className={classes.msg} style={{ paddingInline: 'var(--mantine-spacing-xl)' }}>{deferred || categoryId != null ? t('vod.empty') : t('vod.emptyLibrary')}</p>
         ) : (

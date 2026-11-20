@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { resolveImg } from '../../lib/dlimg';
 import classes from './Poster.module.css';
 
 /** Stable small hash (djb2) so the same title always gets the same fallback pattern. */
@@ -23,7 +24,7 @@ export function Poster({ src, title, shape = 'poster', children }: PosterProps) 
   return (
     <div className={`${classes.root} ${shape === 'wide' ? classes.wide : ''}`}>
       {show ? (
-        <img className={classes.img} src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+        <img className={classes.img} src={resolveImg(src) ?? undefined} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
       ) : (
         <div className={`${classes.fallback} ${classes[`v${titleHash(title) % 4}`]}`} aria-hidden>
           <span className={classes.label}>{title}</span>

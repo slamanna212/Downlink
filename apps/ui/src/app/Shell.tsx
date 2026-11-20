@@ -7,7 +7,8 @@ import { useCaps, useSources } from '../api/queries';
 import { useUiStore } from '../store/ui';
 import { t } from '../lib/i18n';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { invoke } from '../api/ipc';
+import { invoke, listen } from '../api/ipc';
+import { playCatchup, playChannel } from '../features/player/actions';
 import { Banner } from '../components/Banner/Banner';
 import { formatUpdated } from '../lib/time';
 import { readTvSignals, wantsTv } from '../lib/tv';
@@ -66,8 +67,50 @@ function useAutoDensity() {
   }, []);
 }
 
+/** Esc = back (PLAN §8.4) on every screen except Home and the player, unless an overlay or a text field owns it. */
+function useEscapeBack() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  useEffect(() => {
+    if (pathname === '/' || pathname.startsWith('/player')) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      if (document.querySelector('[role="dialog"], [role="menu"], [aria-expanded="true"]')) return;
+      void navigate(-1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navigate, pathname]);
+}
+
+/** `app://deeplink` (second instance / OS URL handler): play a channel or a catch-up programme. */
+function useDeepLinks() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    void listen('app://deeplink', (link) => {
+      void (async () => {
+        const uuid = link.kind === 'channel' ? link.uuid : link.channel;
+        const ch = await invoke('get_channel_by_uuid', { uuid });
+        if (!ch) return;
+        const err = link.kind === 'play' && link.programme ? await playCatchup(link.programme) : await playChannel(ch.id);
+        if (!err) void navigate('/player');
+      })();
+    }).then((s) => (cancelled ? s() : (stop = s)));
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [navigate]);
+}
+
 export function Shell() {
   useAutoDensity();
+  useDeepLinks();
+  useEscapeBack();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const density = useUiStore((s) => s.density);

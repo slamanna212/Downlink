@@ -11,6 +11,7 @@ import type { Channel, Programme } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
+import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { EmptySource } from '../../pages/EmptySource';
 import { addDays, dayLabel, floorToTick, formatClock, formatDay, nowEpoch, progress, startOfDay } from '../../lib/time';
@@ -397,6 +398,9 @@ export function GuidePage() {
     } else if ((e.key === 'r' || e.key === 'R') && caps.dvr && focusState && (focusState === 'now' || focusState === 'future')) {
       e.preventDefault();
       setRecordOpen(true);
+    } else if ((e.key === 'f' || e.key === 'F') && focusChannel) {
+      e.preventDefault();
+      favourite.mutate({ channelId: focusChannel.id, favourite: !focusChannel.isFavourite });
     }
   };
   function xToLeft() {
@@ -528,6 +532,10 @@ export function GuidePage() {
 
       {totalRows === 0 && counts.isLoading ? (
         <SkeletonList rows={8} label={t('loading.guide')} />
+      ) : counts.isError ? (
+        <ErrorState onRetry={() => void counts.refetch()} />
+      ) : totalRows === 0 ? (
+        <ErrorState message={t('channels.empty')} onRetry={() => void counts.refetch()} />
       ) : (
         <div
           ref={mergedRef}

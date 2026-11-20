@@ -4,6 +4,7 @@ import { IconSearch } from '@tabler/icons-react';
 import { useCaps, useHome } from '../../api/queries';
 import type { Channel, ContinueItem, OnNowItem } from '../../api/types';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
+import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
@@ -130,7 +131,9 @@ export function HomePage() {
           <span className={classes.searchLabel}>{t('home.search')}</span> <span className={classes.kbd}>{modKeyLabel()}</span>
         </DLButton>
       </div>
-      {!d ? (
+      {home.isError && !d ? (
+        <ErrorState onRetry={() => void home.refetch()} />
+      ) : !d ? (
         <SkeletonList rows={4} label={t('loading.generic')} />
       ) : (
         <>

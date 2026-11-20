@@ -3,6 +3,7 @@ import { dl } from '../../theme';
 import { useUiStore } from '../../store/ui';
 import { initialsOf, logoColor } from '../../lib/logo';
 import { t } from '../../lib/i18n';
+import { resolveImg } from '../../lib/dlimg';
 import classes from './ChannelLogo.module.css';
 
 export interface ChannelLogoProps {
@@ -27,7 +28,7 @@ export function ChannelLogo({ channelId, name, src, density }: ChannelLogoProps)
       data-fallback={showImage ? undefined : 'true'}
     >
       {showImage ? (
-        <img className={classes.img} src={src} alt={t('channel.logoAlt', { name })} loading="lazy" onError={() => setFailedSrc(src)} />
+        <img className={classes.img} src={resolveImg(src) ?? undefined} alt={t('channel.logoAlt', { name })} loading="lazy" onError={() => setFailedSrc(src)} />
       ) : (
         <span className={classes.fallback} style={{ fontSize: Math.round(h * 0.4) }} aria-label={name} role="img">
           {initialsOf(name)}

@@ -9,6 +9,7 @@ import { invoke } from '../../api/ipc';
 import { useCaps, useChannels, useCounts, useGroups, useNowNextWindow } from '../../api/queries';
 import { dl } from '../../theme';
 import { Icon } from '../../components/Icon/Icon';
+import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { EmptySource } from '../../pages/EmptySource';
 import { isEditableTarget, isListKey, isTypeaheadKey, nextIndex } from '../../lib/listNav';
@@ -230,6 +231,8 @@ export function ChannelsPage() {
         </div>
         {list.isLoading ? (
           <SkeletonList rows={10} label={t('loading.channels')} />
+        ) : list.isError ? (
+          <ErrorState onRetry={() => void list.refetch()} />
         ) : channels.length === 0 ? (
           <Text className={classes.empty}>{t('channels.empty')}</Text>
         ) : (

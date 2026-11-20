@@ -26,6 +26,7 @@ import type {
   UpdateChannel,
   UpdateStatus,
   CatalogUpdated,
+  DeepLink,
   Diagnostics,
   TaskProgress,
   TestSourceResult,
@@ -88,6 +89,9 @@ export interface Commands {
   list_recording_rules: { args: Record<string, never>; result: RecordingRule[] };
   delete_recording_rule: { args: { id: number }; result: null };
   play_recording: { args: { id: number }; result: null };
+  get_channel_by_uuid: { args: { uuid: string }; result: Channel | null };
+  export_diagnostics: { args: Record<string, never>; result: string };
+  reveal_path: { args: { path: string }; result: null };
 }
 export type CommandName = keyof Commands;
 
@@ -98,6 +102,7 @@ export interface Events {
   'task://progress': TaskProgress;
   'session://stats': SessionStats;
   'update://status': UpdateStatus;
+  'app://deeplink': DeepLink;
 }
 export type EventName = keyof Events;
 

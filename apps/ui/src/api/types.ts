@@ -450,3 +450,9 @@ export interface RecordingRule {
   /** e.g. "New episodes" or "Weekdays 19:00". */
   schedule: string;
 }
+
+// ---- Deep links (app://deeplink) ----
+export type DeepLink =
+  | { kind: 'channel'; uuid: string }
+  /** `channel` is a channel uuid; `programme` an opaque programme id (catch-up); `start` is informational. */
+  | { kind: 'play'; channel: string; programme?: string; start?: number };

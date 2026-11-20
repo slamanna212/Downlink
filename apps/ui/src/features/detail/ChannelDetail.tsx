@@ -9,6 +9,7 @@ import type { Programme } from '../../api/types';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
+import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { addDays, dayLabel, formatClock, formatRange, minutesLeft, progress, startOfDay } from '../../lib/time';
 import { useNowEpoch } from '../../lib/useNow';
@@ -111,7 +112,8 @@ export function ChannelDetail() {
           </div>
 
           <div className={classes.label}>{t('detail.schedule')}</div>
-          {list.length === 0 && <div className={classes.note}>{t('detail.noSchedule')}</div>}
+          {schedule.isError && <ErrorState onRetry={() => void schedule.refetch()} />}
+          {!schedule.isError && list.length === 0 && <div className={classes.note}>{t('detail.noSchedule')}</div>}
           {list.map((p) => {
             const st = blockState(p, channel, now);
             const isNowOrFuture = st === 'now' || st === 'future';

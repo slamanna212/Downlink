@@ -79,3 +79,6 @@
   width: 100%;
 }
 .sliderRow > :first-child { flex: 1; }
+
+.exportRow { display: flex; flex-direction: column; align-items: flex-end; gap: var(--mantine-spacing-sm); }
+.exportResult { display: flex; align-items: center; gap: var(--mantine-spacing-sm); font-size: var(--mantine-font-size-sm); color: var(--dl-text-dim); }

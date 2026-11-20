@@ -296,6 +296,12 @@ function AboutSection() {
   const { data: settings } = useSettings();
   const qc = useQueryClient();
   const [copied, setCopied] = useState(false);
+  const [exported, setExported] = useState<{ path: string } | { error: true } | null>(null);
+  const exportDiag = useMutation({
+    mutationFn: () => invoke('export_diagnostics', {}),
+    onSuccess: (path) => setExported({ path }),
+    onError: () => setExported({ error: true }),
+  });
   const debug = useMutation({
     mutationFn: (enabled: boolean) => invoke('set_debug_logging', { enabled }),
     onSuccess: (_r, enabled) => qc.setQueryData(['settings'], { ...settings, debugLogging: enabled }),
@@ -328,6 +334,22 @@ function AboutSection() {
         >
           {copied ? t('settings.copied') : t('settings.copy')}
         </DLButton>
+      </SettingRow>
+      <SettingRow label={t('settings.export')} help={t('settings.export.help')} wide>
+        <div className={classes.exportRow}>
+          <DLButton variant="default" loading={exportDiag.isPending} onClick={() => exportDiag.mutate()}>
+            {t('settings.export')}
+          </DLButton>
+          {exported && 'path' in exported && (
+            <span role="status" className={classes.exportResult}>
+              <span className={classes.mono}>{exported.path}</span>
+              <DLButton variant="subtle" size="sm" onClick={() => void invoke('reveal_path', { path: exported.path })}>
+                {t('settings.export.reveal')}
+              </DLButton>
+            </span>
+          )}
+          {exported && 'error' in exported && <span role="alert">{t('settings.export.failed')}</span>}
+        </div>
       </SettingRow>
     </Section>
   );

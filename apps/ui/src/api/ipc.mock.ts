@@ -253,6 +253,9 @@ export function createMockBackend(): Backend {
       const progs = searchIndex.filter((x) => x.hay.includes(q)).slice(0, limit).map(({ programme, channel }) => ({ programme, channel }));
       return { channels: hits.slice(0, limit), programmes: progs };
     },
+    get_channel_by_uuid: ({ uuid }) => channels.find((c) => c.uuid === uuid) ?? null,
+    export_diagnostics: () => '/home/user/Downloads/downlink-diagnostics.zip',
+    reveal_path: () => null,
     list_vod_categories: ({ kind }) => vod.vodCategories(kind),
     list_movies: (a) => vod.listMovies(a),
     get_movie: ({ id }) => {

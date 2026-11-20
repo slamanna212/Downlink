@@ -7,6 +7,7 @@ import { invoke } from '../../api/ipc';
 import { useCaps } from '../../api/queries';
 import type { Channel, ProgrammeHit } from '../../api/types';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
+import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { Icon } from '../../components/Icon/Icon';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { EmptySource } from '../../pages/EmptySource';
@@ -96,6 +97,7 @@ export function SearchPage() {
       />
       <div id="search-results" ref={listRef} role={items.length ? 'listbox' : undefined} aria-label={t('search.results')}>
         {deferred.length === 0 && <p className={classes.empty}>{t('search.hint')}</p>}
+        {results.isError && <ErrorState onRetry={() => void results.refetch()} />}
         {deferred.length > 0 && results.data && items.length === 0 && <p className={classes.empty}>{t('search.empty', { query: deferred })}</p>}
         {channelCount > 0 && (
           <div role="group" aria-label={t('search.channels')} className={classes.group}>

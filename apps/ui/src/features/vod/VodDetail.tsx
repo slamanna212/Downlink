@@ -8,6 +8,7 @@ import type { Episode, Movie, SeriesDetail } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { Poster } from '../../components/Poster/Poster';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
+import { resolveImg } from '../../lib/dlimg';
 import { t } from '../../lib/i18n';
 import { formatDuration } from '../../lib/time';
 import { playVod } from '../player/actions';
@@ -39,7 +40,7 @@ function Hero({ title, poster, backdrop, meta, plot, onBack, children }: { title
   const parts = meta.filter(Boolean) as string[];
   return (
     <div className={classes.hero}>
-      {backdrop && <div className={classes.heroBackdrop} style={{ backgroundImage: `url(${backdrop})` }} aria-hidden />}
+      {backdrop && <div className={classes.heroBackdrop} style={{ backgroundImage: `url(${resolveImg(backdrop) ?? ''})` }} aria-hidden />}
       <div className={classes.heroPoster}>
         <Poster src={poster} title={title} />
       </div>
