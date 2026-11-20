@@ -1,0 +1,156 @@
+{
+  "id": 1,
+  "series_id": "3001",
+  "name": "Test Series Alpha",
+  "description": "Synthetic plot for Test Series Alpha.",
+  "year": 2020,
+  "genre": "Test",
+  "rating": "7.5",
+  "tmdb_id": null,
+  "imdb_id": null,
+  "category_id": 5,
+  "category_name": "Test Series",
+  "cover": {
+    "id": null,
+    "url": "http://streams.dispatcharr.test/img/series1.png",
+    "cache_url": "https://dispatcharr.test/api/vod/series/1/image/?kind=movie_image&m3u_account_id=3&v=c680d364",
+    "name": "Test Series Alpha"
+  },
+  "backdrop_path": [
+    "https://dispatcharr.test/api/vod/series/1/image/?kind=backdrop&index=0&m3u_account_id=3&v=5398d217"
+  ],
+  "last_refreshed": "2026-11-20T00:56:13.393587Z",
+  "custom_properties": {
+    "cast": "Test Actor",
+    "director": "Test Director",
+    "category_id": "20",
+    "releaseDate": "2020-01-01",
+    "backdrop_path": [
+      "http://streams.dispatcharr.test/img/backdrop.png"
+    ],
+    "episode_run_time": "1"
+  },
+  "m3u_account": {
+    "id": 3,
+    "name": "Synthetic Xtream",
+    "account_type": "XC"
+  },
+  "episodes_fetched": true,
+  "detailed_fetched": true,
+  "episodes": {
+    "1": [
+      {
+        "id": 1,
+        "uuid": "666ba544-13fa-4b73-ada9-0a87538f1354",
+        "name": "Test Series Alpha - S01E01",
+        "title": "Test Series Alpha - S01E01",
+        "episode_number": 1,
+        "season_number": 1,
+        "description": "Synthetic episode 1.",
+        "air_date": "2020-01-01",
+        "plot": "Synthetic episode 1.",
+        "duration_secs": 20,
+        "rating": "7.0",
+        "tmdb_id": null,
+        "imdb_id": null,
+        "movie_image": "https://dispatcharr.test/api/vod/episodes/1/image/?kind=movie_image&m3u_account_id=3&v=c680d364",
+        "container_extension": "mp4",
+        "type": "episode",
+        "series": {
+          "id": 1,
+          "name": "Test Series Alpha"
+        }
+      },
+      {
+        "id": 2,
+        "uuid": "d59c5abc-2f93-462f-b1c8-4845b6b95ada",
+        "name": "Test Series Alpha - S01E02",
+        "title": "Test Series Alpha - S01E02",
+        "episode_number": 2,
+        "season_number": 1,
+        "description": "Synthetic episode 2.",
+        "air_date": "2020-01-02",
+        "plot": "Synthetic episode 2.",
+        "duration_secs": 20,
+        "rating": "7.0",
+        "tmdb_id": null,
+        "imdb_id": null,
+        "movie_image": "https://dispatcharr.test/api/vod/episodes/2/image/?kind=movie_image&m3u_account_id=3&v=c680d364",
+        "container_extension": "mp4",
+        "type": "episode",
+        "series": {
+          "id": 1,
+          "name": "Test Series Alpha"
+        }
+      },
+      {
+        "id": 3,
+        "uuid": "2a07c47c-8c55-4daf-9582-e96a6e5a81c9",
+        "name": "Test Series Alpha - S01E03",
+        "title": "Test Series Alpha - S01E03",
+        "episode_number": 3,
+        "season_number": 1,
+        "description": "Synthetic episode 3.",
+        "air_date": "2020-01-03",
+        "plot": "Synthetic episode 3.",
+        "duration_secs": 20,
+        "rating": "7.0",
+        "tmdb_id": null,
+        "imdb_id": null,
+        "movie_image": "https://dispatcharr.test/api/vod/episodes/3/image/?kind=movie_image&m3u_account_id=3&v=c680d364",
+        "container_extension": "mp4",
+        "type": "episode",
+        "series": {
+          "id": 1,
+          "name": "Test Series Alpha"
+        }
+      }
+    ],
+    "2": [
+      {
+        "id": 4,
+        "uuid": "65eb6472-e51d-4871-9347-c740bc2411da",
+        "name": "Test Series Alpha - S02E01",
+        "title": "Test Series Alpha - S02E01",
+        "episode_number": 1,
+        "season_number": 2,
+        "description": "Synthetic episode 1.",
+        "air_date": "2020-01-01",
+        "plot": "Synthetic episode 1.",
+        "duration_secs": 20,
+        "rating": "7.0",
+        "tmdb_id": null,
+        "imdb_id": null,
+        "movie_image": "https://dispatcharr.test/api/vod/episodes/4/image/?kind=movie_image&m3u_account_id=3&v=c680d364",
+        "container_extension": "mp4",
+        "type": "episode",
+        "series": {
+          "id": 1,
+          "name": "Test Series Alpha"
+        }
+      },
+      {
+        "id": 5,
+        "uuid": "c82a5400-e750-4151-a424-3482c3a4f61b",
+        "name": "Test Series Alpha - S02E02",
+        "title": "Test Series Alpha - S02E02",
+        "episode_number": 2,
+        "season_number": 2,
+        "description": "Synthetic episode 2.",
+        "air_date": "2020-01-02",
+        "plot": "Synthetic episode 2.",
+        "duration_secs": 20,
+        "rating": "7.0",
+        "tmdb_id": null,
+        "imdb_id": null,
+        "movie_image": "https://dispatcharr.test/api/vod/episodes/5/image/?kind=movie_image&m3u_account_id=3&v=c680d364",
+        "container_extension": "mp4",
+        "type": "episode",
+        "series": {
+          "id": 1,
+          "name": "Test Series Alpha"
+        }
+      }
+    ]
+  }
+}

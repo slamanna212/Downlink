@@ -54,10 +54,42 @@ class H(BaseHTTPRequestHandler):
                 return self._stream_if(xc.get(int(q["stream"][0])), minutes=int(q.get("duration", ["60"])[0]), start=q.get("start", [""])[0])
         except (ValueError, KeyError):
             pass
+        if parts[0] == "img" and len(parts) == 2 and parts[1].endswith(".png") and "/" not in parts[1][:-4]:
+            return self._file(os.path.join(MEDIA, "img", parts[1]), "image/png")
+        if parts[0] in ("movie", "series") and len(parts) == 4 and self._xc_auth(parts[1], parts[2]):
+            ext = parts[3].rsplit(".", 1)[-1]
+            if ext in ("mp4", "mkv"):
+                return self._file(os.path.join(MEDIA, "vod_clip." + ext), "video/mp4" if ext == "mp4" else "video/x-matroska")
         if u.path.startswith("/ch/") and u.path.endswith(".ts"):
             c = BY_SLUG.get(u.path[4:-3])
             if c and os.path.isfile(os.path.join(MEDIA, c["clip"] + ".ts")): return self._stream(c)
         self._send(404, "not found", "text/plain")
+
+    def _file(self, path, ctype):
+        """Static file with single-range support (VOD seeking)."""
+        if not os.path.isfile(path): return self._send(404, "not found", "text/plain")
+        size = os.path.getsize(path); start, end, code = 0, size - 1, 200
+        rng = self.headers.get("Range", "")
+        if rng.startswith("bytes="):
+            a, _, b = rng[6:].partition("-")
+            try:
+                start = int(a) if a else size - int(b); end = int(b) if (a and b) else size - 1; code = 206
+            except ValueError: pass
+            end = min(end, size - 1)
+            if start > end: return self._send(416, "bad range", "text/plain")
+        self.send_response(code); self.send_header("Content-Type", ctype); self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if code == 206: self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+        self.send_header("Connection", "close"); self.end_headers()
+        if self.command == "HEAD": return
+        try:
+            with open(path, "rb") as f:
+                f.seek(start); left = end - start + 1
+                while left > 0:
+                    d = f.read(min(65536, left))
+                    if not d: break
+                    self.wfile.write(d); left -= len(d)
+        except (BrokenPipeError, ConnectionResetError): pass
 
     def _xc_auth(self, user, pw): return user == epg.XC_USER and pw == epg.XC_PASS
 
@@ -73,7 +105,11 @@ class H(BaseHTTPRequestHandler):
         if not self._xc_auth(q.get("username", [""])[0], q.get("password", [""])[0]):
             return self._send(200, json.dumps({"user_info": {"auth": 0}}), "application/json")
         body = {"": epg.xc_login(host), "get_live_categories": epg.xc_categories(),
-                "get_live_streams": epg.xc_live_streams(host)}.get(a, [])
+                "get_live_streams": epg.xc_live_streams(host),
+                "get_vod_categories": epg.VOD_CATEGORIES, "get_vod_streams": epg.xc_vod_streams(host),
+                "get_series_categories": epg.SERIES_CATEGORIES, "get_series": epg.xc_series(host),
+                "get_vod_info": epg.xc_vod_info(host, int(q.get("vod_id", ["0"])[0])),
+                "get_series_info": epg.xc_series_info(host, int(q.get("series_id", ["0"])[0]))}.get(a, [])
         self._send(200, json.dumps(body), "application/json")
 
     def _stream(self, c):

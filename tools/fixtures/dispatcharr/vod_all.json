@@ -1,0 +1,145 @@
+{
+  "count": 6,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 3,
+      "uuid": "3beb544a-d0fd-419e-9a2f-f25df1c3b2f8",
+      "name": "Test Documentary Three (2019)",
+      "description": "Synthetic plot for Test Documentary Three.",
+      "year": 2019,
+      "rating": 7.0,
+      "genre": "Test",
+      "duration": 20,
+      "created_at": "2026-11-20T00:56:13.367604Z",
+      "updated_at": "2026-11-20T00:56:19.840441Z",
+      "custom_properties": "{\"actors\": \"Test Actor\", \"director\": \"Test Director\", \"backdrop_path\": [\"http://streams.dispatcharr.test/img/backdrop.png\"]}",
+      "logo": {
+        "id": 2,
+        "name": "Test Documentary Three (2019)",
+        "url": "http://streams.dispatcharr.test/img/movie3.png",
+        "cache_url": "https://dispatcharr.test/api/vod/vodlogos/2/cache/?v=8e470cf3",
+        "movie_count": 0,
+        "series_count": 0,
+        "is_used": true
+      },
+      "content_type": "movie"
+    },
+    {
+      "id": 4,
+      "uuid": "69fe1ff3-5b01-434a-95b8-5e0b581a98a7",
+      "name": "Test Movie Four (2023)",
+      "description": "Synthetic plot for Test Movie Four.",
+      "year": 2023,
+      "rating": 7.0,
+      "genre": "Test",
+      "duration": 20,
+      "created_at": "2026-11-20T00:56:13.367610Z",
+      "updated_at": "2026-11-20T00:56:34.118836Z",
+      "custom_properties": "{\"actors\": \"Test Actor\", \"director\": \"Test Director\", \"backdrop_path\": [\"http://streams.dispatcharr.test/img/backdrop.png\"]}",
+      "logo": {
+        "id": 1,
+        "name": "Test Movie Four (2023)",
+        "url": "http://streams.dispatcharr.test/img/movie4.png",
+        "cache_url": "https://dispatcharr.test/api/vod/vodlogos/1/cache/?v=9c337ce9",
+        "movie_count": 0,
+        "series_count": 0,
+        "is_used": true
+      },
+      "content_type": "movie"
+    },
+    {
+      "id": 1,
+      "uuid": "44cb3e20-f963-4da6-b393-568af2440fd7",
+      "name": "Test Movie One (2021)",
+      "description": "Synthetic plot for Test Movie One.",
+      "year": 2021,
+      "rating": 7.0,
+      "genre": "Test",
+      "duration": 20,
+      "created_at": "2026-11-20T00:56:13.367577Z",
+      "updated_at": "2026-11-20T00:56:34.156851Z",
+      "custom_properties": "{\"actors\": \"Test Actor\", \"director\": \"Test Director\", \"backdrop_path\": [\"http://streams.dispatcharr.test/img/backdrop.png\"]}",
+      "logo": {
+        "id": 4,
+        "name": "Test Movie One (2021)",
+        "url": "http://streams.dispatcharr.test/img/movie1.png",
+        "cache_url": "https://dispatcharr.test/api/vod/vodlogos/4/cache/?v=6828a436",
+        "movie_count": 0,
+        "series_count": 0,
+        "is_used": true
+      },
+      "content_type": "movie"
+    },
+    {
+      "id": 2,
+      "uuid": "935a7677-6e51-4364-a42e-876f3450ea91",
+      "name": "Test Movie Two (2022)",
+      "description": "Synthetic plot for Test Movie Two.",
+      "year": 2022,
+      "rating": 7.0,
+      "genre": "Test",
+      "duration": 20,
+      "created_at": "2026-11-20T00:56:13.367597Z",
+      "updated_at": "2026-11-20T00:56:34.196353Z",
+      "custom_properties": "{\"actors\": \"Test Actor\", \"director\": \"Test Director\", \"backdrop_path\": [\"http://streams.dispatcharr.test/img/backdrop.png\"]}",
+      "logo": {
+        "id": 3,
+        "name": "Test Movie Two (2022)",
+        "url": "http://streams.dispatcharr.test/img/movie2.png",
+        "cache_url": "https://dispatcharr.test/api/vod/vodlogos/3/cache/?v=354da397",
+        "movie_count": 0,
+        "series_count": 0,
+        "is_used": true
+      },
+      "content_type": "movie"
+    },
+    {
+      "id": 1,
+      "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+      "name": "Test Series Alpha",
+      "description": "Synthetic plot for Test Series Alpha.",
+      "year": 2020,
+      "rating": 7.5,
+      "genre": "Test",
+      "duration": null,
+      "created_at": "2026-11-20T00:56:13.393567Z",
+      "updated_at": "2026-11-20T00:56:13.393587Z",
+      "custom_properties": "{\"cast\": \"Test Actor\", \"director\": \"Test Director\", \"category_id\": \"20\", \"releaseDate\": \"2020-01-01\", \"backdrop_path\": [\"http://streams.dispatcharr.test/img/backdrop.png\"], \"episode_run_time\": \"1\"}",
+      "logo": {
+        "id": 5,
+        "name": "Test Series Alpha",
+        "url": "http://streams.dispatcharr.test/img/series1.png",
+        "cache_url": "https://dispatcharr.test/api/vod/vodlogos/5/cache/?v=c680d364",
+        "movie_count": 0,
+        "series_count": 0,
+        "is_used": true
+      },
+      "content_type": "series"
+    },
+    {
+      "id": 2,
+      "uuid": "a0fe77eb-0e88-424b-88b2-9dc7e6bd5cf9",
+      "name": "Test Series Beta",
+      "description": "Synthetic plot for Test Series Beta.",
+      "year": 2024,
+      "rating": 7.5,
+      "genre": "Test",
+      "duration": null,
+      "created_at": "2026-11-20T00:56:13.393583Z",
+      "updated_at": "2026-11-20T00:56:13.393590Z",
+      "custom_properties": "{\"cast\": \"Test Actor\", \"director\": \"Test Director\", \"category_id\": \"20\", \"releaseDate\": \"2024-01-01\", \"backdrop_path\": [\"http://streams.dispatcharr.test/img/backdrop.png\"], \"episode_run_time\": \"1\"}",
+      "logo": {
+        "id": 6,
+        "name": "Test Series Beta",
+        "url": "http://streams.dispatcharr.test/img/series2.png",
+        "cache_url": "https://dispatcharr.test/api/vod/vodlogos/6/cache/?v=95785caf",
+        "movie_count": 0,
+        "series_count": 0,
+        "is_used": true
+      },
+      "content_type": "series"
+    }
+  ]
+}

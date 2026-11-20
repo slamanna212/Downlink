@@ -1,0 +1,13 @@
+{
+  "id": 31,
+  "start_time": "2026-11-20T05:12:22.131476Z",
+  "end_time": "2026-11-20T05:13:52Z",
+  "task_id": "dvr-now-31-0f8d2b21594a4787b91ce0344af0395a",
+  "custom_properties": {
+    "program": {
+      "title": "Synthetic In Progress Recording",
+      "description": "capture"
+    }
+  },
+  "channel": 10
+}

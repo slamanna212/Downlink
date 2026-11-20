@@ -1,0 +1,79 @@
+{
+  "count": 6,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 2,
+      "name": "Test Documentary Three (2019)",
+      "url": "http://streams.dispatcharr.test/img/movie3.png",
+      "cache_url": "https://dispatcharr.test/api/vod/vodlogos/2/cache/?v=8e470cf3",
+      "movie_count": 1,
+      "series_count": 0,
+      "is_used": true,
+      "item_names": [
+        "Movie: Test Documentary Three (2019)"
+      ]
+    },
+    {
+      "id": 1,
+      "name": "Test Movie Four (2023)",
+      "url": "http://streams.dispatcharr.test/img/movie4.png",
+      "cache_url": "https://dispatcharr.test/api/vod/vodlogos/1/cache/?v=9c337ce9",
+      "movie_count": 1,
+      "series_count": 0,
+      "is_used": true,
+      "item_names": [
+        "Movie: Test Movie Four (2023)"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Test Movie One (2021)",
+      "url": "http://streams.dispatcharr.test/img/movie1.png",
+      "cache_url": "https://dispatcharr.test/api/vod/vodlogos/4/cache/?v=6828a436",
+      "movie_count": 1,
+      "series_count": 0,
+      "is_used": true,
+      "item_names": [
+        "Movie: Test Movie One (2021)"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Test Movie Two (2022)",
+      "url": "http://streams.dispatcharr.test/img/movie2.png",
+      "cache_url": "https://dispatcharr.test/api/vod/vodlogos/3/cache/?v=354da397",
+      "movie_count": 1,
+      "series_count": 0,
+      "is_used": true,
+      "item_names": [
+        "Movie: Test Movie Two (2022)"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Test Series Alpha",
+      "url": "http://streams.dispatcharr.test/img/series1.png",
+      "cache_url": "https://dispatcharr.test/api/vod/vodlogos/5/cache/?v=c680d364",
+      "movie_count": 0,
+      "series_count": 1,
+      "is_used": true,
+      "item_names": [
+        "Series: Test Series Alpha"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Test Series Beta",
+      "url": "http://streams.dispatcharr.test/img/series2.png",
+      "cache_url": "https://dispatcharr.test/api/vod/vodlogos/6/cache/?v=95785caf",
+      "movie_count": 0,
+      "series_count": 1,
+      "is_used": true,
+      "item_names": [
+        "Series: Test Series Beta"
+      ]
+    }
+  ]
+}

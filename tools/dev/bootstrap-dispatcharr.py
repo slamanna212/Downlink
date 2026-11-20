@@ -114,6 +114,9 @@ def main():
                                             "enable_vod": False})
         log("created Xtream account", a["id"]); accts[XC_NAME] = a
     xc_acct = accts[XC_NAME]
+    if not api.get(f"/api/m3u/accounts/{xc_acct['id']}/").get("enable_vod"):
+        api.patch(f"/api/m3u/accounts/{xc_acct['id']}/", {"enable_vod": True}); log("enabled VOD on Xtream account")
+        api.post(f"/api/m3u/accounts/{xc_acct['id']}/refresh-vod/")
 
     # --- EPG source
     srcs = {s["name"]: s for s in api.results("/api/epg/sources/")}
@@ -167,6 +170,21 @@ def main():
         if name.startswith("Redirect") and c.get("stream_profile_id") != redirect["id"]:
             patch["stream_profile_id"] = redirect["id"]
         if patch: api.patch(f"/api/channels/channels/{c['id']}/", patch); log("patched", name, list(patch))
+
+    # --- VOD ingest (async); wait for movies and series
+    for attempt in range(60):
+        nm = api.get("/api/vod/movies/?page=1&page_size=1")["count"]; ns = api.get("/api/vod/series/?page=1&page_size=1")["count"]
+        if nm >= 4 and ns >= 2: break
+        if attempt == 20: api.post(f"/api/m3u/accounts/{xc_acct['id']}/refresh-vod/")
+        time.sleep(2)
+    else:
+        log(f"WARNING: VOD not fully ingested (movies={nm}, series={ns})")
+    # Details/episodes are fetched lazily by Dispatcharr on provider-info; trigger once so fixtures are complete.
+    for m in api.results("/api/vod/movies/"): api.get(f"/api/vod/movies/{m['id']}/provider-info/")
+    for sr in api.results("/api/vod/series/"): api.get(f"/api/vod/series/{sr['id']}/provider-info/")
+    log(f"VOD: {nm} movies, {ns} series")
+
+    subprocess.run([sys.executable, "-I", os.path.join(HERE, "dvr-seed.py")], check=True)   # rules + one short recording
 
     final = api.results("/api/channels/channels/")
     log(f"done: {len(final)} channels; catch-up: {[c['name'] for c in final if c.get('is_catchup')]}")

@@ -1,0 +1,27 @@
+{
+  "id": 11,
+  "start_time": "2026-12-04T20:00:00Z",
+  "end_time": "2026-12-04T21:00:00Z",
+  "task_id": "dvr-recording-11",
+  "custom_properties": {
+    "rule": {
+      "id": 1,
+      "name": "Synthetic Weekday Rule",
+      "type": "recurring",
+      "days_of_week": [
+        0,
+        2,
+        4
+      ]
+    },
+    "status": "scheduled",
+    "program": {
+      "title": "Synthetic Weekday Rule",
+      "end_time": "2026-12-04T21:00:00+00:00",
+      "start_time": "2026-12-04T20:00:00+00:00",
+      "description": "Synthetic Weekday Rule"
+    },
+    "description": "Synthetic Weekday Rule"
+  },
+  "channel": 1
+}

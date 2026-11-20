@@ -1,6 +1,81 @@
 {
-  "count": 0,
+  "count": 2,
   "next": null,
   "previous": null,
-  "results": []
+  "results": [
+    {
+      "id": 1,
+      "logo": {
+        "id": 5,
+        "name": "Test Series Alpha",
+        "url": "http://streams.dispatcharr.test/img/series1.png",
+        "cache_url": "https://dispatcharr.test/api/vod/vodlogos/5/cache/?v=c680d364",
+        "movie_count": 0,
+        "series_count": 1,
+        "is_used": true,
+        "item_names": [
+          "Series: Test Series Alpha"
+        ]
+      },
+      "episode_count": 5,
+      "custom_properties": {
+        "cast": "Test Actor",
+        "director": "Test Director",
+        "category_id": "20",
+        "releaseDate": "2020-01-01",
+        "backdrop_path": [
+          "http://streams.dispatcharr.test/img/backdrop.png"
+        ],
+        "episode_run_time": "1"
+      },
+      "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+      "name": "Test Series Alpha",
+      "description": "Synthetic plot for Test Series Alpha.",
+      "year": 2020,
+      "rating": "7.5",
+      "genre": "Test",
+      "tmdb_id": null,
+      "imdb_id": null,
+      "language": "",
+      "created_at": "2026-11-20T00:56:13.393567Z",
+      "updated_at": "2026-11-20T00:56:13.393587Z"
+    },
+    {
+      "id": 2,
+      "logo": {
+        "id": 6,
+        "name": "Test Series Beta",
+        "url": "http://streams.dispatcharr.test/img/series2.png",
+        "cache_url": "https://dispatcharr.test/api/vod/vodlogos/6/cache/?v=95785caf",
+        "movie_count": 0,
+        "series_count": 1,
+        "is_used": true,
+        "item_names": [
+          "Series: Test Series Beta"
+        ]
+      },
+      "episode_count": 2,
+      "custom_properties": {
+        "cast": "Test Actor",
+        "director": "Test Director",
+        "category_id": "20",
+        "releaseDate": "2024-01-01",
+        "backdrop_path": [
+          "http://streams.dispatcharr.test/img/backdrop.png"
+        ],
+        "episode_run_time": "1"
+      },
+      "uuid": "a0fe77eb-0e88-424b-88b2-9dc7e6bd5cf9",
+      "name": "Test Series Beta",
+      "description": "Synthetic plot for Test Series Beta.",
+      "year": 2024,
+      "rating": "7.5",
+      "genre": "Test",
+      "tmdb_id": null,
+      "imdb_id": null,
+      "language": "",
+      "created_at": "2026-11-20T00:56:13.393583Z",
+      "updated_at": "2026-11-20T00:56:13.393590Z"
+    }
+  ]
 }

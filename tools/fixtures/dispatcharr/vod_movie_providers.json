@@ -1,0 +1,228 @@
+[
+  {
+    "id": 3,
+    "movie": {
+      "id": 3,
+      "logo": {
+        "id": 2,
+        "name": "Test Documentary Three (2019)",
+        "url": "http://streams.dispatcharr.test/img/movie3.png",
+        "cache_url": "/api/vod/vodlogos/2/cache/?v=8e470cf3",
+        "movie_count": 1,
+        "series_count": 0,
+        "is_used": true,
+        "item_names": [
+          "Movie: Test Documentary Three (2019)"
+        ]
+      },
+      "custom_properties": {
+        "actors": "Test Actor",
+        "director": "Test Director",
+        "backdrop_path": [
+          "http://streams.dispatcharr.test/img/backdrop.png"
+        ]
+      },
+      "uuid": "3beb544a-d0fd-419e-9a2f-f25df1c3b2f8",
+      "name": "Test Documentary Three (2019)",
+      "description": "Synthetic plot for Test Documentary Three.",
+      "year": 2019,
+      "rating": "7.0",
+      "genre": "Test",
+      "duration_secs": 20,
+      "tmdb_id": null,
+      "imdb_id": null,
+      "language": "",
+      "is_adult": false,
+      "created_at": "2026-11-20T00:56:13.367604Z",
+      "updated_at": "2026-11-20T00:56:19.840441Z"
+    },
+    "category": {
+      "id": 4,
+      "name": "Test Documentaries",
+      "category_type": "movie",
+      "category_type_display": "Movie",
+      "m3u_accounts": [
+        {
+          "category": 4,
+          "m3u_account": 3,
+          "enabled": true,
+          "custom_properties": {}
+        }
+      ]
+    },
+    "m3u_account": {
+      "id": 3,
+      "name": "Synthetic Xtream",
+      "server_url": "http://streams.dispatcharr.test",
+      "file_path": null,
+      "server_group": null,
+      "max_streams": 0,
+      "is_active": true,
+      "created_at": "2026-11-19T19:38:02.485318Z",
+      "updated_at": "2026-11-19T19:38:14.139988Z",
+      "filters": [],
+      "user_agent": null,
+      "profiles": [
+        {
+          "id": 3,
+          "name": "Synthetic Xtream Default",
+          "max_streams": 0,
+          "is_active": true,
+          "is_default": true,
+          "current_viewers": 0,
+          "search_pattern": "^(.*)$",
+          "replace_pattern": "$1",
+          "custom_properties": {
+            "user_info": {
+              "auth": 1,
+              "status": "Active",
+              "message": "",
+              "exp_date": "1826653093",
+              "is_trial": "0",
+              "password": "REDACTED-PASSWORD",
+              "username": "REDACTED-USER",
+              "created_at": "1795030693",
+              "active_cons": "0",
+              "max_connections": "5",
+              "allowed_output_formats": [
+                "ts"
+              ]
+            },
+            "server_info": {
+              "url": "host.docker.internal",
+              "port": "8088",
+              "time_now": "2026-11-19 19:38:13",
+              "timezone": "UTC",
+              "rtmp_port": "1935",
+              "https_port": "443",
+              "timestamp_now": 1795117093,
+              "server_protocol": "http"
+            },
+            "last_refresh": "2026-11-19T19:38:13.542971Z",
+            "auth_timestamp": 1795117093.542981
+          },
+          "exp_date": "2027-11-19T19:38:13Z",
+          "account": {
+            "id": 3,
+            "name": "Synthetic Xtream",
+            "account_type": "XC",
+            "is_xtream_codes": true
+          }
+        }
+      ],
+      "locked": false,
+      "channel_groups": [
+        {
+          "channel_group": 1,
+          "enabled": true,
+          "auto_channel_sync": false,
+          "auto_sync_channel_start": null,
+          "auto_sync_channel_end": null,
+          "custom_properties": {},
+          "is_stale": false,
+          "last_seen": "2026-11-19T19:38:13.483442Z",
+          "stream_count": 0
+        },
+        {
+          "channel_group": 8,
+          "enabled": true,
+          "auto_channel_sync": false,
+          "auto_sync_channel_start": null,
+          "auto_sync_channel_end": null,
+          "custom_properties": {
+            "xc_id": "1"
+          },
+          "is_stale": false,
+          "last_seen": "2026-11-19T19:38:13.483442Z",
+          "stream_count": 3
+        }
+      ],
+      "refresh_interval": 0,
+      "cron_expression": "",
+      "custom_properties": {
+        "enable_vod": true,
+        "auto_enable_new_groups_vod": true,
+        "auto_enable_new_groups_live": true,
+        "auto_enable_new_groups_series": true
+      },
+      "account_type": "XC",
+      "username": "REDACTED-USER",
+      "stale_stream_days": 7,
+      "priority": 0,
+      "status": "success",
+      "last_message": "Processing completed in 0.7 seconds. Streams: 3 created, 0 updated, 0 marked stale, 0 removed. Total processed: 3.",
+      "earliest_expiration": "2027-11-19T19:38:13Z",
+      "all_expirations": [
+        {
+          "profile_id": 3,
+          "profile_name": "Synthetic Xtream Default",
+          "exp_date": "2027-11-19T19:38:13Z",
+          "is_active": true
+        }
+      ],
+      "enable_vod": true,
+      "auto_enable_new_groups_live": true,
+      "auto_enable_new_groups_vod": true,
+      "auto_enable_new_groups_series": true,
+      "hash_key": null,
+      "exp_date": "2027-11-19T19:38:13Z"
+    },
+    "quality_info": null,
+    "custom_properties": {
+      "basic_data": {
+        "num": 3,
+        "name": "Test Documentary Three (2019)",
+        "added": "1767225603",
+        "rating": "6.3",
+        "is_adult": "0",
+        "stream_id": 2003,
+        "custom_sid": null,
+        "category_id": "11",
+        "stream_icon": "http://streams.dispatcharr.test/img/movie3.png",
+        "stream_type": "movie",
+        "_category_id": 4,
+        "category_ids": [
+          11
+        ],
+        "direct_source": "",
+        "rating_5based": 3.5,
+        "container_extension": "mp4",
+        "_provider_category_id": "11"
+      },
+      "movie_data": {
+        "name": "Test Documentary Three",
+        "added": "1767225600",
+        "stream_id": 2003,
+        "category_id": "11",
+        "container_extension": "mp4"
+      },
+      "detailed_info": {
+        "cast": "Test Actor",
+        "name": "Test Documentary Three",
+        "plot": "Synthetic plot for Test Documentary Three.",
+        "genre": "Test",
+        "actors": "Test Actor",
+        "o_name": "Test Documentary Three",
+        "rating": "7.0",
+        "bitrate": 2000,
+        "country": "Testland",
+        "director": "Test Director",
+        "duration": "00:00:20",
+        "description": "Synthetic plot for Test Documentary Three.",
+        "movie_image": "http://streams.dispatcharr.test/img/movie3.png",
+        "releasedate": "2019-03-01",
+        "backdrop_path": [
+          "http://streams.dispatcharr.test/img/backdrop.png"
+        ],
+        "duration_secs": 20
+      },
+      "detailed_fetched": true
+    },
+    "stream_id": "2003",
+    "container_extension": "mp4",
+    "created_at": "2026-11-20T00:56:13.370901Z",
+    "updated_at": "2026-11-20T00:56:13.370924Z",
+    "last_advanced_refresh": "2026-11-20T00:56:19.827675Z",
+    "last_seen": "2026-11-20T00:56:13.339688Z"
+  }
+]

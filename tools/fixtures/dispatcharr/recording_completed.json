@@ -1,0 +1,34 @@
+{
+  "id": 3,
+  "start_time": "2026-11-20T00:58:08Z",
+  "end_time": "2026-11-20T01:00:08Z",
+  "task_id": "dvr-recording-3",
+  "custom_properties": {
+    "status": "completed",
+    "program": {
+      "title": "Synthetic Upcoming Recording",
+      "description": "one-off"
+    },
+    "ended_at": "2026-11-20 01:00:09.181808",
+    "file_url": "/api/channels/recordings/3/file/",
+    "file_name": "20261120_005808.mkv",
+    "file_path": "/data/recordings/TV_Shows/Synthetic Upcoming Recording/20261120_005808.mkv",
+    "started_at": "2026-11-20 00:58:08.078994",
+    "stream_info": {
+      "width": 1920.0,
+      "height": 1080.0,
+      "resolution": "1920x1080",
+      "source_fps": 30.0,
+      "audio_codec": "aac",
+      "sample_rate": 48000.0,
+      "video_codec": "h264",
+      "pixel_format": "yuv420p",
+      "audio_bitrate": 129.0,
+      "audio_channels": "mono"
+    },
+    "bytes_written": 95066524,
+    "remux_success": true,
+    "output_file_url": "/api/channels/recordings/3/file/"
+  },
+  "channel": 1
+}

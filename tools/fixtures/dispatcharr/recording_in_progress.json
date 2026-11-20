@@ -1,0 +1,20 @@
+{
+  "id": 31,
+  "start_time": "2026-11-20T05:12:22.131476Z",
+  "end_time": "2026-11-20T05:13:52Z",
+  "task_id": "dvr-now-31-0f8d2b21594a4787b91ce0344af0395a",
+  "custom_properties": {
+    "status": "recording",
+    "program": {
+      "title": "Synthetic In Progress Recording",
+      "description": "capture"
+    },
+    "_hls_dir": "/data/recordings/TV_Shows/Synthetic In Progress Recording/.dvr_31_hls",
+    "file_url": "/api/channels/recordings/31/hls/index.m3u8",
+    "file_name": "20261120_051222.mkv",
+    "file_path": "/data/recordings/TV_Shows/Synthetic In Progress Recording/20261120_051222.mkv",
+    "started_at": "2026-11-20 05:12:22.195875",
+    "output_file_url": "/api/channels/recordings/31/hls/index.m3u8"
+  },
+  "channel": 10
+}

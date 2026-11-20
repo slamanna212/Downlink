@@ -1,0 +1,26 @@
+{
+  "id": 26,
+  "start_time": "2026-11-21T08:00:00Z",
+  "end_time": "2026-11-21T09:00:00Z",
+  "task_id": "dvr-recording-26",
+  "custom_properties": {
+    "season": 1,
+    "episode": 18,
+    "program": {
+      "id": 889,
+      "title": "Pattern Playhouse",
+      "season": 1,
+      "tvg_id": "test-news.test",
+      "episode": 18,
+      "end_time": "2026-11-21T09:00:00+00:00",
+      "sub_title": "Episode 18",
+      "start_time": "2026-11-21T08:00:00+00:00",
+      "description": "Synthetic programme 97 on Test News.",
+      "epg_source_id": 1,
+      "onscreen_episode": "S01E18",
+      "original_air_date": ""
+    },
+    "onscreen_episode": "S01E18"
+  },
+  "channel": 2
+}

@@ -79,3 +79,52 @@ def xc_login(host):
             "server_info": {"url": h, "port": p or "80", "https_port": "443", "server_protocol": "http", "rtmp_port": "1935",
                             "timezone": "UTC", "timestamp_now": int(now.timestamp()),
                             "time_now": now.strftime("%Y-%m-%d %H:%M:%S")}}
+
+
+# ---------------- Xtream VOD (synthetic) ----------------
+VOD_CATEGORIES = [{"category_id": "10", "category_name": "Test Movies", "parent_id": 0},
+                  {"category_id": "11", "category_name": "Test Documentaries", "parent_id": 0}]
+SERIES_CATEGORIES = [{"category_id": "20", "category_name": "Test Series", "parent_id": 0}]
+MOVIES = [  # id, name, cat, ext, year, poster
+    (2001, "Test Movie One", "10", "mp4", 2021, "movie1"), (2002, "Test Movie Two", "10", "mkv", 2022, "movie2"),
+    (2003, "Test Documentary Three", "11", "mp4", 2019, "movie3"), (2004, "Test Movie Four", "10", "mkv", 2023, "movie4")]
+SERIES = [(3001, "Test Series Alpha", {1: 3, 2: 2}, "series1", 2020), (3002, "Test Series Beta", {1: 2}, "series2", 2024)]
+_T0 = 1767225600
+
+def _episode_id(sid, season, ep): return sid * 100 + season * 10 + ep   # 300111 ...
+
+def xc_vod_streams(host):
+    return [{"num": i, "name": f"{n} ({y})", "stream_type": "movie", "stream_id": sid, "stream_icon": f"http://{host}/img/{p}.png",
+             "rating": f"{6 + i % 3}.{i}", "rating_5based": 3.5, "added": str(_T0 + i), "is_adult": "0", "category_id": cat,
+             "category_ids": [int(cat)], "container_extension": ext, "custom_sid": None, "direct_source": ""}
+            for i, (sid, n, cat, ext, y, p) in enumerate(MOVIES, 1)]
+
+def xc_vod_info(host, vod_id):
+    for sid, n, cat, ext, y, p in MOVIES:
+        if sid == vod_id:
+            return {"info": {"movie_image": f"http://{host}/img/{p}.png", "tmdb_id": "", "name": n, "o_name": n, "releasedate": f"{y}-03-01",
+                             "youtube_trailer": "", "director": "Test Director", "actors": "Test Actor", "cast": "Test Actor", "description": f"Synthetic plot for {n}.",
+                             "plot": f"Synthetic plot for {n}.", "age": "", "country": "Testland", "genre": "Test", "backdrop_path": [f"http://{host}/img/backdrop.png"],
+                             "duration_secs": 20, "duration": "00:00:20", "rating": "7.0", "bitrate": 2000},
+                    "movie_data": {"stream_id": sid, "name": n, "added": str(_T0), "category_id": cat, "container_extension": ext, "custom_sid": "", "direct_source": ""}}
+    return {}
+
+def xc_series(host):
+    return [{"num": i, "name": n, "series_id": sid, "cover": f"http://{host}/img/{p}.png", "plot": f"Synthetic plot for {n}.", "cast": "Test Actor",
+             "director": "Test Director", "genre": "Test", "releaseDate": f"{y}-01-01", "release_date": f"{y}-01-01", "last_modified": str(_T0),
+             "rating": "7.5", "rating_5based": 3.75, "backdrop_path": [f"http://{host}/img/backdrop.png"], "youtube_trailer": "",
+             "episode_run_time": "1", "category_id": "20", "category_ids": [20]} for i, (sid, n, seasons, p, y) in enumerate(SERIES, 1)]
+
+def xc_series_info(host, series_id):
+    for sid, n, seasons, p, y in SERIES:
+        if sid == series_id:
+            return {"seasons": [{"air_date": f"{y}-01-01", "episode_count": str(c), "id": s, "name": f"Season {s}", "overview": "", "season_number": s,
+                                 "cover": f"http://{host}/img/{p}.png"} for s, c in seasons.items()],
+                    "info": {"name": n, "cover": f"http://{host}/img/{p}.png", "plot": f"Synthetic plot for {n}.", "cast": "Test Actor", "director": "Test Director",
+                             "genre": "Test", "releaseDate": f"{y}-01-01", "last_modified": str(_T0), "rating": "7.5", "rating_5based": "3.75",
+                             "backdrop_path": [f"http://{host}/img/backdrop.png"], "youtube_trailer": "", "episode_run_time": "1", "category_id": "20"},
+                    "episodes": {str(s): [{"id": str(_episode_id(sid, s, e)), "episode_num": e, "title": f"{n} - S{s:02d}E{e:02d}", "container_extension": "mp4",
+                                           "info": {"movie_image": f"http://{host}/img/{p}.png", "plot": f"Synthetic episode {e}.", "duration_secs": 20,
+                                                    "duration": "00:00:20", "releasedate": f"{y}-01-0{e}", "rating": 7.0, "bitrate": 2000},
+                                           "custom_sid": "", "added": str(_T0), "season": s, "direct_source": ""} for e in range(1, c + 1)] for s, c in seasons.items()}}
+    return {}

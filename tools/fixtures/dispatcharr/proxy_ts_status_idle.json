@@ -1,4 +1,50 @@
 {
-  "channels": [],
-  "count": 0
+  "channels": [
+    {
+      "channel_id": "e8e49cc7-484c-413f-8c31-058bd25ef0c7",
+      "state": "active",
+      "url": "http://streams.dispatcharr.test/ch/channel-one.ts",
+      "stream_profile": "1",
+      "owner": "dispatcharr-test:1",
+      "buffer_index": 18,
+      "client_count": 1,
+      "uptime": 5.355756759643555,
+      "started_at": 1795151553.0413003,
+      "channel_name": "Channel One",
+      "m3u_profile_id": 2,
+      "stream_id": 1,
+      "stream_name": "Channel One",
+      "total_bytes": 1695744,
+      "avg_bitrate_kbps": 2532.966415170592,
+      "avg_bitrate": "2.53 Mbps",
+      "healthy": true,
+      "clients": [
+        {
+          "client_id": "client_1795151552961_1417",
+          "user_agent": "Dispatcharr-DVR/recording-28",
+          "output_format": "mpegts",
+          "ip_address": "192.0.2.10",
+          "connected_at": 1795151553.0445542,
+          "user_id": "0",
+          "output_profile_id": null
+        }
+      ],
+      "video_codec": "h264",
+      "resolution": "1920x1080",
+      "source_fps": 30.0,
+      "audio_codec": "aac",
+      "audio_channels": "mono",
+      "audio_streams": [
+        {
+          "index": 1,
+          "audio_codec": "aac",
+          "audio_channels": "mono",
+          "audio_bitrate": 129.0,
+          "sample_rate": 48000
+        }
+      ],
+      "stream_type": "mpegts"
+    }
+  ],
+  "count": 1
 }

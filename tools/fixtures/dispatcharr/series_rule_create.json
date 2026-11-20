@@ -1,0 +1,13 @@
+{
+  "success": true,
+  "rules": [
+    {
+      "tvg_id": "test-news.test",
+      "mode": "all",
+      "title": "Pattern Playhouse",
+      "title_mode": "exact",
+      "description": "",
+      "description_mode": "contains"
+    }
+  ]
+}

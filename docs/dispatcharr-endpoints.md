@@ -19,6 +19,7 @@ Auth for every call: `X-API-Key: <key>` (401 with a missing or wrong key). JWT: 
 | 4 | Effective stream profile at sync | `effective_stream_profile_id` is **null** for a channel on the server default; it is not resolved server-side. Resolve it client-side: `channel.stream_profile_id ?? stream_settings.default_stream_profile` (see below). |
 | 5 | Catch-up from M3U tags | Dispatcharr's M3U ingest reads only `tv_archive="1"` and `tv_archive_duration="N"` for `is_catchup`/`catchup_days` (XC accounts: `tv_archive`, `tv_archive_duration` from `get_live_streams`). `catchup="default"` / `catchup-days` / `catchup-source` attributes on a plain M3U are **ignored**. The channel's `is_catchup` is rolled up from its active streams. **Playback additionally requires an XC-type M3U account**: a plain-M3U catch-up stream gets a 201 session but `GET playback_url` returns 400 `Cannot build timeshift URL` (source: `apps/timeshift/views.py::_prepare_catchup_stream_attempt` skips any stream whose account is not `account_type == "XC"` or whose `custom_properties.stream_id` is missing). |
 | 6 | `POST …/{id}/position/` `{…}` | Body is `{"position_secs": <number>}`. Returns 404 `{"error":"No active playback for this session"}` until the player has made its first GET on `playback_url`; it cannot be called right after create. |
+| 10 | Recording state | `custom_properties.status` is absent for scheduled one-off/series recordings; extend takes `extra_minutes`; recurring rules need both dates and use 0 = Monday (see DVR). |
 | 7 | Programme ids are strings | Observed integers for XMLTV EPG in grid, current-programs and search. Keep the string-tolerant decode (dummy EPG ids may still be strings). |
 | 8 | Grid associates programmes to channels | `/api/epg/grid/` rows carry **only `tvg_id`** (no channel id/uuid). Several channels sharing one `tvg_id` receive the same rows; join on `tvg_id` client-side. |
 | 9 | Catch-up `playback_url` | Relative path `/proxy/catchup/<channel_uuid>?session_id=<id>`; prefix the server base URL. That path is a stream endpoint (rule 4): only request it on an actual play. |
@@ -129,21 +130,57 @@ stream_type`. It lists **all** viewers' clients, not only ours; filter `clients[
 exposes the provider URL, so it must pass through `redact/` before logging or showing in the debug panel. The
 channel disappears from the list within seconds of the last client disconnecting.
 
-## VOD, DVR, app data
+## VOD (verified against the synthetic Xtream VOD account)
+
+Dispatcharr ingests VOD only from **XC accounts with `enable_vod: true`** (`PATCH /api/m3u/accounts/{id}/ {"enable_vod":true}`, then
+`POST /api/m3u/accounts/{id}/refresh-vod/`; ingest is async and took seconds locally). It calls the provider's
+`get_vod_categories`, `get_series_categories`, `get_vod_streams`, `get_series` (all in one call each). New categories are
+enabled automatically (`auto_enable_new_groups_vod/series`). Fixtures: `vod_*.json`.
 
 | Call | Observed |
 |---|---|
-| `GET /api/vod/movies/`, `/series/` | paginated, empty locally (no VOD provider in the synthetic server) [`vod_movies`, `vod_series`]. Item shapes: see the OpenAPI schema. |
-| `GET /api/vod/categories/` | bare array `{id,name,category_type ("movie"\|"series"),category_type_display,m3u_accounts[]}`; a default "Uncategorized" per type [`vod_categories`] |
-| `GET /api/vod/series/{id}/episodes/`, `/api/vod/{movies,series,episodes}/{id}/image` | not exercised (no data) |
-| `POST /api/channels/recordings/` | `{channel:<id>, start_time, end_time, custom_properties:{}}` → `{id,start_time,end_time,task_id,custom_properties,channel}` [`recordings_create`]; `GET` → bare array [`recordings_list`] |
-| `GET /api/channels/recurring-rules/` | bare array [`recurring_rules`] |
-| `GET /api/channels/series-rules/` | `{"rules":[…]}` [`series_rules`] |
+| `GET /api/vod/movies/` | paginated. Row: `{id, logo{id,name,url,cache_url,movie_count,series_count,is_used,item_names[]}, custom_properties (null until provider-info), uuid, name, description, year, rating (string), genre, duration_secs, tmdb_id, imdb_id, language, is_adult, created_at, updated_at}`. **Before the first `provider-info` call** `description`, `genre`, `duration_secs` are empty/null; the list only has what `get_vod_streams` carried. `logo.cache_url` is an absolute URL built from the request host (use the path only) |
+| `GET /api/vod/movies/{id}/` | same row shape |
+| `GET /api/vod/movies/{id}/providers/` | array of `{id, movie, category{id,name,category_type,m3u_accounts[]}, m3u_account{… the full account incl. username/password and profiles …}, stream_id, container_extension, …}` — **embeds provider credentials; never log it, and drop `m3u_account` when decoding** |
+| `GET /api/vod/movies/{id}/provider-info/` | **triggers a provider `get_vod_info`** and returns `{id, uuid, stream_id, name, o_name, description, plot, year, release_date, genre, director, actors, country, rating, tmdb_id, imdb_id, youtube_trailer, duration_secs, age, backdrop_path[], cover, cover_big, movie_image, bitrate, video{}, audio{}, container_extension, direct_source, category_id, added, m3u_account{id,name,account_type}}`; image URLs are rewritten to `/api/vod/movies/{id}/image/?kind=…` |
+| `GET /api/vod/series/` | paginated; row adds `episode_count` (0 until episodes are fetched) and `custom_properties{cast,director,category_id,releaseDate,backdrop_path[],episode_run_time}` |
+| `GET /api/vod/series/{id}/provider-info/` | **triggers `get_series_info` and populates episodes** |
+| `GET /api/vod/series/{id}/episodes/` | **bare array** (not paginated). Empty until `provider-info` has run once. Each element embeds `series{…}` and `providers[{… m3u_account with credentials …}]` |
+| `GET /api/vod/episodes/` | paginated, same embedded objects |
+| `GET /api/vod/categories/` | bare array `{id,name,category_type,category_type_display,m3u_accounts[{category,m3u_account,enabled,custom_properties}]}` (movie and series categories in one list) |
+| `GET /api/vod/all/` | paginated mixed list `{id, uuid, name, description, year, rating (number), genre, duration, created_at, updated_at, custom_properties (JSON string!)}` |
+| `GET /api/vod/{movies,series,episodes}/{id}/image/` | 200 `image/png` (served via Dispatcharr's image proxy); `GET /api/vod/vodlogos/{id}/cache/` likewise |
+| `GET /proxy/vod/movie/{uuid}`, `/proxy/vod/episode/{uuid}` | **stream endpoint.** First answers `301` to `/proxy/vod/movie/{uuid}/{session_id}` (`vod_<ms>_<n>`, `Cache-Control: private, max-age=21600`). The session URL honours `Range` (206) and plays; ffprobe (which follows redirects) opened an episode through it. The session id is created by that first GET, so treat it like the other sessions (stop on leaving). `GET /proxy/vod/stats/` lists `vod_connections[{content_type, content_name, content_uuid, content_metadata, connection_count, connections[]}]`; `POST /proxy/vod/stop_client/` ends one |
+
+Pitfalls found: series `episode_count` and episode lists are lazy (call `provider-info` first); `rating` is a string on
+movie/series rows but a number in `/vod/all/`; the embedded `m3u_account` objects include provider credentials, so a typed
+decoder should not model them at all.
+
+## DVR (verified locally; fixtures `recording*.json`, `recurring_rules.json`, `series_rule*.json`)
+
+**Recording** (`GET/POST /api/channels/recordings/`, list is a **bare array**):
+`{id, start_time, end_time, task_id, custom_properties, channel (int id)}`. Create body: `{channel, start_time, end_time, custom_properties:{program:{title,description}}}`.
+- `end_time` must be in the future: past windows get 400 `{"non_field_errors":["End time must be in the future."]}` (`recording_past_error`). `start_time` may be in the past (starts immediately; `task_id` becomes `dvr-now-<id>-<hash>`, otherwise `dvr-recording-<id>`).
+- **State is `custom_properties.status`**, and it is **absent while scheduled** for one-off and series-created recordings (`recording_scheduled_oneoff`, `recording_scheduled_series`); recurring-rule recordings carry `status: "scheduled"` (`recording_scheduled_recurring`). Values seen: `scheduled`, `recording`, `completed`, `stopped`; source also has `interrupted` and `cancelled`. Treat missing as scheduled, and finished = `completed|stopped|interrupted` (the same set `extend` refuses).
+- **In progress** (`recording_in_progress`): `status: "recording"`, `file_url` = `output_file_url` = `/api/channels/recordings/{id}/hls/index.m3u8`, plus `_hls_dir`, `file_name`, `file_path`, `started_at` (naive UTC string). The playlist is `application/x-mpegURL`, `EVENT` type, 4 s segments, **segment URIs are absolute and built from the request Host** (`recording_in_progress_hls_playlist`): rewrite their origin to the configured server. Segments (`/hls/seg_00000.ts`) return 403 without `X-API-Key`, 200 with, so the player needs the header per file. `GET …/file/` while recording answers `302` to the HLS playlist.
+- **Completed/stopped** (`recording_completed`, `recording_after_stop`): `file_url` = `output_file_url` = `/api/channels/recordings/{id}/file/` (Matroska, `Range` supported, `Content-Disposition: inline; filename=…mkv`), plus `ended_at`, `bytes_written`, `remux_success`, `stream_info{width,height,resolution,source_fps,video_codec,audio_codec,…}` when probed. `stopped` adds `stopped_at`; the HLS fields are gone.
+- **Extend**: `POST …/{id}/extend/` body is **`{"extra_minutes": n}`** (positive int), not `minutes` (that returns 400 `{"success":false,"error":"extra_minutes must be a positive integer"}`). Success: `200 {"success":true,"new_end_time":"…+00:00"}`; a finished recording returns 400 `{"success":false,"error":"Recording has already finished"}`.
+- **Stop**: `POST …/{id}/stop/` → `200 {"success":true,"status":"stopped"}`; partial content stays playable (status becomes `stopped` within seconds, file at `/file/`).
+- `DELETE …/{id}/` → 204.
+
+**Recurring rule** (`GET/POST /api/channels/recurring-rules/`): `{id, days_of_week:[int], start_time:"HH:MM:SS", end_time, enabled, name, start_date, end_date, created_at, updated_at, channel}`.
+**`start_date` and `end_date` are both required** (400 `Start date is required`, then `End date is required`; the schema marks them nullable but the serializer rejects null). **Day numbering is Python `weekday()`: 0 = Monday … 6 = Sunday** (rule `[0,2,4]` produced recordings on Mon 2026-11-23, Wed 11-25, Fri 11-20). Times are interpreted in the **system time zone** (`system_settings.time_zone`, UTC locally), an overnight window (end <= start) rolls to the next day. Creating a rule materialises recordings immediately for the next 14 days; each carries `custom_properties.rule = {type:"recurring", id, days_of_week, name}`, `status: "scheduled"`, and `program{title: rule name, start_time, end_time}`. Deleting the rule removes its future recordings.
+
+**Series rule** (`GET/POST/DELETE /api/channels/series-rules/`): `POST {tvg_id?, title, mode, title_mode, description?, description_mode?, untagged_is_new?, channel_id?, epg_source_id?}`; `mode` in `all|new`, `title_mode` in `exact|contains|search|regex`, `description_mode` in `contains|search|regex`. Response `200 {"success":true,"rules":[{tvg_id,mode,title,title_mode,description,description_mode}]}` (the whole list; re-posting an identical rule is a no-op). `GET` returns `{"rules":[…]}`. `DELETE ?tvg_id=&title=[&epg_source_id=]` → `200 {"success":true,"rules":[],"removed":N}` (removes the rule and its future recordings). **Creation does not schedule anything by itself on the local server**: matching recordings appeared only after `POST /api/channels/series-rules/evaluate/ {}` → `{"success":true,"scheduled":5,"details":[{tvg_id,title,status:"ok",created:5}]}`. Evaluation-created recordings have no `status` and no `rule` tag; they carry `custom_properties{season,episode,onscreen_episode,program{id,title,season,episode,tvg_id,sub_title,description,epg_source_id,start_time,end_time,…}}`, so matching them back to a rule is by title + tvg_id. `POST …/preview/` takes the same body plus `limit` and returns `{matches:[{id,tvg_id,title,sub_title,description,start_time,end_time,season,episode,is_new}],total,limit,epg_found,warn}` without persisting.
+
+## App data
+
+| Call | Observed |
+|---|---|
 | `GET /api/accounts/users/me/app-data/` | `{limits{max_value_bytes:131072, max_total_bytes:1048576, max_apps:25, max_depth:8, key_min_length:8, key_max_length:64}, total_bytes, apps[{key,bytes}]}` [`app_data_list`] |
 | `PUT/GET/DELETE /api/accounts/users/me/app-data/{key}/` | body and response are the raw JSON value [`app_data_get`]. **Keys must be 8-64 chars.** |
 
-Not captured (would need real content): recording stop/extend/file/HLS, recurring/series rule creation,
-VOD item bodies, logo image bytes.
+Not captured: recording comskip/refresh-artwork/update-metadata, VOD image bytes.
 
 ## Local test server data
 

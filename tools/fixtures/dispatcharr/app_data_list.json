@@ -7,8 +7,12 @@
     "key_min_length": 8,
     "key_max_length": 64
   },
-  "total_bytes": 17,
+  "total_bytes": 465,
   "apps": [
+    {
+      "key": "com.downlink.state.v1",
+      "bytes": 448
+    },
     {
       "key": "downlink-fixture",
       "bytes": 17

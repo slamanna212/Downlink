@@ -1,0 +1,1312 @@
+[
+  {
+    "id": 1,
+    "series": {
+      "id": 1,
+      "logo": {
+        "id": 5,
+        "name": "Test Series Alpha",
+        "url": "http://streams.dispatcharr.test/img/series1.png",
+        "cache_url": "/api/vod/vodlogos/5/cache/?v=c680d364",
+        "movie_count": 0,
+        "series_count": 1,
+        "is_used": true,
+        "item_names": [
+          "Series: Test Series Alpha"
+        ]
+      },
+      "episode_count": 5,
+      "custom_properties": {
+        "cast": "Test Actor",
+        "director": "Test Director",
+        "category_id": "20",
+        "releaseDate": "2020-01-01",
+        "backdrop_path": [
+          "http://streams.dispatcharr.test/img/backdrop.png"
+        ],
+        "episode_run_time": "1"
+      },
+      "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+      "name": "Test Series Alpha",
+      "description": "Synthetic plot for Test Series Alpha.",
+      "year": 2020,
+      "rating": "7.5",
+      "genre": "Test",
+      "tmdb_id": null,
+      "imdb_id": null,
+      "language": "",
+      "created_at": "2026-11-20T00:56:13.393567Z",
+      "updated_at": "2026-11-20T00:56:13.393587Z"
+    },
+    "custom_properties": {
+      "movie_image": "http://streams.dispatcharr.test/img/series1.png"
+    },
+    "providers": [
+      {
+        "id": 1,
+        "episode": {
+          "id": 1,
+          "series": {
+            "id": 1,
+            "logo": {
+              "id": 5,
+              "name": "Test Series Alpha",
+              "url": "http://streams.dispatcharr.test/img/series1.png",
+              "cache_url": "/api/vod/vodlogos/5/cache/?v=c680d364",
+              "movie_count": 0,
+              "series_count": 1,
+              "is_used": true,
+              "item_names": [
+                "Series: Test Series Alpha"
+              ]
+            },
+            "episode_count": 5,
+            "custom_properties": {
+              "cast": "Test Actor",
+              "director": "Test Director",
+              "category_id": "20",
+              "releaseDate": "2020-01-01",
+              "backdrop_path": [
+                "http://streams.dispatcharr.test/img/backdrop.png"
+              ],
+              "episode_run_time": "1"
+            },
+            "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+            "name": "Test Series Alpha",
+            "description": "Synthetic plot for Test Series Alpha.",
+            "year": 2020,
+            "rating": "7.5",
+            "genre": "Test",
+            "tmdb_id": null,
+            "imdb_id": null,
+            "language": "",
+            "created_at": "2026-11-20T00:56:13.393567Z",
+            "updated_at": "2026-11-20T00:56:13.393587Z"
+          },
+          "custom_properties": {
+            "movie_image": "http://streams.dispatcharr.test/img/series1.png"
+          },
+          "uuid": "666ba544-13fa-4b73-ada9-0a87538f1354",
+          "name": "Test Series Alpha - S01E01",
+          "description": "Synthetic episode 1.",
+          "air_date": "2020-01-01",
+          "rating": "7.0",
+          "duration_secs": 20,
+          "season_number": 1,
+          "episode_number": 1,
+          "tmdb_id": null,
+          "imdb_id": null,
+          "created_at": "2026-11-20T00:56:24.669151Z",
+          "updated_at": "2026-11-20T00:56:24.669181Z"
+        },
+        "m3u_account": {
+          "id": 3,
+          "name": "Synthetic Xtream",
+          "server_url": "http://streams.dispatcharr.test",
+          "file_path": null,
+          "server_group": null,
+          "max_streams": 0,
+          "is_active": true,
+          "created_at": "2026-11-19T19:38:02.485318Z",
+          "updated_at": "2026-11-19T19:38:14.139988Z",
+          "filters": [],
+          "user_agent": null,
+          "profiles": [
+            {
+              "id": 3,
+              "name": "Synthetic Xtream Default",
+              "max_streams": 0,
+              "is_active": true,
+              "is_default": true,
+              "current_viewers": 0,
+              "search_pattern": "^(.*)$",
+              "replace_pattern": "$1",
+              "custom_properties": {
+                "user_info": {
+                  "auth": 1,
+                  "status": "Active",
+                  "message": "",
+                  "exp_date": "1826653093",
+                  "is_trial": "0",
+                  "password": "REDACTED-PASSWORD",
+                  "username": "REDACTED-USER",
+                  "created_at": "1795030693",
+                  "active_cons": "0",
+                  "max_connections": "5",
+                  "allowed_output_formats": [
+                    "ts"
+                  ]
+                },
+                "server_info": {
+                  "url": "host.docker.internal",
+                  "port": "8088",
+                  "time_now": "2026-11-19 19:38:13",
+                  "timezone": "UTC",
+                  "rtmp_port": "1935",
+                  "https_port": "443",
+                  "timestamp_now": 1795117093,
+                  "server_protocol": "http"
+                },
+                "last_refresh": "2026-11-19T19:38:13.542971Z",
+                "auth_timestamp": 1795117093.542981
+              },
+              "exp_date": "2027-11-19T19:38:13Z",
+              "account": {
+                "id": 3,
+                "name": "Synthetic Xtream",
+                "account_type": "XC",
+                "is_xtream_codes": true
+              }
+            }
+          ],
+          "locked": false,
+          "channel_groups": [
+            {
+              "channel_group": 1,
+              "enabled": true,
+              "auto_channel_sync": false,
+              "auto_sync_channel_start": null,
+              "auto_sync_channel_end": null,
+              "custom_properties": {},
+              "is_stale": false,
+              "last_seen": "2026-11-19T19:38:13.483442Z",
+              "stream_count": 0
+            },
+            {
+              "channel_group": 8,
+              "enabled": true,
+              "auto_channel_sync": false,
+              "auto_sync_channel_start": null,
+              "auto_sync_channel_end": null,
+              "custom_properties": {
+                "xc_id": "1"
+              },
+              "is_stale": false,
+              "last_seen": "2026-11-19T19:38:13.483442Z",
+              "stream_count": 3
+            }
+          ],
+          "refresh_interval": 0,
+          "cron_expression": "",
+          "custom_properties": {
+            "enable_vod": true,
+            "auto_enable_new_groups_vod": true,
+            "auto_enable_new_groups_live": true,
+            "auto_enable_new_groups_series": true
+          },
+          "account_type": "XC",
+          "username": "REDACTED-USER",
+          "stale_stream_days": 7,
+          "priority": 0,
+          "status": "success",
+          "last_message": "Processing completed in 0.7 seconds. Streams: 3 created, 0 updated, 0 marked stale, 0 removed. Total processed: 3.",
+          "earliest_expiration": "2027-11-19T19:38:13Z",
+          "all_expirations": [
+            {
+              "profile_id": 3,
+              "profile_name": "Synthetic Xtream Default",
+              "exp_date": "2027-11-19T19:38:13Z",
+              "is_active": true
+            }
+          ],
+          "enable_vod": true,
+          "auto_enable_new_groups_live": true,
+          "auto_enable_new_groups_vod": true,
+          "auto_enable_new_groups_series": true,
+          "hash_key": null,
+          "exp_date": "2027-11-19T19:38:13Z"
+        },
+        "quality_info": null,
+        "custom_properties": {
+          "info": {
+            "id": "300111",
+            "info": {
+              "plot": "Synthetic episode 1.",
+              "rating": 7.0,
+              "bitrate": 2000,
+              "duration": "00:00:20",
+              "movie_image": "http://streams.dispatcharr.test/img/series1.png",
+              "releasedate": "2020-01-01",
+              "duration_secs": 20
+            },
+            "added": "1767225600",
+            "title": "Test Series Alpha - S01E01",
+            "season": 1,
+            "custom_sid": "",
+            "episode_num": 1,
+            "direct_source": "",
+            "_season_number": 1,
+            "container_extension": "mp4"
+          },
+          "season_number": 1
+        },
+        "stream_id": "300111",
+        "container_extension": "mp4",
+        "created_at": "2026-11-20T00:56:24.675659Z",
+        "updated_at": "2026-11-20T00:56:24.675707Z",
+        "last_seen": "2026-11-20T00:56:24.668125Z",
+        "series_relation": 1
+      }
+    ],
+    "uuid": "666ba544-13fa-4b73-ada9-0a87538f1354",
+    "name": "Test Series Alpha - S01E01",
+    "description": "Synthetic episode 1.",
+    "air_date": "2020-01-01",
+    "rating": "7.0",
+    "duration_secs": 20,
+    "season_number": 1,
+    "episode_number": 1,
+    "tmdb_id": null,
+    "imdb_id": null,
+    "created_at": "2026-11-20T00:56:24.669151Z",
+    "updated_at": "2026-11-20T00:56:24.669181Z"
+  },
+  {
+    "id": 2,
+    "series": {
+      "id": 1,
+      "logo": {
+        "id": 5,
+        "name": "Test Series Alpha",
+        "url": "http://streams.dispatcharr.test/img/series1.png",
+        "cache_url": "/api/vod/vodlogos/5/cache/?v=c680d364",
+        "movie_count": 0,
+        "series_count": 1,
+        "is_used": true,
+        "item_names": [
+          "Series: Test Series Alpha"
+        ]
+      },
+      "episode_count": 5,
+      "custom_properties": {
+        "cast": "Test Actor",
+        "director": "Test Director",
+        "category_id": "20",
+        "releaseDate": "2020-01-01",
+        "backdrop_path": [
+          "http://streams.dispatcharr.test/img/backdrop.png"
+        ],
+        "episode_run_time": "1"
+      },
+      "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+      "name": "Test Series Alpha",
+      "description": "Synthetic plot for Test Series Alpha.",
+      "year": 2020,
+      "rating": "7.5",
+      "genre": "Test",
+      "tmdb_id": null,
+      "imdb_id": null,
+      "language": "",
+      "created_at": "2026-11-20T00:56:13.393567Z",
+      "updated_at": "2026-11-20T00:56:13.393587Z"
+    },
+    "custom_properties": {
+      "movie_image": "http://streams.dispatcharr.test/img/series1.png"
+    },
+    "providers": [
+      {
+        "id": 2,
+        "episode": {
+          "id": 2,
+          "series": {
+            "id": 1,
+            "logo": {
+              "id": 5,
+              "name": "Test Series Alpha",
+              "url": "http://streams.dispatcharr.test/img/series1.png",
+              "cache_url": "/api/vod/vodlogos/5/cache/?v=c680d364",
+              "movie_count": 0,
+              "series_count": 1,
+              "is_used": true,
+              "item_names": [
+                "Series: Test Series Alpha"
+              ]
+            },
+            "episode_count": 5,
+            "custom_properties": {
+              "cast": "Test Actor",
+              "director": "Test Director",
+              "category_id": "20",
+              "releaseDate": "2020-01-01",
+              "backdrop_path": [
+                "http://streams.dispatcharr.test/img/backdrop.png"
+              ],
+              "episode_run_time": "1"
+            },
+            "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+            "name": "Test Series Alpha",
+            "description": "Synthetic plot for Test Series Alpha.",
+            "year": 2020,
+            "rating": "7.5",
+            "genre": "Test",
+            "tmdb_id": null,
+            "imdb_id": null,
+            "language": "",
+            "created_at": "2026-11-20T00:56:13.393567Z",
+            "updated_at": "2026-11-20T00:56:13.393587Z"
+          },
+          "custom_properties": {
+            "movie_image": "http://streams.dispatcharr.test/img/series1.png"
+          },
+          "uuid": "d59c5abc-2f93-462f-b1c8-4845b6b95ada",
+          "name": "Test Series Alpha - S01E02",
+          "description": "Synthetic episode 2.",
+          "air_date": "2020-01-02",
+          "rating": "7.0",
+          "duration_secs": 20,
+          "season_number": 1,
+          "episode_number": 2,
+          "tmdb_id": null,
+          "imdb_id": null,
+          "created_at": "2026-11-20T00:56:24.669164Z",
+          "updated_at": "2026-11-20T00:56:24.669185Z"
+        },
+        "m3u_account": {
+          "id": 3,
+          "name": "Synthetic Xtream",
+          "server_url": "http://streams.dispatcharr.test",
+          "file_path": null,
+          "server_group": null,
+          "max_streams": 0,
+          "is_active": true,
+          "created_at": "2026-11-19T19:38:02.485318Z",
+          "updated_at": "2026-11-19T19:38:14.139988Z",
+          "filters": [],
+          "user_agent": null,
+          "profiles": [
+            {
+              "id": 3,
+              "name": "Synthetic Xtream Default",
+              "max_streams": 0,
+              "is_active": true,
+              "is_default": true,
+              "current_viewers": 0,
+              "search_pattern": "^(.*)$",
+              "replace_pattern": "$1",
+              "custom_properties": {
+                "user_info": {
+                  "auth": 1,
+                  "status": "Active",
+                  "message": "",
+                  "exp_date": "1826653093",
+                  "is_trial": "0",
+                  "password": "REDACTED-PASSWORD",
+                  "username": "REDACTED-USER",
+                  "created_at": "1795030693",
+                  "active_cons": "0",
+                  "max_connections": "5",
+                  "allowed_output_formats": [
+                    "ts"
+                  ]
+                },
+                "server_info": {
+                  "url": "host.docker.internal",
+                  "port": "8088",
+                  "time_now": "2026-11-19 19:38:13",
+                  "timezone": "UTC",
+                  "rtmp_port": "1935",
+                  "https_port": "443",
+                  "timestamp_now": 1795117093,
+                  "server_protocol": "http"
+                },
+                "last_refresh": "2026-11-19T19:38:13.542971Z",
+                "auth_timestamp": 1795117093.542981
+              },
+              "exp_date": "2027-11-19T19:38:13Z",
+              "account": {
+                "id": 3,
+                "name": "Synthetic Xtream",
+                "account_type": "XC",
+                "is_xtream_codes": true
+              }
+            }
+          ],
+          "locked": false,
+          "channel_groups": [
+            {
+              "channel_group": 1,
+              "enabled": true,
+              "auto_channel_sync": false,
+              "auto_sync_channel_start": null,
+              "auto_sync_channel_end": null,
+              "custom_properties": {},
+              "is_stale": false,
+              "last_seen": "2026-11-19T19:38:13.483442Z",
+              "stream_count": 0
+            },
+            {
+              "channel_group": 8,
+              "enabled": true,
+              "auto_channel_sync": false,
+              "auto_sync_channel_start": null,
+              "auto_sync_channel_end": null,
+              "custom_properties": {
+                "xc_id": "1"
+              },
+              "is_stale": false,
+              "last_seen": "2026-11-19T19:38:13.483442Z",
+              "stream_count": 3
+            }
+          ],
+          "refresh_interval": 0,
+          "cron_expression": "",
+          "custom_properties": {
+            "enable_vod": true,
+            "auto_enable_new_groups_vod": true,
+            "auto_enable_new_groups_live": true,
+            "auto_enable_new_groups_series": true
+          },
+          "account_type": "XC",
+          "username": "REDACTED-USER",
+          "stale_stream_days": 7,
+          "priority": 0,
+          "status": "success",
+          "last_message": "Processing completed in 0.7 seconds. Streams: 3 created, 0 updated, 0 marked stale, 0 removed. Total processed: 3.",
+          "earliest_expiration": "2027-11-19T19:38:13Z",
+          "all_expirations": [
+            {
+              "profile_id": 3,
+              "profile_name": "Synthetic Xtream Default",
+              "exp_date": "2027-11-19T19:38:13Z",
+              "is_active": true
+            }
+          ],
+          "enable_vod": true,
+          "auto_enable_new_groups_live": true,
+          "auto_enable_new_groups_vod": true,
+          "auto_enable_new_groups_series": true,
+          "hash_key": null,
+          "exp_date": "2027-11-19T19:38:13Z"
+        },
+        "quality_info": null,
+        "custom_properties": {
+          "info": {
+            "id": "300112",
+            "info": {
+              "plot": "Synthetic episode 2.",
+              "rating": 7.0,
+              "bitrate": 2000,
+              "duration": "00:00:20",
+              "movie_image": "http://streams.dispatcharr.test/img/series1.png",
+              "releasedate": "2020-01-02",
+              "duration_secs": 20
+            },
+            "added": "1767225600",
+            "title": "Test Series Alpha - S01E02",
+            "season": 1,
+            "custom_sid": "",
+            "episode_num": 2,
+            "direct_source": "",
+            "_season_number": 1,
+            "container_extension": "mp4"
+          },
+          "season_number": 1
+        },
+        "stream_id": "300112",
+        "container_extension": "mp4",
+        "created_at": "2026-11-20T00:56:24.675682Z",
+        "updated_at": "2026-11-20T00:56:24.675712Z",
+        "last_seen": "2026-11-20T00:56:24.668341Z",
+        "series_relation": 1
+      }
+    ],
+    "uuid": "d59c5abc-2f93-462f-b1c8-4845b6b95ada",
+    "name": "Test Series Alpha - S01E02",
+    "description": "Synthetic episode 2.",
+    "air_date": "2020-01-02",
+    "rating": "7.0",
+    "duration_secs": 20,
+    "season_number": 1,
+    "episode_number": 2,
+    "tmdb_id": null,
+    "imdb_id": null,
+    "created_at": "2026-11-20T00:56:24.669164Z",
+    "updated_at": "2026-11-20T00:56:24.669185Z"
+  },
+  {
+    "id": 3,
+    "series": {
+      "id": 1,
+      "logo": {
+        "id": 5,
+        "name": "Test Series Alpha",
+        "url": "http://streams.dispatcharr.test/img/series1.png",
+        "cache_url": "/api/vod/vodlogos/5/cache/?v=c680d364",
+        "movie_count": 0,
+        "series_count": 1,
+        "is_used": true,
+        "item_names": [
+          "Series: Test Series Alpha"
+        ]
+      },
+      "episode_count": 5,
+      "custom_properties": {
+        "cast": "Test Actor",
+        "director": "Test Director",
+        "category_id": "20",
+        "releaseDate": "2020-01-01",
+        "backdrop_path": [
+          "http://streams.dispatcharr.test/img/backdrop.png"
+        ],
+        "episode_run_time": "1"
+      },
+      "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+      "name": "Test Series Alpha",
+      "description": "Synthetic plot for Test Series Alpha.",
+      "year": 2020,
+      "rating": "7.5",
+      "genre": "Test",
+      "tmdb_id": null,
+      "imdb_id": null,
+      "language": "",
+      "created_at": "2026-11-20T00:56:13.393567Z",
+      "updated_at": "2026-11-20T00:56:13.393587Z"
+    },
+    "custom_properties": {
+      "movie_image": "http://streams.dispatcharr.test/img/series1.png"
+    },
+    "providers": [
+      {
+        "id": 3,
+        "episode": {
+          "id": 3,
+          "series": {
+            "id": 1,
+            "logo": {
+              "id": 5,
+              "name": "Test Series Alpha",
+              "url": "http://streams.dispatcharr.test/img/series1.png",
+              "cache_url": "/api/vod/vodlogos/5/cache/?v=c680d364",
+              "movie_count": 0,
+              "series_count": 1,
+              "is_used": true,
+              "item_names": [
+                "Series: Test Series Alpha"
+              ]
+            },
+            "episode_count": 5,
+            "custom_properties": {
+              "cast": "Test Actor",
+              "director": "Test Director",
+              "category_id": "20",
+              "releaseDate": "2020-01-01",
+              "backdrop_path": [
+                "http://streams.dispatcharr.test/img/backdrop.png"
+              ],
+              "episode_run_time": "1"
+            },
+            "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+            "name": "Test Series Alpha",
+            "description": "Synthetic plot for Test Series Alpha.",
+            "year": 2020,
+            "rating": "7.5",
+            "genre": "Test",
+            "tmdb_id": null,
+            "imdb_id": null,
+            "language": "",
+            "created_at": "2026-11-20T00:56:13.393567Z",
+            "updated_at": "2026-11-20T00:56:13.393587Z"
+          },
+          "custom_properties": {
+            "movie_image": "http://streams.dispatcharr.test/img/series1.png"
+          },
+          "uuid": "2a07c47c-8c55-4daf-9582-e96a6e5a81c9",
+          "name": "Test Series Alpha - S01E03",
+          "description": "Synthetic episode 3.",
+          "air_date": "2020-01-03",
+          "rating": "7.0",
+          "duration_secs": 20,
+          "season_number": 1,
+          "episode_number": 3,
+          "tmdb_id": null,
+          "imdb_id": null,
+          "created_at": "2026-11-20T00:56:24.669168Z",
+          "updated_at": "2026-11-20T00:56:24.669196Z"
+        },
+        "m3u_account": {
+          "id": 3,
+          "name": "Synthetic Xtream",
+          "server_url": "http://streams.dispatcharr.test",
+          "file_path": null,
+          "server_group": null,
+          "max_streams": 0,
+          "is_active": true,
+          "created_at": "2026-11-19T19:38:02.485318Z",
+          "updated_at": "2026-11-19T19:38:14.139988Z",
+          "filters": [],
+          "user_agent": null,
+          "profiles": [
+            {
+              "id": 3,
+              "name": "Synthetic Xtream Default",
+              "max_streams": 0,
+              "is_active": true,
+              "is_default": true,
+              "current_viewers": 0,
+              "search_pattern": "^(.*)$",
+              "replace_pattern": "$1",
+              "custom_properties": {
+                "user_info": {
+                  "auth": 1,
+                  "status": "Active",
+                  "message": "",
+                  "exp_date": "1826653093",
+                  "is_trial": "0",
+                  "password": "REDACTED-PASSWORD",
+                  "username": "REDACTED-USER",
+                  "created_at": "1795030693",
+                  "active_cons": "0",
+                  "max_connections": "5",
+                  "allowed_output_formats": [
+                    "ts"
+                  ]
+                },
+                "server_info": {
+                  "url": "host.docker.internal",
+                  "port": "8088",
+                  "time_now": "2026-11-19 19:38:13",
+                  "timezone": "UTC",
+                  "rtmp_port": "1935",
+                  "https_port": "443",
+                  "timestamp_now": 1795117093,
+                  "server_protocol": "http"
+                },
+                "last_refresh": "2026-11-19T19:38:13.542971Z",
+                "auth_timestamp": 1795117093.542981
+              },
+              "exp_date": "2027-11-19T19:38:13Z",
+              "account": {
+                "id": 3,
+                "name": "Synthetic Xtream",
+                "account_type": "XC",
+                "is_xtream_codes": true
+              }
+            }
+          ],
+          "locked": false,
+          "channel_groups": [
+            {
+              "channel_group": 1,
+              "enabled": true,
+              "auto_channel_sync": false,
+              "auto_sync_channel_start": null,
+              "auto_sync_channel_end": null,
+              "custom_properties": {},
+              "is_stale": false,
+              "last_seen": "2026-11-19T19:38:13.483442Z",
+              "stream_count": 0
+            },
+            {
+              "channel_group": 8,
+              "enabled": true,
+              "auto_channel_sync": false,
+              "auto_sync_channel_start": null,
+              "auto_sync_channel_end": null,
+              "custom_properties": {
+                "xc_id": "1"
+              },
+              "is_stale": false,
+              "last_seen": "2026-11-19T19:38:13.483442Z",
+              "stream_count": 3
+            }
+          ],
+          "refresh_interval": 0,
+          "cron_expression": "",
+          "custom_properties": {
+            "enable_vod": true,
+            "auto_enable_new_groups_vod": true,
+            "auto_enable_new_groups_live": true,
+            "auto_enable_new_groups_series": true
+          },
+          "account_type": "XC",
+          "username": "REDACTED-USER",
+          "stale_stream_days": 7,
+          "priority": 0,
+          "status": "success",
+          "last_message": "Processing completed in 0.7 seconds. Streams: 3 created, 0 updated, 0 marked stale, 0 removed. Total processed: 3.",
+          "earliest_expiration": "2027-11-19T19:38:13Z",
+          "all_expirations": [
+            {
+              "profile_id": 3,
+              "profile_name": "Synthetic Xtream Default",
+              "exp_date": "2027-11-19T19:38:13Z",
+              "is_active": true
+            }
+          ],
+          "enable_vod": true,
+          "auto_enable_new_groups_live": true,
+          "auto_enable_new_groups_vod": true,
+          "auto_enable_new_groups_series": true,
+          "hash_key": null,
+          "exp_date": "2027-11-19T19:38:13Z"
+        },
+        "quality_info": null,
+        "custom_properties": {
+          "info": {
+            "id": "300113",
+            "info": {
+              "plot": "Synthetic episode 3.",
+              "rating": 7.0,
+              "bitrate": 2000,
+              "duration": "00:00:20",
+              "movie_image": "http://streams.dispatcharr.test/img/series1.png",
+              "releasedate": "2020-01-03",
+              "duration_secs": 20
+            },
+            "added": "1767225600",
+            "title": "Test Series Alpha - S01E03",
+            "season": 1,
+            "custom_sid": "",
+            "episode_num": 3,
+            "direct_source": "",
+            "_season_number": 1,
+            "container_extension": "mp4"
+          },
+          "season_number": 1
+        },
+        "stream_id": "300113",
+        "container_extension": "mp4",
+        "created_at": "2026-11-20T00:56:24.675688Z",
+        "updated_at": "2026-11-20T00:56:24.675718Z",
+        "last_seen": "2026-11-20T00:56:24.668420Z",
+        "series_relation": 1
+      }
+    ],
+    "uuid": "2a07c47c-8c55-4daf-9582-e96a6e5a81c9",
+    "name": "Test Series Alpha - S01E03",
+    "description": "Synthetic episode 3.",
+    "air_date": "2020-01-03",
+    "rating": "7.0",
+    "duration_secs": 20,
+    "season_number": 1,
+    "episode_number": 3,
+    "tmdb_id": null,
+    "imdb_id": null,
+    "created_at": "2026-11-20T00:56:24.669168Z",
+    "updated_at": "2026-11-20T00:56:24.669196Z"
+  },
+  {
+    "id": 4,
+    "series": {
+      "id": 1,
+      "logo": {
+        "id": 5,
+        "name": "Test Series Alpha",
+        "url": "http://streams.dispatcharr.test/img/series1.png",
+        "cache_url": "/api/vod/vodlogos/5/cache/?v=c680d364",
+        "movie_count": 0,
+        "series_count": 1,
+        "is_used": true,
+        "item_names": [
+          "Series: Test Series Alpha"
+        ]
+      },
+      "episode_count": 5,
+      "custom_properties": {
+        "cast": "Test Actor",
+        "director": "Test Director",
+        "category_id": "20",
+        "releaseDate": "2020-01-01",
+        "backdrop_path": [
+          "http://streams.dispatcharr.test/img/backdrop.png"
+        ],
+        "episode_run_time": "1"
+      },
+      "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+      "name": "Test Series Alpha",
+      "description": "Synthetic plot for Test Series Alpha.",
+      "year": 2020,
+      "rating": "7.5",
+      "genre": "Test",
+      "tmdb_id": null,
+      "imdb_id": null,
+      "language": "",
+      "created_at": "2026-11-20T00:56:13.393567Z",
+      "updated_at": "2026-11-20T00:56:13.393587Z"
+    },
+    "custom_properties": {
+      "movie_image": "http://streams.dispatcharr.test/img/series1.png"
+    },
+    "providers": [
+      {
+        "id": 4,
+        "episode": {
+          "id": 4,
+          "series": {
+            "id": 1,
+            "logo": {
+              "id": 5,
+              "name": "Test Series Alpha",
+              "url": "http://streams.dispatcharr.test/img/series1.png",
+              "cache_url": "/api/vod/vodlogos/5/cache/?v=c680d364",
+              "movie_count": 0,
+              "series_count": 1,
+              "is_used": true,
+              "item_names": [
+                "Series: Test Series Alpha"
+              ]
+            },
+            "episode_count": 5,
+            "custom_properties": {
+              "cast": "Test Actor",
+              "director": "Test Director",
+              "category_id": "20",
+              "releaseDate": "2020-01-01",
+              "backdrop_path": [
+                "http://streams.dispatcharr.test/img/backdrop.png"
+              ],
+              "episode_run_time": "1"
+            },
+            "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+            "name": "Test Series Alpha",
+            "description": "Synthetic plot for Test Series Alpha.",
+            "year": 2020,
+            "rating": "7.5",
+            "genre": "Test",
+            "tmdb_id": null,
+            "imdb_id": null,
+            "language": "",
+            "created_at": "2026-11-20T00:56:13.393567Z",
+            "updated_at": "2026-11-20T00:56:13.393587Z"
+          },
+          "custom_properties": {
+            "movie_image": "http://streams.dispatcharr.test/img/series1.png"
+          },
+          "uuid": "65eb6472-e51d-4871-9347-c740bc2411da",
+          "name": "Test Series Alpha - S02E01",
+          "description": "Synthetic episode 1.",
+          "air_date": "2020-01-01",
+          "rating": "7.0",
+          "duration_secs": 20,
+          "season_number": 2,
+          "episode_number": 1,
+          "tmdb_id": null,
+          "imdb_id": null,
+          "created_at": "2026-11-20T00:56:24.669172Z",
+          "updated_at": "2026-11-20T00:56:24.669200Z"
+        },
+        "m3u_account": {
+          "id": 3,
+          "name": "Synthetic Xtream",
+          "server_url": "http://streams.dispatcharr.test",
+          "file_path": null,
+          "server_group": null,
+          "max_streams": 0,
+          "is_active": true,
+          "created_at": "2026-11-19T19:38:02.485318Z",
+          "updated_at": "2026-11-19T19:38:14.139988Z",
+          "filters": [],
+          "user_agent": null,
+          "profiles": [
+            {
+              "id": 3,
+              "name": "Synthetic Xtream Default",
+              "max_streams": 0,
+              "is_active": true,
+              "is_default": true,
+              "current_viewers": 0,
+              "search_pattern": "^(.*)$",
+              "replace_pattern": "$1",
+              "custom_properties": {
+                "user_info": {
+                  "auth": 1,
+                  "status": "Active",
+                  "message": "",
+                  "exp_date": "1826653093",
+                  "is_trial": "0",
+                  "password": "REDACTED-PASSWORD",
+                  "username": "REDACTED-USER",
+                  "created_at": "1795030693",
+                  "active_cons": "0",
+                  "max_connections": "5",
+                  "allowed_output_formats": [
+                    "ts"
+                  ]
+                },
+                "server_info": {
+                  "url": "host.docker.internal",
+                  "port": "8088",
+                  "time_now": "2026-11-19 19:38:13",
+                  "timezone": "UTC",
+                  "rtmp_port": "1935",
+                  "https_port": "443",
+                  "timestamp_now": 1795117093,
+                  "server_protocol": "http"
+                },
+                "last_refresh": "2026-11-19T19:38:13.542971Z",
+                "auth_timestamp": 1795117093.542981
+              },
+              "exp_date": "2027-11-19T19:38:13Z",
+              "account": {
+                "id": 3,
+                "name": "Synthetic Xtream",
+                "account_type": "XC",
+                "is_xtream_codes": true
+              }
+            }
+          ],
+          "locked": false,
+          "channel_groups": [
+            {
+              "channel_group": 1,
+              "enabled": true,
+              "auto_channel_sync": false,
+              "auto_sync_channel_start": null,
+              "auto_sync_channel_end": null,
+              "custom_properties": {},
+              "is_stale": false,
+              "last_seen": "2026-11-19T19:38:13.483442Z",
+              "stream_count": 0
+            },
+            {
+              "channel_group": 8,
+              "enabled": true,
+              "auto_channel_sync": false,
+              "auto_sync_channel_start": null,
+              "auto_sync_channel_end": null,
+              "custom_properties": {
+                "xc_id": "1"
+              },
+              "is_stale": false,
+              "last_seen": "2026-11-19T19:38:13.483442Z",
+              "stream_count": 3
+            }
+          ],
+          "refresh_interval": 0,
+          "cron_expression": "",
+          "custom_properties": {
+            "enable_vod": true,
+            "auto_enable_new_groups_vod": true,
+            "auto_enable_new_groups_live": true,
+            "auto_enable_new_groups_series": true
+          },
+          "account_type": "XC",
+          "username": "REDACTED-USER",
+          "stale_stream_days": 7,
+          "priority": 0,
+          "status": "success",
+          "last_message": "Processing completed in 0.7 seconds. Streams: 3 created, 0 updated, 0 marked stale, 0 removed. Total processed: 3.",
+          "earliest_expiration": "2027-11-19T19:38:13Z",
+          "all_expirations": [
+            {
+              "profile_id": 3,
+              "profile_name": "Synthetic Xtream Default",
+              "exp_date": "2027-11-19T19:38:13Z",
+              "is_active": true
+            }
+          ],
+          "enable_vod": true,
+          "auto_enable_new_groups_live": true,
+          "auto_enable_new_groups_vod": true,
+          "auto_enable_new_groups_series": true,
+          "hash_key": null,
+          "exp_date": "2027-11-19T19:38:13Z"
+        },
+        "quality_info": null,
+        "custom_properties": {
+          "info": {
+            "id": "300121",
+            "info": {
+              "plot": "Synthetic episode 1.",
+              "rating": 7.0,
+              "bitrate": 2000,
+              "duration": "00:00:20",
+              "movie_image": "http://streams.dispatcharr.test/img/series1.png",
+              "releasedate": "2020-01-01",
+              "duration_secs": 20
+            },
+            "added": "1767225600",
+            "title": "Test Series Alpha - S02E01",
+            "season": 2,
+            "custom_sid": "",
+            "episode_num": 1,
+            "direct_source": "",
+            "_season_number": 2,
+            "container_extension": "mp4"
+          },
+          "season_number": 2
+        },
+        "stream_id": "300121",
+        "container_extension": "mp4",
+        "created_at": "2026-11-20T00:56:24.675694Z",
+        "updated_at": "2026-11-20T00:56:24.675723Z",
+        "last_seen": "2026-11-20T00:56:24.668473Z",
+        "series_relation": 1
+      }
+    ],
+    "uuid": "65eb6472-e51d-4871-9347-c740bc2411da",
+    "name": "Test Series Alpha - S02E01",
+    "description": "Synthetic episode 1.",
+    "air_date": "2020-01-01",
+    "rating": "7.0",
+    "duration_secs": 20,
+    "season_number": 2,
+    "episode_number": 1,
+    "tmdb_id": null,
+    "imdb_id": null,
+    "created_at": "2026-11-20T00:56:24.669172Z",
+    "updated_at": "2026-11-20T00:56:24.669200Z"
+  },
+  {
+    "id": 5,
+    "series": {
+      "id": 1,
+      "logo": {
+        "id": 5,
+        "name": "Test Series Alpha",
+        "url": "http://streams.dispatcharr.test/img/series1.png",
+        "cache_url": "/api/vod/vodlogos/5/cache/?v=c680d364",
+        "movie_count": 0,
+        "series_count": 1,
+        "is_used": true,
+        "item_names": [
+          "Series: Test Series Alpha"
+        ]
+      },
+      "episode_count": 5,
+      "custom_properties": {
+        "cast": "Test Actor",
+        "director": "Test Director",
+        "category_id": "20",
+        "releaseDate": "2020-01-01",
+        "backdrop_path": [
+          "http://streams.dispatcharr.test/img/backdrop.png"
+        ],
+        "episode_run_time": "1"
+      },
+      "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+      "name": "Test Series Alpha",
+      "description": "Synthetic plot for Test Series Alpha.",
+      "year": 2020,
+      "rating": "7.5",
+      "genre": "Test",
+      "tmdb_id": null,
+      "imdb_id": null,
+      "language": "",
+      "created_at": "2026-11-20T00:56:13.393567Z",
+      "updated_at": "2026-11-20T00:56:13.393587Z"
+    },
+    "custom_properties": {
+      "movie_image": "http://streams.dispatcharr.test/img/series1.png"
+    },
+    "providers": [
+      {
+        "id": 5,
+        "episode": {
+          "id": 5,
+          "series": {
+            "id": 1,
+            "logo": {
+              "id": 5,
+              "name": "Test Series Alpha",
+              "url": "http://streams.dispatcharr.test/img/series1.png",
+              "cache_url": "/api/vod/vodlogos/5/cache/?v=c680d364",
+              "movie_count": 0,
+              "series_count": 1,
+              "is_used": true,
+              "item_names": [
+                "Series: Test Series Alpha"
+              ]
+            },
+            "episode_count": 5,
+            "custom_properties": {
+              "cast": "Test Actor",
+              "director": "Test Director",
+              "category_id": "20",
+              "releaseDate": "2020-01-01",
+              "backdrop_path": [
+                "http://streams.dispatcharr.test/img/backdrop.png"
+              ],
+              "episode_run_time": "1"
+            },
+            "uuid": "3600b99f-6cab-42b6-87ed-80bf71733931",
+            "name": "Test Series Alpha",
+            "description": "Synthetic plot for Test Series Alpha.",
+            "year": 2020,
+            "rating": "7.5",
+            "genre": "Test",
+            "tmdb_id": null,
+            "imdb_id": null,
+            "language": "",
+            "created_at": "2026-11-20T00:56:13.393567Z",
+            "updated_at": "2026-11-20T00:56:13.393587Z"
+          },
+          "custom_properties": {
+            "movie_image": "http://streams.dispatcharr.test/img/series1.png"
+          },
+          "uuid": "c82a5400-e750-4151-a424-3482c3a4f61b",
+          "name": "Test Series Alpha - S02E02",
+          "description": "Synthetic episode 2.",
+          "air_date": "2020-01-02",
+          "rating": "7.0",
+          "duration_secs": 20,
+          "season_number": 2,
+          "episode_number": 2,
+          "tmdb_id": null,
+          "imdb_id": null,
+          "created_at": "2026-11-20T00:56:24.669176Z",
+          "updated_at": "2026-11-20T00:56:24.669203Z"
+        },
+        "m3u_account": {
+          "id": 3,
+          "name": "Synthetic Xtream",
+          "server_url": "http://streams.dispatcharr.test",
+          "file_path": null,
+          "server_group": null,
+          "max_streams": 0,
+          "is_active": true,
+          "created_at": "2026-11-19T19:38:02.485318Z",
+          "updated_at": "2026-11-19T19:38:14.139988Z",
+          "filters": [],
+          "user_agent": null,
+          "profiles": [
+            {
+              "id": 3,
+              "name": "Synthetic Xtream Default",
+              "max_streams": 0,
+              "is_active": true,
+              "is_default": true,
+              "current_viewers": 0,
+              "search_pattern": "^(.*)$",
+              "replace_pattern": "$1",
+              "custom_properties": {
+                "user_info": {
+                  "auth": 1,
+                  "status": "Active",
+                  "message": "",
+                  "exp_date": "1826653093",
+                  "is_trial": "0",
+                  "password": "REDACTED-PASSWORD",
+                  "username": "REDACTED-USER",
+                  "created_at": "1795030693",
+                  "active_cons": "0",
+                  "max_connections": "5",
+                  "allowed_output_formats": [
+                    "ts"
+                  ]
+                },
+                "server_info": {
+                  "url": "host.docker.internal",
+                  "port": "8088",
+                  "time_now": "2026-11-19 19:38:13",
+                  "timezone": "UTC",
+                  "rtmp_port": "1935",
+                  "https_port": "443",
+                  "timestamp_now": 1795117093,
+                  "server_protocol": "http"
+                },
+                "last_refresh": "2026-11-19T19:38:13.542971Z",
+                "auth_timestamp": 1795117093.542981
+              },
+              "exp_date": "2027-11-19T19:38:13Z",
+              "account": {
+                "id": 3,
+                "name": "Synthetic Xtream",
+                "account_type": "XC",
+                "is_xtream_codes": true
+              }
+            }
+          ],
+          "locked": false,
+          "channel_groups": [
+            {
+              "channel_group": 1,
+              "enabled": true,
+              "auto_channel_sync": false,
+              "auto_sync_channel_start": null,
+              "auto_sync_channel_end": null,
+              "custom_properties": {},
+              "is_stale": false,
+              "last_seen": "2026-11-19T19:38:13.483442Z",
+              "stream_count": 0
+            },
+            {
+              "channel_group": 8,
+              "enabled": true,
+              "auto_channel_sync": false,
+              "auto_sync_channel_start": null,
+              "auto_sync_channel_end": null,
+              "custom_properties": {
+                "xc_id": "1"
+              },
+              "is_stale": false,
+              "last_seen": "2026-11-19T19:38:13.483442Z",
+              "stream_count": 3
+            }
+          ],
+          "refresh_interval": 0,
+          "cron_expression": "",
+          "custom_properties": {
+            "enable_vod": true,
+            "auto_enable_new_groups_vod": true,
+            "auto_enable_new_groups_live": true,
+            "auto_enable_new_groups_series": true
+          },
+          "account_type": "XC",
+          "username": "REDACTED-USER",
+          "stale_stream_days": 7,
+          "priority": 0,
+          "status": "success",
+          "last_message": "Processing completed in 0.7 seconds. Streams: 3 created, 0 updated, 0 marked stale, 0 removed. Total processed: 3.",
+          "earliest_expiration": "2027-11-19T19:38:13Z",
+          "all_expirations": [
+            {
+              "profile_id": 3,
+              "profile_name": "Synthetic Xtream Default",
+              "exp_date": "2027-11-19T19:38:13Z",
+              "is_active": true
+            }
+          ],
+          "enable_vod": true,
+          "auto_enable_new_groups_live": true,
+          "auto_enable_new_groups_vod": true,
+          "auto_enable_new_groups_series": true,
+          "hash_key": null,
+          "exp_date": "2027-11-19T19:38:13Z"
+        },
+        "quality_info": null,
+        "custom_properties": {
+          "info": {
+            "id": "300122",
+            "info": {
+              "plot": "Synthetic episode 2.",
+              "rating": 7.0,
+              "bitrate": 2000,
+              "duration": "00:00:20",
+              "movie_image": "http://streams.dispatcharr.test/img/series1.png",
+              "releasedate": "2020-01-02",
+              "duration_secs": 20
+            },
+            "added": "1767225600",
+            "title": "Test Series Alpha - S02E02",
+            "season": 2,
+            "custom_sid": "",
+            "episode_num": 2,
+            "direct_source": "",
+            "_season_number": 2,
+            "container_extension": "mp4"
+          },
+          "season_number": 2
+        },
+        "stream_id": "300122",
+        "container_extension": "mp4",
+        "created_at": "2026-11-20T00:56:24.675699Z",
+        "updated_at": "2026-11-20T00:56:24.675728Z",
+        "last_seen": "2026-11-20T00:56:24.668521Z",
+        "series_relation": 1
+      }
+    ],
+    "uuid": "c82a5400-e750-4151-a424-3482c3a4f61b",
+    "name": "Test Series Alpha - S02E02",
+    "description": "Synthetic episode 2.",
+    "air_date": "2020-01-02",
+    "rating": "7.0",
+    "duration_secs": 20,
+    "season_number": 2,
+    "episode_number": 2,
+    "tmdb_id": null,
+    "imdb_id": null,
+    "created_at": "2026-11-20T00:56:24.669176Z",
+    "updated_at": "2026-11-20T00:56:24.669203Z"
+  }
+]

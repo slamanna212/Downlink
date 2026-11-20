@@ -49,4 +49,20 @@ if [ ! -f "$OUT/broken_timestamps.ts" ] || [ "$FORCE" = "--force" ]; then
     -muxdelay 0 -f mpegts "$OUT/broken_timestamps.ts"
 fi
 
+# 6. VOD clips (movies / episodes) and posters, served by serve.py under /movie, /series and /img
+if [ ! -f "$OUT/vod_clip.mp4" ] || [ "$FORCE" = "--force" ]; then
+  echo "making vod clips"
+  "${FF[@]}" -f lavfi -i "testsrc2=size=1280x720:rate=30:duration=20" -f lavfi -i "sine=frequency=392:sample_rate=48000:duration=20" \
+    -c:v libx264 -preset veryfast -g 60 -pix_fmt yuv420p -b:v 2M -c:a aac -b:a 96k -shortest -movflags +faststart "$OUT/vod_clip.mp4"
+  "${FF[@]}" -i "$OUT/vod_clip.mp4" -c copy "$OUT/vod_clip.mkv"
+fi
+mkdir -p "$OUT/img"
+for n in movie1 movie2 movie3 movie4 series1 series2 backdrop; do
+  if [ ! -f "$OUT/img/$n.png" ] || [ "$FORCE" = "--force" ]; then
+    case $n in movie1) c=0x5b4bdb;; movie2) c=0x2b8a3e;; movie3) c=0xc2255c;; movie4) c=0x1c7ed6;; series1) c=0xe8590c;; series2) c=0x6741d9;; *) c=0x343a40;; esac
+    sz=200x300; [ $n = backdrop ] && sz=640x360
+    "${FF[@]}" -f lavfi -i "color=c=$c:s=$sz:d=1,drawbox=x=10:y=10:w=iw-20:h=ih-20:color=white@0.6:t=4" -frames:v 1 "$OUT/img/$n.png"
+  fi
+done
+
 ls -lh "$OUT"

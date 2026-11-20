@@ -4,96 +4,96 @@
   "previous": null,
   "results": [
     {
-      "id": 852,
-      "title": "Test Pattern Theatre",
-      "sub_title": "Episode 2",
-      "description": "Synthetic programme 61 on Test News.",
-      "start_time": "2026-11-19T20:00:00Z",
-      "end_time": "2026-11-19T21:00:00Z",
-      "tvg_id": "test-news.test",
-      "custom_properties": {
-        "season": 1,
-        "episode": 2,
-        "categories": [
-          "Test News"
-        ],
-        "onscreen_episode": "S01E02"
-      },
-      "epg_source": "Synthetic EPG",
-      "epg_name": "Test News",
-      "epg_icon_url": null,
-      "channels": [
-        {
-          "id": 2,
-          "name": "Test News",
-          "channel_number": 2.0,
-          "channel_group": "Test News",
-          "tvg_id": "test-news.test"
-        }
-      ],
-      "streams": [
-        {
-          "id": 2,
-          "name": "Test News",
-          "channel_group": "Test News",
-          "tvg_id": "test-news.test",
-          "m3u_account": "Synthetic Playlist"
-        }
-      ]
-    },
-    {
-      "id": 853,
-      "title": "Bitrate Briefing",
-      "sub_title": "Episode 3",
-      "description": "Synthetic programme 62 on Test News.",
-      "start_time": "2026-11-19T21:00:00Z",
-      "end_time": "2026-11-19T22:00:00Z",
-      "tvg_id": "test-news.test",
-      "custom_properties": {
-        "season": 1,
-        "episode": 3,
-        "categories": [
-          "Test News"
-        ],
-        "onscreen_episode": "S01E03"
-      },
-      "epg_source": "Synthetic EPG",
-      "epg_name": "Test News",
-      "epg_icon_url": null,
-      "channels": [
-        {
-          "id": 2,
-          "name": "Test News",
-          "channel_number": 2.0,
-          "channel_group": "Test News",
-          "tvg_id": "test-news.test"
-        }
-      ],
-      "streams": [
-        {
-          "id": 2,
-          "name": "Test News",
-          "channel_group": "Test News",
-          "tvg_id": "test-news.test",
-          "m3u_account": "Synthetic Playlist"
-        }
-      ]
-    },
-    {
-      "id": 854,
+      "id": 862,
       "title": "Morning Test Show",
-      "sub_title": "Episode 4",
-      "description": "Synthetic programme 63 on Test News.",
-      "start_time": "2026-11-19T22:00:00Z",
-      "end_time": "2026-11-19T23:00:00Z",
+      "sub_title": "Episode 12",
+      "description": "Synthetic programme 71 on Test News.",
+      "start_time": "2026-11-20T06:00:00Z",
+      "end_time": "2026-11-20T07:00:00Z",
       "tvg_id": "test-news.test",
       "custom_properties": {
         "season": 1,
-        "episode": 4,
+        "episode": 12,
         "categories": [
           "Test News"
         ],
-        "onscreen_episode": "S01E04"
+        "onscreen_episode": "S01E12"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Test News",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 2,
+          "name": "Test News",
+          "channel_number": 2.0,
+          "channel_group": "Test News",
+          "tvg_id": "test-news.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 2,
+          "name": "Test News",
+          "channel_group": "Test News",
+          "tvg_id": "test-news.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 863,
+      "title": "The Synthetic Hour",
+      "sub_title": "Episode 13",
+      "description": "Synthetic programme 72 on Test News.",
+      "start_time": "2026-11-20T07:00:00Z",
+      "end_time": "2026-11-20T08:00:00Z",
+      "tvg_id": "test-news.test",
+      "custom_properties": {
+        "season": 1,
+        "episode": 13,
+        "categories": [
+          "Test News"
+        ],
+        "onscreen_episode": "S01E13"
+      },
+      "epg_source": "Synthetic EPG",
+      "epg_name": "Test News",
+      "epg_icon_url": null,
+      "channels": [
+        {
+          "id": 2,
+          "name": "Test News",
+          "channel_number": 2.0,
+          "channel_group": "Test News",
+          "tvg_id": "test-news.test"
+        }
+      ],
+      "streams": [
+        {
+          "id": 2,
+          "name": "Test News",
+          "channel_group": "Test News",
+          "tvg_id": "test-news.test",
+          "m3u_account": "Synthetic Playlist"
+        }
+      ]
+    },
+    {
+      "id": 864,
+      "title": "Pattern Playhouse",
+      "sub_title": "Episode 14",
+      "description": "Synthetic programme 73 on Test News.",
+      "start_time": "2026-11-20T08:00:00Z",
+      "end_time": "2026-11-20T09:00:00Z",
+      "tvg_id": "test-news.test",
+      "custom_properties": {
+        "season": 1,
+        "episode": 14,
+        "categories": [
+          "Test News"
+        ],
+        "onscreen_episode": "S01E14"
       },
       "epg_source": "Synthetic EPG",
       "epg_name": "Test News",

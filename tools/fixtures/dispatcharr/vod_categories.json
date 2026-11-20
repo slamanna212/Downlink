@@ -1,16 +1,72 @@
 [
   {
+    "id": 4,
+    "name": "Test Documentaries",
+    "category_type": "movie",
+    "category_type_display": "Movie",
+    "m3u_accounts": [
+      {
+        "category": 4,
+        "m3u_account": 3,
+        "enabled": true,
+        "custom_properties": {}
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "name": "Test Movies",
+    "category_type": "movie",
+    "category_type_display": "Movie",
+    "m3u_accounts": [
+      {
+        "category": 3,
+        "m3u_account": 3,
+        "enabled": true,
+        "custom_properties": {}
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "name": "Test Series",
+    "category_type": "series",
+    "category_type_display": "Series",
+    "m3u_accounts": [
+      {
+        "category": 5,
+        "m3u_account": 3,
+        "enabled": true,
+        "custom_properties": {}
+      }
+    ]
+  },
+  {
     "id": 1,
     "name": "Uncategorized",
     "category_type": "movie",
     "category_type_display": "Movie",
-    "m3u_accounts": []
+    "m3u_accounts": [
+      {
+        "category": 1,
+        "m3u_account": 3,
+        "enabled": true,
+        "custom_properties": {}
+      }
+    ]
   },
   {
     "id": 2,
     "name": "Uncategorized",
     "category_type": "series",
     "category_type_display": "Series",
-    "m3u_accounts": []
+    "m3u_accounts": [
+      {
+        "category": 2,
+        "m3u_account": 3,
+        "enabled": true,
+        "custom_properties": {}
+      }
+    ]
   }
 ]

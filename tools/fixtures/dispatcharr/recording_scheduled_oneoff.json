@@ -1,0 +1,13 @@
+{
+  "id": 30,
+  "start_time": "2026-11-20T08:12:22Z",
+  "end_time": "2026-11-20T09:12:22Z",
+  "task_id": "dvr-recording-30",
+  "custom_properties": {
+    "program": {
+      "title": "Synthetic Future Recording",
+      "description": "one-off"
+    }
+  },
+  "channel": 10
+}

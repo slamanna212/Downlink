@@ -1,0 +1,39 @@
+{
+  "id": 3,
+  "uuid": "3beb544a-d0fd-419e-9a2f-f25df1c3b2f8",
+  "stream_id": "2003",
+  "name": "Test Documentary Three",
+  "o_name": "Test Documentary Three",
+  "description": "Synthetic plot for Test Documentary Three.",
+  "plot": "Synthetic plot for Test Documentary Three.",
+  "year": 2019,
+  "release_date": "2019-03-01",
+  "genre": "Test",
+  "director": "Test Director",
+  "actors": "Test Actor",
+  "country": "Testland",
+  "rating": "7.0",
+  "tmdb_id": null,
+  "imdb_id": null,
+  "youtube_trailer": "",
+  "duration_secs": 20,
+  "age": "",
+  "backdrop_path": [
+    "https://dispatcharr.test/api/vod/movies/3/image/?kind=backdrop&index=0&m3u_account_id=3&v=5398d217"
+  ],
+  "cover": "https://dispatcharr.test/api/vod/movies/3/image/?kind=movie_image&m3u_account_id=3&v=8e470cf3",
+  "cover_big": "https://dispatcharr.test/api/vod/movies/3/image/?kind=movie_image&m3u_account_id=3&v=8e470cf3",
+  "movie_image": "https://dispatcharr.test/api/vod/movies/3/image/?kind=movie_image&m3u_account_id=3&v=8e470cf3",
+  "bitrate": 2000,
+  "video": {},
+  "audio": {},
+  "container_extension": "mp4",
+  "direct_source": "",
+  "category_id": "11",
+  "added": "1767225600",
+  "m3u_account": {
+    "id": 3,
+    "name": "Synthetic Xtream",
+    "account_type": "XC"
+  }
+}

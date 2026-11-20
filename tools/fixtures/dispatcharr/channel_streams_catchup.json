@@ -2,7 +2,7 @@
   {
     "id": 11,
     "name": "XC Catchup",
-    "url": "http://streams.dispatcharr.test/live/testuser/testpass/101.ts",
+    "url": "http://streams.dispatcharr.test/live/REDACTED-USER/REDACTED-PASSWORD/101.ts",
     "m3u_account": 3,
     "logo_url": "",
     "tvg_id": "xc-catchup.test",

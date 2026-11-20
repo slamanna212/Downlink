@@ -1,0 +1,4 @@
+{
+  "content_type": "application/x-mpegURL",
+  "body": "#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:EVENT\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-DISCONTINUITY\n#EXTINF:4.000000,\nhttps://dispatcharr.test/api/channels/recordings/31/hls/seg_00000.ts\n#EXTINF:4.000000,\nhttps://dispatcharr.test/api/channels/recordings/31/hls/seg_00001.ts\n"
+}
