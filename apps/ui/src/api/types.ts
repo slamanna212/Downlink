@@ -131,6 +131,8 @@ export interface PlayerState {
   videoCodec: string | null;
   width: number | null;
   height: number | null;
+  /** True during an automatic retry after the stream dropped (UI shows "Reconnecting…"). */
+  reconnecting: boolean;
   /** Set when Buffering lasts > 3 s: what we are waiting on. */
   waitingOn: 'connection' | 'first_data' | 'first_keyframe' | null;
   error: AppError | null;
@@ -146,6 +148,12 @@ export interface AppError {
   message: string;
   /** Seconds. */
   retryAfter: number | null;
+  /** More specific cause for code 'stream'/'media' (PLAN §4.9): server stream limit, undecodable codec, engine crash. */
+  reason?: 'limit' | 'codec' | 'engine';
+  /** Codec name when reason is 'codec'. */
+  codec?: string;
+  /** Crash id when reason is 'engine'. */
+  crashId?: string;
 }
 
 export interface CatalogUpdated {

@@ -163,3 +163,30 @@ test('offline: record actions are disabled with the reason (guide menu, recordin
   await expect(page.getByText('Recording needs a connection to your server.')).toBeVisible();
   await expect(page.getByRole('menuitem', { name: 'Record this programme' })).toBeDisabled();
 });
+
+for (const c of [
+  { reason: 'limit', title: 'Your server is at its stream limit', first: 'Try again' },
+  { reason: 'codec', title: 'This channel uses a format Downlink can’t decode', body: 'AV1 10-bit', first: 'Copy diagnostics' },
+  { reason: 'engine', title: 'The video engine stopped unexpectedly', body: 'c-7f3a', first: 'Copy diagnostics' },
+]) {
+  test(`player failure copy: ${c.reason}`, async ({ page }) => {
+    await page.goto(`/channels?fail=102&reason=${c.reason}`);
+    await settle(page);
+    await focusFirstRow(page);
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    const alert = page.getByRole('alert').filter({ hasText: c.title });
+    await expect(alert).toBeVisible();
+    if (c.body) await expect(alert).toContainText(c.body);
+    await expect(alert.getByRole('button').first()).toHaveText(c.first);
+  });
+}
+
+test('player shows "Reconnecting…" during an automatic retry', async ({ page }) => {
+  await page.goto('/channels?reconnect=1');
+  await settle(page);
+  await focusFirstRow(page);
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('status').filter({ hasText: 'Reconnecting…' })).toBeVisible();
+});

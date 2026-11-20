@@ -131,7 +131,7 @@ export function isAppError(e: unknown): e is AppError {
 
 /** Normalise anything thrown by invoke into an AppError. Never leaks raw exception text. */
 export function toAppError(e: unknown): AppError {
-  if (isAppError(e)) return { code: e.code, message: e.message, retryAfter: e.retryAfter ?? null };
+  if (isAppError(e)) return { code: e.code, message: e.message, retryAfter: e.retryAfter ?? null, reason: e.reason, codec: e.codec, crashId: e.crashId };
   return { code: 'local', message: 'Something went wrong. Try again.', retryAfter: null };
 }
 

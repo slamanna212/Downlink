@@ -150,30 +150,46 @@ function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerSta
 function ErrorOverlay({ error, onRetry }: { error: AppError | null; onRetry: () => void }) {
   const [copied, setCopied] = useState(false);
   const code = error?.code ?? 'local';
+  const reason = error?.reason;
+  const title = reason ? t(`player.error.${reason}` as MessageKey) : t(`player.error.${code}` as MessageKey);
+  const body =
+    reason === 'limit'
+      ? t('player.error.limit.body')
+      : reason === 'codec'
+        ? t('player.error.codec.body', { codec: error?.codec ?? '?' })
+        : reason === 'engine'
+          ? t('player.error.engine.body', { id: error?.crashId ?? '?' })
+          : (error?.message ?? t('error.generic'));
+  // Retrying cannot fix an undecodable format; diagnostics are the useful action there and after a crash.
+  const copyFirst = reason === 'codec' || reason === 'engine';
+  const copy = (
+    <DLButton
+      key="copy"
+      variant={copyFirst ? 'filled' : 'default'}
+      size="lg"
+      onClick={() =>
+        void copyDiagnostics().then((ok) => {
+          setCopied(ok);
+          setTimeout(() => setCopied(false), 2000);
+        })
+      }
+    >
+      {copied ? t('player.copied') : t('player.copyDiagnostics')}
+    </DLButton>
+  );
+  const retry = (
+    <DLButton key="retry" variant={copyFirst ? 'default' : 'filled'} size="lg" icon={IconRefresh} onClick={onRetry}>
+      {t('player.retry')}
+    </DLButton>
+  );
   return (
     <div className={classes.error} role="alert">
       <div className={classes.errorMark}>
         <Icon icon={IconAlertTriangle} size={24} />
       </div>
-      <h2 className={classes.errorTitle}>{t(`player.error.${code}` as MessageKey)}</h2>
-      <p className={classes.errorBody}>{error?.message ?? t('error.generic')}</p>
-      <div className={classes.errorActions}>
-        <DLButton variant="filled" size="lg" icon={IconRefresh} onClick={onRetry}>
-          {t('player.retry')}
-        </DLButton>
-        <DLButton
-          variant="default"
-          size="lg"
-          onClick={() =>
-            void copyDiagnostics().then((ok) => {
-              setCopied(ok);
-              setTimeout(() => setCopied(false), 2000);
-            })
-          }
-        >
-          {copied ? t('player.copied') : t('player.copyDiagnostics')}
-        </DLButton>
-      </div>
+      <h2 className={classes.errorTitle}>{title}</h2>
+      <p className={classes.errorBody}>{body}</p>
+      <div className={classes.errorActions}>{reason === 'codec' ? [copy] : copyFirst ? [copy, retry] : [retry, copy]}</div>
     </div>
   );
 }
@@ -334,7 +350,7 @@ export function PlayerPage() {
 
   useEffect(() => () => { if (entryTimer.current) clearTimeout(entryTimer.current); }, []);
 
-  const showStatus = ['Resolving', 'Connecting', 'Buffering'].includes(player.state);
+  const showStatus = player.reconnecting || ['Resolving', 'Connecting', 'Buffering'].includes(player.state);
   const catchup = player.mode === 'catchup';
   const timeshift = player.mode === 'catchup' || player.mode === 'vod' || player.mode === 'recording';
   const live = !timeshift && (player.mode === 'live' || player.mode === null);
@@ -363,7 +379,7 @@ export function PlayerPage() {
         </div>
       ) : null}
 
-      {showStatus && <div className={classes.status} role="status">{t(`player.state.${player.state}` as MessageKey)}</div>}
+      {showStatus && <div className={classes.status} role="status">{player.reconnecting ? t('player.reconnecting') : t(`player.state.${player.state}` as MessageKey)}</div>}
 
       {failed ? (
         <ErrorOverlay error={player.error} onRetry={() => cmd({ kind: 'retry' })} />

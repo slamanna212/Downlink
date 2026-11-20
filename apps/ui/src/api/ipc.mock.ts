@@ -122,7 +122,7 @@ export function mockNowNext(channelId: number, now = nowSec(), scheduled?: Reado
 export function idleState(): PlayerState {
   return {
     state: 'Idle', mode: null, channelId: null, position: null, duration: null, buffered: null, seekable: false,
-    volume: 100, muted: false, hwdecCurrent: null, videoCodec: null, width: null, height: null, waitingOn: null,
+    volume: 100, muted: false, hwdecCurrent: null, videoCodec: null, width: null, height: null, waitingOn: null, reconnecting: false,
     error: null, transitionedAt: Date.now(), programme: null, title: null, resumeAt: null,
   };
 }
@@ -133,6 +133,13 @@ export function createMockBackend(): Backend {
   const mode = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('mock') : null;
   const failParam = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('fail') : null;
   const failId = failParam ? Number(failParam) : null;
+  const reconnectFlag = typeof location !== 'undefined' && new URLSearchParams(location.search).has('reconnect');
+  const failReason = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('reason') : null;
+  const failError = (): AppError =>
+    failReason === 'limit' ? { ...appError('stream', 'limit'), reason: 'limit' }
+    : failReason === 'codec' ? { ...appError('media', 'codec'), reason: 'codec', codec: 'AV1 10-bit' }
+    : failReason === 'engine' ? { ...appError('local', 'engine'), reason: 'engine', crashId: 'c-7f3a' }
+    : appError('stream', 'This channel stopped sending video. Try again, or pick another channel.');
   const sources = mockSources(mode === 'empty', mode === 'offline' ? 'offline' : mode === 'connecting' ? 'connecting' : 'connected');
   const channels = mode === 'empty' ? [] : mockChannels(mode === 'big' ? 5000 : 240);
   const scheduled = new Set<string>();
@@ -318,8 +325,8 @@ export function createMockBackend(): Backend {
       setTimeout(() => {
         // `?fail=<id>` in the URL makes that channel fail, to exercise the error overlay.
         if (failId !== null && failId === channelId)
-          setPlayer({ state: 'Failed', error: appError('stream', 'This channel stopped sending video. Try again, or pick another channel.') });
-        else setPlayer({ state: 'Playing', hwdecCurrent: 'vaapi', videoCodec: 'h264', width: 1920, height: 1080 });
+          setPlayer({ state: 'Failed', error: failError() });
+        else setPlayer({ state: 'Playing', hwdecCurrent: 'vaapi', videoCodec: 'h264', width: 1920, height: 1080, reconnecting: reconnectFlag });
       }, 400);
       return null;
     },
