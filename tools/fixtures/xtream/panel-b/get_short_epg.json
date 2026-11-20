@@ -1,0 +1,60 @@
+{
+  "epg_listings": [
+    {
+      "id": "9000",
+      "epg_id": "1",
+      "title": "TW9ybmluZyBUZXN0IFNob3c=",
+      "lang": "",
+      "start": 1767225600,
+      "end": 1767229200,
+      "description": "U3ludGhldGljIGRlc2NyaXB0aW9uIGZvciBNb3JuaW5nIFRlc3QgU2hvdy4=",
+      "channel_id": "test-channel-1.test",
+      "start_timestamp": 1767225600,
+      "stop_timestamp": 1767229200,
+      "now_playing": 1,
+      "has_archive": 0
+    },
+    {
+      "id": "9001",
+      "epg_id": "1",
+      "title": "VGhlIFN5bnRoZXRpYyBIb3Vy",
+      "lang": "",
+      "start": 1767229200,
+      "end": 1767232800,
+      "description": "U3ludGhldGljIGRlc2NyaXB0aW9uIGZvciBUaGUgU3ludGhldGljIEhvdXIu",
+      "channel_id": "test-channel-1.test",
+      "start_timestamp": 1767229200,
+      "stop_timestamp": 1767232800,
+      "now_playing": 0,
+      "has_archive": 0
+    },
+    {
+      "id": "9002",
+      "epg_id": "1",
+      "title": "UGF0dGVybiBQbGF5aG91c2U=",
+      "lang": "",
+      "start": 1767232800,
+      "end": 1767234600,
+      "description": "U3ludGhldGljIGRlc2NyaXB0aW9uIGZvciBQYXR0ZXJuIFBsYXlob3VzZS4=",
+      "channel_id": "test-channel-1.test",
+      "start_timestamp": 1767232800,
+      "stop_timestamp": 1767234600,
+      "now_playing": 0,
+      "has_archive": 0
+    },
+    {
+      "id": "9003",
+      "epg_id": "1",
+      "title": "Q29sb3VyIEJhcnMgTGl2ZQ==",
+      "lang": "",
+      "start": 1767234600,
+      "end": 1767236400,
+      "description": "U3ludGhldGljIGRlc2NyaXB0aW9uIGZvciBDb2xvdXIgQmFycyBMaXZlLg==",
+      "channel_id": "test-channel-1.test",
+      "start_timestamp": 1767234600,
+      "stop_timestamp": 1767236400,
+      "now_playing": 0,
+      "has_archive": 0
+    }
+  ]
+}
