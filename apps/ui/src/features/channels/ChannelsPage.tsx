@@ -6,7 +6,7 @@ import { Center, SegmentedControl, Text, TextInput, VisuallyHidden } from '@mant
 import { IconLayoutList, IconList, IconSearch } from '@tabler/icons-react';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { invoke } from '../../api/ipc';
-import type { RecordKind } from '../../api/types';
+import type { NowNext, RecordKind } from '../../api/types';
 import { useCaps, useChannels, useCounts, useGroups, useNowNextWindow, useOffline } from '../../api/queries';
 import { dl } from '../../theme';
 import { Icon } from '../../components/Icon/Icon';
@@ -69,14 +69,22 @@ export function ChannelsPage() {
   });
   useEffect(() => virtualizer.measure(), [rowH, virtualizer]);
 
-  // Now/next for a window around the viewport.
+  // Now/next for a window around the viewport (one window above, the current one, one below).
   const windowIndex = Math.floor(firstVisible / WINDOW);
   const windowIds = useMemo(
-    () => channels.slice(windowIndex * WINDOW, windowIndex * WINDOW + WINDOW * 3).map((c) => c.id),
+    () => channels.slice(Math.max(0, windowIndex - 1) * WINDOW, (windowIndex + 2) * WINDOW).map((c) => c.id),
     [channels, windowIndex],
   );
   const nowNext = useNowNextWindow(windowIds, `${selectionKey(selection)}|${deferred}|${windowIndex}`);
-  const nowNextById = useMemo(() => new Map((nowNext.data ?? []).map((n) => [n.channelId, n])), [nowNext.data]);
+  // Merge every window's answer instead of replacing it: a fast scroll or scrollbar drag skips windows,
+  // and replacing made visible rows flip between "no guide" and their programme as each window loaded.
+  const [merged, setMerged] = useState<{ src: NowNext[] | undefined; byId: Map<number, NowNext> }>({ src: undefined, byId: new Map() });
+  if (nowNext.data && !nowNext.isPlaceholderData && nowNext.data !== merged.src) {
+    const byId = new Map(merged.byId);
+    for (const n of nowNext.data) byId.set(n.channelId, n);
+    setMerged({ src: nowNext.data, byId });
+  }
+  const nowNextById = merged.byId;
 
   const favourite = useMutation({
     mutationFn: (v: { channelId: number; favourite: boolean }) => invoke('set_favourite', v),

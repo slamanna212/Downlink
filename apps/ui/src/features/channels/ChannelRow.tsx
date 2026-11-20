@@ -12,6 +12,7 @@ import classes from './Channels.module.css';
 
 export interface ChannelRowProps {
   channel: Channel;
+  /** undefined while still loading (renders blank); a value with `now: null` means no guide data. */
   nowNext: NowNext | undefined;
   now: number;
   active: boolean;
@@ -90,9 +91,9 @@ export const ChannelRow = forwardRef<HTMLDivElement, ChannelRowProps>(function C
               <span className={classes.fill} style={{ display: 'block', width: `${progress(p.startUtc, p.endUtc, now) * 100}%` }} />
             </span>
           </>
-        ) : (
+        ) : nowNext ? (
           <span className={classes.nowTime}>{t('channels.noGuide')}</span>
-        )}
+        ) : null}
       </span>
       <span className={classes.next}>{next ? `${formatClock(next.startUtc)} ${next.title ?? ''}` : ''}</span>
       <span className={classes.end}>
