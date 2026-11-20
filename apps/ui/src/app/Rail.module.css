@@ -121,6 +121,11 @@
 .dotLive { background: var(--dl-live); }
 .dotProgress { background: var(--dl-accent); }
 .dotNone { background: var(--dl-text-disabled); }
+.dotPulse { background: var(--dl-text-disabled); animation: dotPulse 1400ms ease-in-out infinite; }
+@keyframes dotPulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
 
 .sourceName {
   font-size: var(--mantine-font-size-sm);

@@ -13,6 +13,7 @@ export const en = {
   'nav.primary': 'Primary',
   'nav.collapse': 'Collapse sidebar',
   'nav.expand': 'Expand sidebar',
+  'source.status.connecting': 'Connecting…',
   'source.status.connected': 'Connected',
   'source.status.syncing': 'Syncing',
   'source.status.offline': 'Offline',

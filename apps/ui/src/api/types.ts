@@ -25,7 +25,8 @@ export interface Caps {
   favourites: boolean;
 }
 
-export type SourceStatus = 'connected' | 'syncing' | 'offline' | 'stale' | 'auth_error';
+/** `connecting` = not probed yet since launch. */
+export type SourceStatus = 'connecting' | 'connected' | 'syncing' | 'offline' | 'stale' | 'auth_error';
 
 export interface Source {
   id: number;

@@ -133,7 +133,7 @@ export function createMockBackend(): Backend {
   const mode = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('mock') : null;
   const failParam = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('fail') : null;
   const failId = failParam ? Number(failParam) : null;
-  const sources = mockSources(mode === 'empty', mode === 'offline' ? 'offline' : 'connected');
+  const sources = mockSources(mode === 'empty', mode === 'offline' ? 'offline' : mode === 'connecting' ? 'connecting' : 'connected');
   const channels = mode === 'empty' ? [] : mockChannels(mode === 'big' ? 5000 : 240);
   const scheduled = new Set<string>();
   let tick: ReturnType<typeof setInterval> | null = null;

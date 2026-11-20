@@ -16,6 +16,7 @@ import classes from './Rail.module.css';
 export type RailMode = 'expanded' | 'collapsed' | 'tv';
 
 const DOT_CLASS: Record<SourceStatus | 'none', string | undefined> = {
+  connecting: classes.dotPulse,
   connected: classes.dotOk,
   syncing: classes.dotProgress,
   offline: classes.dotWarn,
