@@ -34,7 +34,7 @@ export function mockSources(empty: boolean, status: Source['status'] = 'connecte
     {
       id: 1, uuid: 'mock-source-1', kind: 'dispatcharr', name: 'Demo server', host: 'demo.invalid',
       caps: Cap.Live | Cap.Epg | Cap.Catchup | Cap.Vod | Cap.Dvr | Cap.Favourites,
-      status, serverVersion: '0.0-mock', lastSyncAt: nowSec() - 600, archiveDays: 7,
+      status, serverVersion: '0.0-mock', lastSyncAt: nowSec() - 600, archiveDays: 7, supportsHlsTransport: true, hlsTransport: false,
     },
   ];
 }
@@ -151,7 +151,7 @@ export function createMockBackend(): Backend {
   const groups = mockGroups();
   let settings: AppSettings = {
     liveBufferSecs: 2, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
-    deinterlace: 'auto', subtitleSize: 100, subtitleBackground: true,
+    deinterlace: 'auto', subtitleSize: 100, subtitleBackground: true, resumeLastChannel: false,
   };
   let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, lastChecked: null };
   let searchIndex: { programme: Programme; channel: Channel; hay: string }[] | null = null;
@@ -271,6 +271,11 @@ export function createMockBackend(): Backend {
     export_diagnostics: () => '/home/user/Downloads/downlink-diagnostics.zip',
     reveal_path: () => null,
     report_ui_timing: () => null,
+    set_source_options: ({ sourceId, hlsTransport }) => {
+      const src = sources.find((x) => x.id === sourceId);
+      if (src) src.hlsTransport = hlsTransport;
+      return null;
+    },
     archive_newer_database: () => {
       blockedBy = null;
       return null;
@@ -446,6 +451,12 @@ export function createMockBackend(): Backend {
     },
     set_fullscreen: () => null,
   };
+
+  // `?mock=resume`: the shell resumes the last channel at launch (setting on, playback starts by itself).
+  if (mode === 'resume') {
+    settings = { ...settings, resumeLastChannel: true };
+    setTimeout(() => void impl.play_channel({ channelId: channels[1]?.id ?? 100 }), 400);
+  }
 
   return {
     async invoke(cmd, args) {

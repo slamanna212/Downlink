@@ -99,6 +99,7 @@ export interface Commands {
   /** Accept the server's new TLS certificate for this source. */
   trust_new_certificate: { args: { sourceId: number }; result: null };
   quit_app: { args: Record<string, never>; result: null };
+  set_source_options: { args: { sourceId: number; hlsTransport: boolean }; result: null };
   report_ui_timing: { args: { name: string; ms: number }; result: null };
 }
 export type CommandName = keyof Commands;

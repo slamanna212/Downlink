@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { useHotkeys } from '@mantine/hooks';
 import { dl } from '../theme';
 import type { Source } from '../api/types';
-import { useCaps, useSources } from '../api/queries';
+import { useCaps, useSettings, useSources } from '../api/queries';
 import { useUiStore } from '../store/ui';
+import { usePlayerStore } from '../store/player';
 import { t } from '../lib/i18n';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, listen } from '../api/ipc';
@@ -80,6 +81,25 @@ function useAutoDensity() {
   }, []);
 }
 
+/**
+ * "Resume last channel on launch": the shell starts playback itself, so when the setting is on and playback
+ * begins during the first seconds on Home, open the player. Never steals focus from a screen the user chose.
+ */
+function useResumeOnLaunch() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const { data: settings } = useSettings();
+  const state = usePlayerStore((s) => s.player.state);
+  const done = useRef(false);
+  const active = ['Resolving', 'Connecting', 'Buffering', 'Playing'].includes(state);
+  useEffect(() => {
+    if (done.current || !settings?.resumeLastChannel || !active || pathname !== '/') return;
+    if (performance.now() > 15_000) return;
+    done.current = true;
+    void navigate('/player', { replace: true });
+  }, [settings?.resumeLastChannel, active, pathname, navigate]);
+}
+
 /** Esc = back (PLAN §8.4) on every screen except Home and the player, unless an overlay or a text field owns it. */
 function useEscapeBack() {
   const navigate = useNavigate();
@@ -121,6 +141,7 @@ function useDeepLinks() {
 }
 
 export function Shell() {
+  useResumeOnLaunch();
   const detailOpen = useDetailStore((s) => s.open !== null);
   useEffect(() => {
     const id = window.setTimeout(preloadRoutes, 1500);

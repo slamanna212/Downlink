@@ -218,3 +218,20 @@ test('settings: the debug logging switch is in About & diagnostics and calls set
   await page.getByLabel('Debug logging').click({ force: true });
   await expect.poll(async () => (await calls(page)).includes('set_debug_logging')).toBe(true);
 });
+
+test('settings: per-source HLS transport switch (only when supported) and resume-last-channel switch', async ({ page }) => {
+  await page.goto('/settings/sources');
+  await settle(page);
+  await page.getByLabel(/Use HLS transport/).click({ force: true });
+  await expect.poll(async () => (await calls(page)).includes('set_source_options')).toBe(true);
+  await expect(page.getByText('Only if your network breaks long video connections. Adds a few seconds of delay.')).toBeVisible();
+  await page.goto('/settings/playback');
+  await settle(page);
+  await page.getByLabel('Resume last channel on launch').click({ force: true });
+  await expect.poll(async () => (await calls(page)).includes('set_settings')).toBe(true);
+});
+
+test('resume last channel on launch opens the player', async ({ page }) => {
+  await page.goto('/?mock=resume');
+  await expect(page).toHaveURL(/\/player$/);
+});

@@ -42,6 +42,10 @@ export interface Source {
   lastSyncAt: number | null;
   /** Longest catch-up window across the source's channels, in days (0 = none). */
   archiveDays: number;
+  /** The source can serve live TV over HLS (opt-in transport). Absent until the core reports it: hide the switch. */
+  supportsHlsTransport?: boolean;
+  /** Live TV uses HLS for this source. */
+  hlsTransport?: boolean;
 }
 
 export interface Group {
@@ -194,6 +198,8 @@ export interface AppSettings {
   /** Percent, 50..150. */
   subtitleSize: number;
   subtitleBackground: boolean;
+  /** Open the player on the most recently watched channel at launch (off by default). */
+  resumeLastChannel: boolean;
 }
 
 export interface AudioDevice {

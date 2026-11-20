@@ -43,6 +43,10 @@ function SourceRow({ source, onRemove }: { source: Source; onRemove: (s: Source)
     mutationFn: () => invoke('sync_source', { sourceId: source.id }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog', 'sources'] }),
   });
+  const hls = useMutation({
+    mutationFn: (hlsTransport: boolean) => invoke('set_source_options', { sourceId: source.id, hlsTransport }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog', 'sources'] }),
+  });
   const syncing = source.status === 'syncing' || !!task || sync.isPending;
   const help = task
     ? t('settings.sources.syncing', { phase: task.phase })
@@ -50,6 +54,7 @@ function SourceRow({ source, onRemove }: { source: Source; onRemove: (s: Source)
       ? t('settings.sources.lastSync', { time: formatUpdated(source.lastSyncAt) })
       : t('settings.sources.never');
   return (
+    <>
     <SettingRow
       label={source.name}
       help={`${source.kind} · ${source.host ?? ''} · ${t(`source.status.${source.status}`)} · ${help}`}
@@ -64,6 +69,17 @@ function SourceRow({ source, onRemove }: { source: Source; onRemove: (s: Source)
         </DLButton>
       </div>
     </SettingRow>
+    {source.supportsHlsTransport && (
+      <SettingRow label={t('settings.hls')} help={t('settings.hls.help')} wide>
+        <Switch
+          aria-label={`${t('settings.hls')}: ${source.name}`}
+          checked={source.hlsTransport ?? false}
+          disabled={hls.isPending}
+          onChange={(e) => hls.mutate(e.currentTarget.checked)}
+        />
+      </SettingRow>
+    )}
+    </>
   );
 }
 
@@ -138,6 +154,13 @@ function PlaybackSection() {
           value={data.hwdec}
           allowDeselect={false}
           onChange={(v) => v && patch.mutate({ hwdec: v as HwdecSetting })}
+        />
+      </SettingRow>
+      <SettingRow label={t('settings.resumeLast')} help={t('settings.resumeLast.help')} wide>
+        <Switch
+          aria-label={t('settings.resumeLast')}
+          checked={data.resumeLastChannel ?? false}
+          onChange={(e) => patch.mutate({ resumeLastChannel: e.currentTarget.checked })}
         />
       </SettingRow>
       <SettingRow label={t('settings.buffer')} help={t('settings.buffer.help')}>
