@@ -211,3 +211,10 @@ test('blocking prompt: a changed certificate offers Trust new certificate or Can
   await expect.poll(async () => (await calls(page)).includes('trust_new_certificate')).toBe(true);
   await expect(page.locator('[role=list] [data-index="0"]')).toBeVisible();
 });
+
+test('settings: the debug logging switch is in About & diagnostics and calls set_debug_logging', async ({ page }) => {
+  await page.goto('/settings/about');
+  await settle(page);
+  await page.getByLabel('Debug logging').click({ force: true });
+  await expect.poll(async () => (await calls(page)).includes('set_debug_logging')).toBe(true);
+});
