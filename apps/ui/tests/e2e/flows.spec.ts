@@ -190,3 +190,24 @@ test('player shows "Reconnecting…" during an automatic retry', async ({ page }
   await page.keyboard.press('Enter');
   await expect(page.getByRole('status').filter({ hasText: 'Reconnecting…' })).toBeVisible();
 });
+
+test('blocking prompt: a newer database stops the app; "Start fresh" is outlined, not a filled primary', async ({ page }) => {
+  await page.goto('/channels?mock=newerdb');
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('This library was created by a newer version of Downlink.');
+  await expect(dialog.getByRole('button', { name: 'Quit' })).toHaveAttribute('data-variant', 'filled');
+  await expect(dialog.getByRole('button', { name: 'Start fresh' })).toHaveAttribute('data-variant', 'danger');
+  const reloaded = page.waitForEvent('load'); // after archiving, the UI reloads
+  await dialog.getByRole('button', { name: 'Start fresh' }).click();
+  await reloaded;
+});
+
+test('blocking prompt: a changed certificate offers Trust new certificate or Cancel', async ({ page }) => {
+  await page.goto('/channels?mock=cert');
+  const dialog = page.getByRole('alertdialog');
+  await expect(dialog).toContainText('certificate changed');
+  await dialog.getByRole('button', { name: 'Trust new certificate' }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(async () => (await calls(page)).includes('trust_new_certificate')).toBe(true);
+  await expect(page.locator('[role=list] [data-index="0"]')).toBeVisible();
+});

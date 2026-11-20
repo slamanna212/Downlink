@@ -8,6 +8,7 @@ import { createQueryClient, startCatalogBridge } from '../api/queries';
 import { startPlayerBridge } from '../store/player';
 import { startTaskBridge } from '../store/tasks';
 import { applyDensity, useUiStore } from '../store/ui';
+import { BlockingPrompt } from '../features/blocking/BlockingPrompt';
 import { createAppRouter } from './routes';
 
 export function App({ router, client }: { router?: DataRouter; client?: QueryClient }) {
@@ -32,6 +33,7 @@ export function App({ router, client }: { router?: DataRouter; client?: QueryCli
       <Notifications position="bottom-right" limit={3} autoClose={5000}  />
       <QueryClientProvider client={qc}>
         <RouterProvider router={r} />
+        <BlockingPrompt />
       </QueryClientProvider>
     </MantineProvider>
   );

@@ -2,6 +2,7 @@
 // talks HTTP). Outside Tauri (browser dev, Storybook, tests) a mock backend with synthetic data answers.
 import { invoke as tauriInvoke, isTauri } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
+import { noteBlockingError } from '../lib/blocking';
 import type {
   AddSourceInput,
   AppError,
@@ -93,6 +94,11 @@ export interface Commands {
   export_diagnostics: { args: Record<string, never>; result: string };
   reveal_path: { args: { path: string }; result: null };
   /** Debug: the UI reports a named startup timing (ms since navigation start) for the desktop perf harness. */
+  /** Move the newer-version database aside and start with an empty library (the UI then reloads). */
+  archive_newer_database: { args: Record<string, never>; result: null };
+  /** Accept the server's new TLS certificate for this source. */
+  trust_new_certificate: { args: { sourceId: number }; result: null };
+  quit_app: { args: Record<string, never>; result: null };
   report_ui_timing: { args: { name: string; ms: number }; result: null };
 }
 export type CommandName = keyof Commands;
@@ -164,7 +170,12 @@ export function setBackend(b: Backend | null): void {
 }
 
 export async function invoke<C extends CommandName>(cmd: C, args: Commands[C]['args']): Promise<Commands[C]['result']> {
-  return (await getBackend()).invoke(cmd, args);
+  try {
+    return await (await getBackend()).invoke(cmd, args);
+  } catch (e) {
+    if (isAppError(e)) noteBlockingError(e.message);
+    throw e;
+  }
 }
 
 export async function listen<E extends EventName>(event: E, handler: (payload: Events[E]) => void): Promise<Unlisten> {

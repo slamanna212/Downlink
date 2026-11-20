@@ -133,6 +133,10 @@ export function createMockBackend(): Backend {
   const mode = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('mock') : null;
   const failParam = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('fail') : null;
   const failId = failParam ? Number(failParam) : null;
+  // `?mock=newerdb` / `?mock=cert`: catalogue calls fail with the blocking messages until the user resolves them.
+  let blockedBy: 'newerdb' | 'cert' | null = mode === 'newerdb' || mode === 'cert' ? mode : null;
+  const blockedError = (): AppError =>
+    blockedBy === 'newerdb' ? appError('local', 'This library was created by a newer version of Downlink.') : appError('server', 'The server’s certificate changed.');
   const reconnectFlag = typeof location !== 'undefined' && new URLSearchParams(location.search).has('reconnect');
   const failReason = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('reason') : null;
   const failError = (): AppError =>
@@ -196,13 +200,15 @@ export function createMockBackend(): Backend {
   const impl: { [C in CommandName]: (a: Commands[C]['args']) => Commands[C]['result'] | Promise<Commands[C]['result']> } = {
     list_sources: () => sources.map((s) => ({ ...s })),
     list_groups: () => withCounts(),
-    list_channels: ({ groupId, query, favouritesOnly }) =>
-      channels.filter(
+    list_channels: ({ groupId, query, favouritesOnly }) => {
+      if (blockedBy) throw blockedError();
+      return channels.filter(
         (c) =>
           (groupId == null || c.groupId === groupId) &&
           (!favouritesOnly || c.isFavourite) &&
           (!query || c.name.toLowerCase().includes(query.toLowerCase()) || String(c.number ?? '').startsWith(query)),
-      ),
+      );
+    },
     get_now_next: ({ channelIds }) => channelIds.map((id) => mockNowNext(id, nowSec(), scheduled)),
     get_guide: ({ start, end, channelOffset, channelLimit, groupId }) => {
       const list = channels.filter((c) => groupId == null || c.groupId === groupId).slice(channelOffset, channelOffset + channelLimit);
@@ -265,6 +271,15 @@ export function createMockBackend(): Backend {
     export_diagnostics: () => '/home/user/Downloads/downlink-diagnostics.zip',
     reveal_path: () => null,
     report_ui_timing: () => null,
+    archive_newer_database: () => {
+      blockedBy = null;
+      return null;
+    },
+    trust_new_certificate: () => {
+      blockedBy = null;
+      return null;
+    },
+    quit_app: () => null,
     list_vod_categories: ({ kind }) => vod.vodCategories(kind),
     list_movies: (a) => vod.listMovies(a),
     get_movie: ({ id }) => {
