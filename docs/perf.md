@@ -66,3 +66,22 @@ Initial import of the 20k-channel playlist and 672k-programme guide: 58 s.
 ### Resume last channel
 Setting `resumeLastChannel` (boolean, default off, stored with the other machine settings; the UI has no toggle yet) plays
 the most recently watched channel as soon as the engine is up. Never blocks the UI.
+
+### Re-measurement after "window first" start-up and core's search/guide work
+
+Start-up is now two background stages (`apps/desktop/src/boot.rs`): `setup` only creates the state and registers deep
+links, then returns; service + logging (stage 1) and libmpv, engine pre-warm, surface, tray and media session (stage 2)
+run afterwards and every command waits on the stage it needs (`state.rs`). Release build, same 20k-channel / 672k-programme
+library, three runs on the warm cache:
+
+| Budget | Result | Verdict |
+|---|---|---|
+| Start -> interactive (cached) < 800 ms | `setup` returns at 0.25-0.28 s, service and engine ready at 0.26-0.30 s, webview navigation starts at 0.48-0.52 s, `#root` has content 235-260 ms later: **about 0.72-0.78 s** after process start (was ~0.90 s) | pass, with little margin on this VM |
+| Guide first chunk < 300 ms | 16 ms cold, 15 ms warm p50; scrolling all channels p50 22 ms, p95 35 ms | pass |
+| Section switch < 100 ms | p50 13 ms, p95 19 ms | pass |
+| Search keystroke < 30 ms | channel list p95 19 ms; unified search (with core's faster programme search) p50 21 ms, p95 61 ms, max 89 ms (was p95 188 ms) | channel search passes; unified search p95 still above 30 ms |
+| RSS < 400 MB | app process 258 MiB (was 319 MiB); process tree with WebKit helpers 587 MiB | pass |
+
+The first launch after a core schema migration is slower (core ready at 1.1 s in the run that migrated the old cache);
+that cost is paid once. The remaining ~0.25 s before `setup` runs and ~0.2 s between `setup` returning and the webview
+navigating are Tauri/GTK/WebKit initialisation.

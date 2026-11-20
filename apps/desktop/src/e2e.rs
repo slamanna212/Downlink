@@ -42,6 +42,7 @@ pub fn spawn(app: AppHandle, mode: String) {
             "perf" => perf(&st).await,
             "launch" => launch(&st).await,
             "degraded" => degraded(&st).await,
+            "hls" => hls(&st, &db).await,
             _ => full(&st, &db).await,
         };
         if let Err(e) = r {
@@ -701,5 +702,45 @@ async fn degraded(st: &AppState) -> Result<(), String> {
     .map_err(|e| e.message)?;
     let n = fresh.list_sources().await.map_err(|e| e.message)?.len();
     say(json!({ "step": "reopened", "sources": n }));
+    Ok(())
+}
+
+/// `DOWNLINK_E2E=hls`: switch the source to the opt-in HLS transport, play a channel, check the
+/// session is tracked, then stop and check it is released.
+async fn hls(st: &AppState, db: &str) -> Result<(), String> {
+    use downlink_core::service::SetSourceOptionsArgs;
+    let svc = st.service_now();
+    let src = svc.list_sources().await.map_err(|e| e.message)?;
+    let s = src.first().ok_or("no source")?;
+    say(
+        json!({ "step": "source", "supportsHlsTransport": s.supports_hls_transport, "hlsTransport": s.hls_transport }),
+    );
+    let dto = svc
+        .set_source_options(SetSourceOptionsArgs {
+            source_id: s.id,
+            hls_transport: true,
+        })
+        .await
+        .map_err(|e| e.message)?;
+    say(json!({ "step": "enabled", "hlsTransport": dto.hls_transport }));
+    let id = channel_id(st, "Channel One").await?;
+    let pb = st.playback().await.map_err(|e| e.message)?;
+    pb.play_channel(id).await.map_err(|e| e.message)?;
+    let snap = pb.snapshot_wait(
+        |s| matches!(s, SessionState::Playing | SessionState::Failed),
+        Duration::from_secs(30),
+    );
+    say(
+        json!({ "step": "hls_play", "state": snap.state, "firstFrameMs": snap.first_frame_ms, "openSessions": open_sessions(db) }),
+    );
+    pb.stop().await.map_err(|e| e.message)?;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    say(json!({ "step": "hls_stopped", "openSessions": open_sessions(db) }));
+    svc.set_source_options(SetSourceOptionsArgs {
+        source_id: s.id,
+        hls_transport: false,
+    })
+    .await
+    .map_err(|e| e.message)?;
     Ok(())
 }

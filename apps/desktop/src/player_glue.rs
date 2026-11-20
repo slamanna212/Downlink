@@ -40,6 +40,10 @@ struct Active {
     generation: u64,
     /// Server-side failover attempts since the user's last play (PLAN §4.5).
     failover_count: u32,
+    /// The current live plan is an opt-in HLS session (minted URL, no headers).
+    live_hls: bool,
+    /// The one allowed re-mint after a 410 / dead session was used.
+    hls_reminted: bool,
     /// VOD / recording being played, for position reports.
     media: Option<Media>,
     /// Loopback playlist proxy for the current recording (aborted when dropped).
@@ -152,6 +156,33 @@ impl SinkContext {
         let Some(player) = self.extras.player.get().cloned() else {
             return;
         };
+        // Live HLS: a dead session (410) is fixed by minting a new one, once per play.
+        let remint = {
+            let mut a = lock(&self.active);
+            let r = a.live_hls && !a.hls_reminted && a.info.mode == Some(PlayMode::Live);
+            if r {
+                a.hls_reminted = true;
+                a.info.failure = None;
+                a.info.failover_active = true;
+            }
+            r.then_some(a.info.channel_id).flatten()
+        };
+        if let Some(channel) = remint {
+            player.begin_resolving();
+            match self.service.remint_hls(channel).await {
+                Ok(plan) => {
+                    tracing::info!("live HLS session re-minted after a failure");
+                    if let Err(e) = player.play(plan_request(&plan, PlayMode::Live, true)) {
+                        self.publish_failure(
+                            &player,
+                            AppError::new(ErrorCode::Media, e.to_string()),
+                        );
+                    }
+                }
+                Err(e) => self.publish_failure(&player, e),
+            }
+            return;
+        }
         let (channel, attempt, live) = {
             let mut a = lock(&self.active);
             a.failover_count += 1;
@@ -360,6 +391,12 @@ impl Playback {
         }
     }
 
+    /// Release the live HLS session in the background (navigate-away, non-live playback).
+    fn stop_live_hls_bg(&self) {
+        let svc = self.service.clone();
+        tauri::async_runtime::spawn(async move { svc.stop_live_hls().await });
+    }
+
     fn begin(
         &self,
         channel_id: Option<i64>,
@@ -368,9 +405,14 @@ impl Playback {
         last: LastPlay,
     ) {
         self.stop_previous_catchup();
+        if mode != PlayMode::Live {
+            self.stop_live_hls_bg();
+        }
         let mut a = lock(&self.active);
         a.generation += 1;
         a.failover_count = 0;
+        a.live_hls = false;
+        a.hls_reminted = false;
         a.media = None;
         a.hls = None;
         a.source_index = 0;
@@ -409,6 +451,7 @@ impl Playback {
                 return Err(e);
             }
         };
+        lock(&self.active).live_hls = plan.surface == downlink_core::source::Surface::Hls;
         let source_id = self
             .service
             .store()
@@ -710,6 +753,7 @@ impl Playback {
             a.hls = None;
         }
         let r = self.player.stop().map_err(player_err);
+        self.service.stop_live_hls().await;
         let prev = lock(&self.active).catchup.take();
         if let Some(play) = prev
             && let Err(e) = self.service.stop_catchup(&play).await

@@ -107,6 +107,7 @@ macro_rules! handlers {
             commands::catalog::add_source,
             commands::catalog::test_source,
             commands::catalog::remove_source,
+            commands::catalog::set_source_options,
             commands::catalog::sync_source,
             commands::catalog::list_groups,
             commands::catalog::list_channels,

@@ -1,7 +1,8 @@
 use downlink_core::AppError;
 use downlink_core::service::{
     AddSourceInput, ChannelDto, CountsDto, GroupDto, GuideArgs, GuideDto, HomeDto,
-    ListChannelsArgs, NowNextDto, ProgrammeDto, SearchDto, SourceDto, TestSourceResult,
+    ListChannelsArgs, NowNextDto, ProgrammeDto, SearchDto, SetSourceOptionsArgs, SourceDto,
+    TestSourceResult,
 };
 use tauri::State;
 
@@ -224,4 +225,20 @@ pub async fn get_channel_by_uuid(
         }
     }
     Err(AppError::local("That channel is not in your list."))
+}
+
+#[tauri::command]
+pub async fn set_source_options(
+    state: State<'_, AppState>,
+    source_id: i64,
+    hls_transport: bool,
+) -> CmdResult<SourceDto> {
+    state
+        .svc()
+        .await?
+        .set_source_options(SetSourceOptionsArgs {
+            source_id,
+            hls_transport,
+        })
+        .await
 }
