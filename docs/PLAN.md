@@ -1262,6 +1262,10 @@ README and About show "Works with Dispatcharr ≥ 0.32.0, tested with <latest>".
 
 Updater signatures (minisign) are required regardless of OS code signing.
 
+**Decided 2026-11-20 (Sam):** releases start with **Windows and Linux**; Windows stays unsigned for now.
+**macOS** follows soon, signed and notarised with Sam's existing **Apple Developer ID** (the macOS release jobs
+are gated behind the `ENABLE_MACOS` repo variable until then). Azure Trusted Signing is not planned.
+
 ---
 
 ## 11. Engineering handbook
@@ -1394,8 +1398,7 @@ Local dev may use a system mpv/libmpv (`DOWNLINK_MPV_PATH`); release artefacts n
 
 1. **Licence** — GPL-3.0 (default) or something else? A permissive licence forces an LGPL mpv build
    and loses mpv's X11 output.
-2. **Signing before 1.0** — stay unsigned/ad-hoc like the dev channel, or buy Developer ID and/or
-   Azure Trusted Signing? Doesn't block any milestone.
+2. **Signing before 1.0** — decided: Windows unsigned, macOS via Apple Developer ID when Mac builds start (§10.5).
 3. **Multi-user on one machine** — default: the OS user account is the profile in 1.0.
 4. **Repo name** — default `slamanna212/Downlink` (used in the updater endpoints above).
 
