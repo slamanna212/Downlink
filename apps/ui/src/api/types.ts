@@ -324,6 +324,8 @@ export interface UpdateStatus {
   notes?: string | null;
   /** UTC seconds. */
   lastChecked?: number | null;
+  /** The available update is downloaded and can be installed now. */
+  ready?: boolean;
 }
 
 export interface AddSourceInput {

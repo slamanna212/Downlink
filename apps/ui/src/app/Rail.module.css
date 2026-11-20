@@ -60,9 +60,23 @@
 }
 
 .icon {
+  position: relative;
   display: inline-flex;
   color: inherit;
 }
+
+/* Update waiting: status dot on the icon's top-right corner, cut out from the rail surface. */
+.noticeDot {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--dl-notice);
+  box-shadow: 0 0 0 2px var(--dl-surface-1);
+}
+.item[data-active] .noticeDot { box-shadow: 0 0 0 2px var(--dl-surface-3); }
 
 /* collapsed: icon only, centred */
 .collapsed .item {

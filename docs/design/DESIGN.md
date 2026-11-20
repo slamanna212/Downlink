@@ -49,6 +49,11 @@ catch-up, playing row, links) · `--dl-on-accent #120A33` (text on accent fill, 
 - Live `#F2495C`: dot, now line, REC dot. Text `#FF8B97` on 18% tint. Never solid red with white text.
 - OK `#34D399` (text `#6EE7B7`): connected, test passed.
 - Warn `#F5B544`: offline, stale guide, name-matched EPG, stream limit.
+- Notice `--dl-notice` (`#9D8CFF`, the Iris value): the 8 px "update waiting" dot on the rail's Settings item and
+  the Settings → Updates nav row. Its only use. Iris, not green, so it never reads as the source "connected"
+  dot directly below it in the rail. While an update waits, the rail item links straight to Settings → Updates,
+  which shows an update card (surface-2 panel, hairline border, radius 12) holding the release notes and the
+  view's single primary button, Restart and update.
 
 ### States and alpha
 - Interaction = white overlays on any surface: hover 6%, pressed 10%, focus = ring + 4%. Selected = surface-3.

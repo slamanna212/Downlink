@@ -28,3 +28,13 @@ pub async fn check_for_updates(
 ) -> CmdResult<UpdateStatus> {
     Ok(state.updater.check(&app).await)
 }
+
+/// Install the downloaded update and relaunch. Every playback session is stopped first (rule 6).
+#[tauri::command]
+pub async fn install_update(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
+    if let Some(pb) = state.try_playback() {
+        pb.release_all().await;
+    }
+    state.updater.install_now()?;
+    app.restart()
+}

@@ -10,7 +10,7 @@ dev builds are a button.
 > - [ ] Add the secrets:
 >   `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/downlink.key`
 >   then `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (it prompts for the value).
-> - [ ] Paste the public key (`~/.tauri/downlink.key.pub`) into `plugins.updater.pubkey` in `apps/desktop/tauri.conf.json`.
+> - [x] Paste the public key (`~/.tauri/downlink.key.pub`) into `plugins.updater.pubkey` in `apps/desktop/tauri.conf.json`.
 > - [ ] Re-enable the Release workflow on GitHub (it was disabled by hand): `gh workflow enable release.yml`.
 
 ## Workflows

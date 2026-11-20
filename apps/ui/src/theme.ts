@@ -140,6 +140,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-ok-tint': 'rgb(52 211 153 / 0.10)',
     '--dl-warn': '#F5B544',
     '--dl-warn-tint': 'rgb(245 181 68 / 0.10)',
+    '--dl-notice': '#9D8CFF',                         // "update waiting" dot (rail, settings nav) only
     // interaction layers (white over any surface)
     '--dl-hover': 'rgb(255 255 255 / 0.06)',
     '--dl-pressed': 'rgb(255 255 255 / 0.10)',

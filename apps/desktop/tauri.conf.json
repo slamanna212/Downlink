@@ -66,7 +66,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "TODO_REPLACE_WITH_CONTENTS_OF_downlink.key.pub",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFDMDYxMjJFRkNFMTFBMDcKUldRSEd1SDhMaElHckduTDE0djNTRlJNOVhkRUJLalhZdVg5THZ1RUY4bFF4NkV4YlpQWU1iazAK",
       "endpoints": [
         "https://github.com/slamanna212/Downlink/releases/latest/download/latest.json"
       ],
