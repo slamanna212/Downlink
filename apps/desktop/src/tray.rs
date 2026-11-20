@@ -19,7 +19,7 @@ fn toggle_window(app: &AppHandle) {
     }
 }
 
-pub fn build(app: &tauri::App) -> tauri::Result<()> {
+pub fn build(app: &AppHandle) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, "toggle", "Show or hide Downlink", true, None::<&str>)?;
     let play_pause = MenuItem::with_id(app, "playpause", "Play or pause", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -31,7 +31,7 @@ pub fn build(app: &tauri::App) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "toggle" => toggle_window(app),
             "playpause" => {
-                if let Some(pb) = app.try_state::<AppState>().and_then(|s| s.playback.clone()) {
+                if let Some(pb) = app.try_state::<AppState>().and_then(|s| s.try_playback()) {
                     let _ = pb.command(PlayerCommand::TogglePause);
                 }
             }

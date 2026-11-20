@@ -6,7 +6,7 @@
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use downlink_core::service::{AddSourceInput, ListChannelsArgs};
+use downlink_core::service::{AddSourceInput, ListChannelsArgs, Service};
 use downlink_player::{PlayerCommand, SessionState};
 use serde_json::json;
 use tauri::{AppHandle, Manager};
@@ -41,12 +41,13 @@ pub fn spawn(app: AppHandle, mode: String) {
             "perf-setup" => perf_setup(&st).await,
             "perf" => perf(&st).await,
             "launch" => launch(&st).await,
+            "degraded" => degraded(&st).await,
             _ => full(&st, &db).await,
         };
         if let Err(e) = r {
             say(json!({ "step": "error", "message": e }));
         }
-        if let Some(pb) = &st.playback {
+        if let Some(pb) = st.try_playback() {
             let _ = pb.stop().await;
         }
         app.exit(0);
@@ -55,7 +56,7 @@ pub fn spawn(app: AppHandle, mode: String) {
 
 async fn channel_id(st: &AppState, name: &str) -> Result<i64, String> {
     let list = st
-        .service
+        .service_now()
         .list_channels(ListChannelsArgs {
             query: Some(name.to_owned()),
             limit: Some(20),
@@ -72,11 +73,15 @@ async fn channel_id(st: &AppState, name: &str) -> Result<i64, String> {
 async fn full(st: &AppState, db: &str) -> Result<(), String> {
     let url = std::env::var("DOWNLINK_E2E_URL").map_err(|_| "DOWNLINK_E2E_URL missing")?;
     let key = std::env::var("DOWNLINK_E2E_KEY").map_err(|_| "DOWNLINK_E2E_KEY missing")?;
-    let sources = st.service.list_sources().await.map_err(|e| e.message)?;
+    let sources = st
+        .service_now()
+        .list_sources()
+        .await
+        .map_err(|e| e.message)?;
     if sources.is_empty() {
         let t0 = Instant::now();
         let s = st
-            .service
+            .service_now()
             .add_source(AddSourceInput {
                 kind: "dispatcharr".into(),
                 name: "E2E".into(),
@@ -94,17 +99,21 @@ async fn full(st: &AppState, db: &str) -> Result<(), String> {
         );
     }
     let channels = st
-        .service
+        .service_now()
         .list_channels(ListChannelsArgs {
             limit: Some(1000),
             ..Default::default()
         })
         .await
         .map_err(|e| e.message)?;
-    let groups = st.service.list_groups(None).await.map_err(|e| e.message)?;
+    let groups = st
+        .service_now()
+        .list_groups(None)
+        .await
+        .map_err(|e| e.message)?;
     say(json!({ "step": "catalog", "channels": channels.len(), "groups": groups.len() }));
 
-    let pb = st.playback().map_err(|e| e.message)?;
+    let pb = st.playback().await.map_err(|e| e.message)?;
     // Zap between channels (live), including the Redirect-profile channel.
     for name in [
         "Channel One",
@@ -136,7 +145,7 @@ async fn full(st: &AppState, db: &str) -> Result<(), String> {
         start_utc: now - 3 * 3600,
         end_utc: now,
     };
-    let rows = downlink_core::epg::window(st.service.store(), &[xc], w)
+    let rows = downlink_core::epg::window(st.service_now().store(), &[xc], w)
         .await
         .map_err(|e| e.message)?;
     let start = match rows.iter().rev().find(|r| r.end_utc <= now) {
@@ -145,7 +154,7 @@ async fn full(st: &AppState, db: &str) -> Result<(), String> {
             // The test server's EPG has no XC programmes in the cache; insert one archived hour so
             // the catch-up session flow can still be exercised (times come from the row).
             let start = (now - 2 * 3600) / 3600 * 3600;
-            st.service
+            st.service_now()
                 .store()
                 .upsert_programmes(&[downlink_core::store::ProgrammeRow {
                     channel_id: xc,
@@ -206,12 +215,16 @@ async fn full(st: &AppState, db: &str) -> Result<(), String> {
 }
 
 async fn offline(st: &AppState, _db: &str) -> Result<(), String> {
-    let sources = st.service.list_sources().await.map_err(|e| e.message)?;
+    let sources = st
+        .service_now()
+        .list_sources()
+        .await
+        .map_err(|e| e.message)?;
     say(
         json!({ "step": "sources_cached", "sources": sources.iter().map(|s| json!({ "name": s.name, "status": s.status })).collect::<Vec<_>>() }),
     );
     let channels = st
-        .service
+        .service_now()
         .list_channels(ListChannelsArgs {
             limit: Some(1000),
             ..Default::default()
@@ -220,14 +233,18 @@ async fn offline(st: &AppState, _db: &str) -> Result<(), String> {
         .map_err(|e| e.message)?;
     say(json!({ "step": "channels_from_cache", "count": channels.len() }));
     if let Some(s) = sources.first() {
-        let r = st.service.sync_source(s.id).await;
+        let r = st.service_now().sync_source(s.id).await;
         say(
             json!({ "step": "sync_while_offline", "error": r.err().map(|e| json!({ "code": e.code, "message": e.message })) }),
         );
-        let after = st.service.list_sources().await.map_err(|e| e.message)?;
+        let after = st
+            .service_now()
+            .list_sources()
+            .await
+            .map_err(|e| e.message)?;
         say(json!({ "step": "status_after_sync", "status": after.first().map(|s| s.status) }));
     }
-    let pb = st.playback().map_err(|e| e.message)?;
+    let pb = st.playback().await.map_err(|e| e.message)?;
     if let Some(c) = channels.first() {
         let r = pb.play_channel(c.id).await;
         say(
@@ -256,7 +273,7 @@ async fn zap(st: &AppState) -> Result<(), String> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(20);
-    let pb = st.playback().map_err(|e| e.message)?;
+    let pb = st.playback().await.map_err(|e| e.message)?;
     let mut ids = Vec::new();
     for n in names.split(',') {
         ids.push((n.to_owned(), channel_id(st, n.trim()).await?));
@@ -297,7 +314,7 @@ async fn zap(st: &AppState) -> Result<(), String> {
 /// and watch the §4.5 sequence: reconnect, server next-stream attempts, then a plain failure.
 async fn failover(st: &AppState) -> Result<(), String> {
     let id = channel_id(st, "Channel One").await?;
-    let pb = st.playback().map_err(|e| e.message)?;
+    let pb = st.playback().await.map_err(|e| e.message)?;
     let t0 = Instant::now();
     pb.play_channel(id).await.map_err(|e| e.message)?;
     // Wait until the machine settles in Failed with no pending failover (state flips through
@@ -320,7 +337,7 @@ async fn failover(st: &AppState) -> Result<(), String> {
         }
     }
     say(
-        json!({ "step": "failover_done", "state": pb.snapshot_dto().state, "sourceStats": st.service.source_position(id).await.ok() }),
+        json!({ "step": "failover_done", "state": pb.snapshot_dto().state, "sourceStats": st.service_now().source_position(id).await.ok() }),
     );
     Ok(())
 }
@@ -329,7 +346,7 @@ async fn failover(st: &AppState) -> Result<(), String> {
 /// or recordings, so empty lists and no errors are expected).
 async fn smoke(st: &AppState) -> Result<(), String> {
     use downlink_core::service::{VodKindArg, VodListArgs};
-    let svc = &st.service;
+    let svc = &st.service_now();
     let cats_m = svc
         .list_vod_categories(VodKindArg::Movie)
         .await
@@ -361,7 +378,7 @@ async fn smoke(st: &AppState) -> Result<(), String> {
         .first()
         .or(recs.completed.first())
         .map(|r| r.id);
-    if let (Some(id), Ok(pb)) = (first, st.playback()) {
+    if let (Some(id), Ok(pb)) = (first, st.playback().await) {
         pb.play_recording(id).await.map_err(|e| e.message)?;
         let snap = pb.snapshot_wait(
             |s| matches!(s, SessionState::Playing | SessionState::Failed),
@@ -480,7 +497,7 @@ async fn perf_setup(st: &AppState) -> Result<(), String> {
     let xml = std::env::var("DOWNLINK_PERF_XMLTV").map_err(|_| "DOWNLINK_PERF_XMLTV missing")?;
     let t0 = Instant::now();
     let src = st
-        .service
+        .service_now()
         .add_source(AddSourceInput {
             kind: "m3u".into(),
             name: "perf".into(),
@@ -503,8 +520,12 @@ async fn perf_setup(st: &AppState) -> Result<(), String> {
 /// `DOWNLINK_E2E=perf`: budgets on a warm cache (run `perf-setup` first, in a fresh process).
 async fn perf(st: &AppState) -> Result<(), String> {
     use downlink_core::service::GuideArgs;
-    let svc = &st.service;
+    let svc = &st.service_now();
     let setup_done = crate::resume::SETUP_DONE.get().map(Duration::as_secs_f64);
+    let setup_returned = crate::resume::SETUP_RETURNED
+        .get()
+        .map(Duration::as_secs_f64);
+    let core_ready = crate::resume::CORE_READY.get().map(Duration::as_secs_f64);
     let t_ready = Instant::now();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -540,7 +561,9 @@ async fn perf(st: &AppState) -> Result<(), String> {
     let interactive_ms = t_ready.elapsed().as_secs_f64() * 1000.0;
     say(json!({
         "step": "interactive",
-        "processStartToSetupDoneSecs": setup_done,
+        "setupReturnedSecs": setup_returned,
+        "coreReadySecs": core_ready,
+        "engineReadySecs": setup_done,
         "firstScreenCommandsMs": first,
         "firstScreenTotalMs": interactive_ms,
         "channels": counts.map(|c| c.all),
@@ -635,7 +658,7 @@ async fn perf(st: &AppState) -> Result<(), String> {
 
 /// `DOWNLINK_E2E=launch`: with `resumeLastChannel` on, report process start -> first frame.
 async fn launch(st: &AppState) -> Result<(), String> {
-    let pb = st.playback().map_err(|e| e.message)?;
+    let pb = st.playback().await.map_err(|e| e.message)?;
     let snap = pb.snapshot_wait(
         |s| matches!(s, SessionState::Playing | SessionState::Failed),
         Duration::from_secs(30),
@@ -651,5 +674,32 @@ async fn launch(st: &AppState) -> Result<(), String> {
         "loadfileToFirstFrameMs": snap.first_frame_ms,
         "startToFirstFrameSecs": issued.zip(snap.first_frame_ms).map(|(i, f)| i + f as f64 / 1000.0),
     }));
+    Ok(())
+}
+
+/// `DOWNLINK_E2E=degraded`: the data dir holds a library from a newer version. Catalog commands must
+/// return the blocking error; archiving the file must let a fresh service open.
+async fn degraded(st: &AppState) -> Result<(), String> {
+    let r = st.svc().await;
+    let e = match r {
+        Ok(_) => return Err("expected the service to fail".into()),
+        Err(e) => e,
+    };
+    say(
+        json!({ "step": "degraded_error", "message": e.message, "blocking": e.blocking, "code": e.code }),
+    );
+    let playback = st.playback().await.err().map(|e| e.message);
+    say(json!({ "step": "playback_error", "message": playback }));
+    let archived = Service::archive_newer_database(&st.data_dir).map_err(|e| e.message)?;
+    say(json!({ "step": "archived", "file": archived.file_name().and_then(|n| n.to_str()) }));
+    let fresh = Service::new(downlink_core::service::ServiceConfig {
+        data_dir: st.data_dir.clone(),
+        secrets: std::sync::Arc::new(downlink_core::auth::MemorySecretStore::new()),
+        app_version: "test".into(),
+    })
+    .await
+    .map_err(|e| e.message)?;
+    let n = fresh.list_sources().await.map_err(|e| e.message)?.len();
+    say(json!({ "step": "reopened", "sources": n }));
     Ok(())
 }

@@ -17,7 +17,7 @@ pub async fn set_update_channel(
 ) -> CmdResult<UpdateStatus> {
     state
         .updater
-        .set_channel(&app, &state.service, &channel)
+        .set_channel(&app, &*state.svc().await?, &channel)
         .await
 }
 

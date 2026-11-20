@@ -7,22 +7,22 @@ use crate::state::AppState;
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> CmdResult<Value> {
-    state.service.get_settings().await
+    state.svc().await?.get_settings().await
 }
 
 /// Persist the patch, then apply it: player preferences and the log level.
 #[tauri::command]
 pub async fn set_settings(state: State<'_, AppState>, patch: Value) -> CmdResult<Value> {
-    let v = state.service.set_settings(patch).await?;
-    apply(&state, &v);
+    let v = state.svc().await?.set_settings(patch).await?;
+    apply(&state, &v).await;
     Ok(v)
 }
 
-pub fn apply(state: &AppState, settings: &Value) {
-    if let Some(p) = &state.player {
+pub async fn apply(state: &AppState, settings: &Value) {
+    if let Some(p) = state.player().await {
         p.set_preferences(preferences_from_settings(settings));
     }
-    state.log.set_debug(
+    state.log().await.set_debug(
         settings
             .get("debugLogging")
             .and_then(Value::as_bool)

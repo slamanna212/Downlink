@@ -27,12 +27,13 @@ impl From<downlink_player::PlayerError> for CmdError {
     }
 }
 
-fn player(state: &State<'_, AppState>) -> Result<Arc<Player>, CmdError> {
-    state.player.clone().ok_or_else(|| CmdError {
+async fn player(state: &State<'_, AppState>) -> Result<Arc<Player>, CmdError> {
+    state.player().await.ok_or_else(|| CmdError {
         code: "engine",
         message: state
-            .engine_error
-            .clone()
+            .engine
+            .now()
+            .and_then(|e| e.error.clone())
             .unwrap_or_else(|| "the playback engine is not available".into()),
     })
 }
@@ -44,7 +45,7 @@ pub async fn play_url(
     profile: Option<Profile>,
     start_secs: Option<f64>,
 ) -> Result<u64, CmdError> {
-    let p = player(&state)?;
+    let p = player(&state).await?;
     Ok(p.play(PlayRequest {
         url,
         headers: Vec::new(),
@@ -58,14 +59,14 @@ pub async fn play_url(
 
 #[tauri::command]
 pub async fn player_snapshot(state: State<'_, AppState>) -> Result<PlayerSnapshot, CmdError> {
-    Ok(player(&state)?.snapshot())
+    Ok(player(&state).await?.snapshot())
 }
 
 #[tauri::command]
 pub async fn player_diagnostics(
     state: State<'_, AppState>,
 ) -> Result<Vec<(String, String)>, CmdError> {
-    Ok(player(&state)?.diagnostics())
+    Ok(player(&state).await?.diagnostics())
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -206,14 +207,14 @@ pub async fn zap_bench(
     count: u32,
     dwell_ms: Option<u64>,
 ) -> Result<ZapReport, CmdError> {
-    let p = player(&state)?;
+    let p = player(&state).await?;
     if urls.is_empty() {
         return Err(CmdError {
             code: "args",
             message: "no urls".into(),
         });
     }
-    let surface = state.surface.clone();
+    let surface = state.surface().await;
     let dwell = dwell_ms.unwrap_or(1500);
     tauri::async_runtime::spawn_blocking(move || {
         run_zap_bench(&p, surface.as_ref(), &urls, count, dwell, &[])

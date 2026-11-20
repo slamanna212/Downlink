@@ -9,7 +9,7 @@ use crate::state::AppState;
 
 #[tauri::command]
 pub async fn play_channel(state: State<'_, AppState>, channel_id: i64) -> CmdResult<()> {
-    state.playback()?.play_channel(channel_id).await
+    state.playback().await?.play_channel(channel_id).await
 }
 
 #[tauri::command]
@@ -19,19 +19,20 @@ pub async fn play_catchup(
     resume: Option<bool>,
 ) -> CmdResult<()> {
     state
-        .playback()?
+        .playback()
+        .await?
         .play_catchup(&programme_id, resume.unwrap_or(false))
         .await
 }
 
 #[tauri::command]
 pub async fn restart_programme(state: State<'_, AppState>, channel_id: i64) -> CmdResult<()> {
-    state.playback()?.restart_programme(channel_id).await
+    state.playback().await?.restart_programme(channel_id).await
 }
 
 #[tauri::command]
 pub async fn get_player_state(state: State<'_, AppState>) -> CmdResult<PlayerStateDto> {
-    Ok(state.playback()?.snapshot_dto())
+    Ok(state.playback().await?.snapshot_dto())
 }
 
 /// `PlayerCommand` of types.ts (plus `togglePause` for the spike page).
@@ -51,7 +52,7 @@ pub enum UiCommand {
 
 #[tauri::command]
 pub async fn player_command(state: State<'_, AppState>, command: UiCommand) -> CmdResult<()> {
-    let pb = state.playback()?;
+    let pb = state.playback().await?;
     match command {
         UiCommand::Pause => pb.command(PlayerCommand::Pause),
         UiCommand::Resume => pb.command(PlayerCommand::Resume),
@@ -78,7 +79,7 @@ pub async fn set_video_bounds(
     scale: f64,
     visible: Option<bool>,
 ) -> CmdResult<()> {
-    if let Some(s) = &state.surface {
+    if let Some(s) = state.surface().await {
         s.set_bounds(SurfaceBounds { x, y, w, h, scale });
         s.set_visible(visible.unwrap_or(true));
     }
@@ -96,7 +97,7 @@ pub async fn set_fullscreen(app: AppHandle, enabled: bool) -> CmdResult<()> {
 
 #[tauri::command]
 pub async fn set_stats_enabled(state: State<'_, AppState>, enabled: bool) -> CmdResult<()> {
-    if let Some(p) = &state.player {
+    if let Some(p) = state.player().await {
         p.set_stats_enabled(enabled);
     }
     Ok(())
@@ -111,8 +112,8 @@ pub struct AudioDevice {
 #[tauri::command]
 pub async fn list_audio_devices(state: State<'_, AppState>) -> CmdResult<Vec<AudioDevice>> {
     Ok(state
-        .player
-        .as_ref()
+        .player()
+        .await
         .map(|p| {
             p.audio_devices()
                 .into_iter()
@@ -133,12 +134,13 @@ pub async fn play_vod(
     resume: Option<bool>,
 ) -> CmdResult<()> {
     state
-        .playback()?
+        .playback()
+        .await?
         .play_vod(&kind, id, resume.unwrap_or(false))
         .await
 }
 
 #[tauri::command]
 pub async fn play_recording(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
-    state.playback()?.play_recording(id).await
+    state.playback().await?.play_recording(id).await
 }

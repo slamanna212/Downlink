@@ -14,7 +14,7 @@ pub async fn list_vod_categories(
     state: State<'_, AppState>,
     kind: VodKindArg,
 ) -> CmdResult<Vec<VodCategoryDto>> {
-    state.service.list_vod_categories(kind).await
+    state.svc().await?.list_vod_categories(kind).await
 }
 
 #[tauri::command]
@@ -26,7 +26,8 @@ pub async fn list_movies(
     limit: Option<i64>,
 ) -> CmdResult<Vec<MovieDto>> {
     state
-        .service
+        .svc()
+        .await?
         .list_movies(VodListArgs {
             category_id,
             query,
@@ -38,7 +39,7 @@ pub async fn list_movies(
 
 #[tauri::command]
 pub async fn get_movie(state: State<'_, AppState>, id: i64) -> CmdResult<MovieDto> {
-    state.service.get_movie(id).await
+    state.svc().await?.get_movie(id).await
 }
 
 #[tauri::command]
@@ -50,7 +51,8 @@ pub async fn list_series(
     limit: Option<i64>,
 ) -> CmdResult<Vec<SeriesDto>> {
     state
-        .service
+        .svc()
+        .await?
         .list_series(VodListArgs {
             category_id,
             query,
@@ -62,12 +64,12 @@ pub async fn list_series(
 
 #[tauri::command]
 pub async fn get_series(state: State<'_, AppState>, id: i64) -> CmdResult<SeriesDetailDto> {
-    state.service.get_series(id).await
+    state.svc().await?.get_series(id).await
 }
 
 #[tauri::command]
 pub async fn list_recordings(state: State<'_, AppState>) -> CmdResult<RecordingsDto> {
-    state.service.list_recordings().await
+    state.svc().await?.list_recordings().await
 }
 
 #[tauri::command]
@@ -76,35 +78,39 @@ pub async fn schedule_recording(
     programme_id: String,
     kind: RecordKindArg,
 ) -> CmdResult<()> {
-    state.service.schedule_recording(&programme_id, kind).await
+    state
+        .svc()
+        .await?
+        .schedule_recording(&programme_id, kind)
+        .await
 }
 
 #[tauri::command]
 pub async fn cancel_recording(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
-    state.service.cancel_recording(id).await
+    state.svc().await?.cancel_recording(id).await
 }
 
 #[tauri::command]
 pub async fn stop_recording(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
-    state.service.stop_recording(id).await
+    state.svc().await?.stop_recording(id).await
 }
 
 #[tauri::command]
 pub async fn extend_recording(state: State<'_, AppState>, id: i64, minutes: i64) -> CmdResult<()> {
-    state.service.extend_recording(id, minutes).await
+    state.svc().await?.extend_recording(id, minutes).await
 }
 
 #[tauri::command]
 pub async fn delete_recording(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
-    state.service.delete_recording(id).await
+    state.svc().await?.delete_recording(id).await
 }
 
 #[tauri::command]
 pub async fn list_recording_rules(state: State<'_, AppState>) -> CmdResult<Vec<RecordingRuleDto>> {
-    state.service.list_recording_rules().await
+    state.svc().await?.list_recording_rules().await
 }
 
 #[tauri::command]
 pub async fn delete_recording_rule(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
-    state.service.delete_recording_rule(id).await
+    state.svc().await?.delete_recording_rule(id).await
 }

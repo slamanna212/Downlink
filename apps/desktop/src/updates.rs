@@ -70,6 +70,13 @@ impl UpdaterState {
         })
     }
 
+    /// The channel saved in settings, applied once the service is up.
+    pub fn apply_saved_channel(&self, channel: &str) {
+        if channel == "stable" || channel == "dev" {
+            self.update_status(|s| s.channel = channel.to_owned());
+        }
+    }
+
     pub fn status(&self) -> UpdateStatus {
         match self.status.lock() {
             Ok(s) => s.clone(),

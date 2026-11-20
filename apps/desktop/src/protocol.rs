@@ -36,8 +36,10 @@ pub fn register<R: Runtime>(builder: Builder<R>) -> Builder<R> {
         let app = ctx.app_handle().clone();
         let uri = request.uri().to_string();
         tauri::async_runtime::spawn(async move {
-            let service: Option<Arc<Service>> =
-                app.try_state::<AppState>().map(|s| s.service.clone());
+            let service: Option<Arc<Service>> = match app.try_state::<AppState>() {
+                Some(s) => s.svc().await.ok(),
+                None => None,
+            };
             let resp = match (normalise_uri(&uri), service) {
                 (Some(u), Some(service)) => match service.image(&u).await {
                     Ok(img) => Response::builder()

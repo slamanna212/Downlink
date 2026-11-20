@@ -1,6 +1,7 @@
 //! Downlink desktop shell: Tauri 2 commands over the core `Service`, the libmpv `Player`, the
 //! native video surface under the transparent webview, logging, updates and the `dlimg://` protocol.
 
+mod boot;
 mod bundle;
 mod commands;
 mod deeplink;
@@ -21,14 +22,9 @@ mod tray;
 mod updates;
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use downlink_core::auth::KeyringStore;
-use downlink_core::service::{Service, ServiceConfig};
-use downlink_player::{MainThreadDispatch, Player, RenderBackend, VideoSurface};
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
-use crate::player_glue::{Playback, SinkContext};
 use crate::state::AppState;
 
 /// Installed on every page load: F11 toggles fullscreen and Esc always leaves it, so a fullscreen
@@ -70,123 +66,19 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         let _ = win.set_size(tauri::LogicalSize::new(w, h));
     }
 
-    let service = tauri::async_runtime::block_on(Service::new(ServiceConfig {
-        data_dir: data_dir(app),
-        secrets: Arc::new(KeyringStore::new()),
-        app_version: version.clone(),
-    }))
-    .map_err(|e| e.message)?;
-    let settings = tauri::async_runtime::block_on(service.get_settings()).unwrap_or_default();
-    let debug = settings
-        .get("debugLogging")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
+    let data_dir = data_dir(app);
     let log_dir = app
         .path()
         .app_log_dir()
         .unwrap_or_else(|_| PathBuf::from("."));
-    let log = logging::init(&log_dir, service.log_tail(), debug);
-    tracing::info!("Downlink {version} starting");
-
-    // Core events -> webview (catalog://updated, task://progress).
-    {
-        let mut rx = service.subscribe();
-        let h = handle.clone();
-        tauri::async_runtime::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(ev) => {
-                        let _ = h.emit(ev.name(), &ev);
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
-                    Err(_) => break,
-                }
-            }
-        });
+    let updater = updates::UpdaterState::new(&version, None);
+    if std::env::var_os("DOWNLINK_NO_UPDATE_CHECK").is_none() {
+        updater.spawn_loop(handle.clone());
     }
-
-    // Crash recovery: delete sessions a previous run left open (rule 6).
-    {
-        let s = service.clone();
-        tauri::async_runtime::spawn(async move {
-            match s.startup_cleanup().await {
-                Ok(r) if r.stopped + r.failed > 0 => tracing::info!(
-                    "startup cleanup: {} stopped, {} failed",
-                    r.stopped,
-                    r.failed
-                ),
-                Ok(_) => {}
-                Err(e) => tracing::warn!("startup cleanup failed: {}", e.message),
-            }
-        });
-    }
-
-    // Reachability probe for every source (offline sources keep their cache); emits
-    // `catalog://updated` per source through the event forwarder above.
-    {
-        let s = service.clone();
-        tauri::async_runtime::spawn(async move {
-            if let Err(e) = s.probe_sources().await {
-                tracing::warn!("source probe failed: {}", e.message);
-            }
-        });
-    }
-
-    // Engine, surface, playback glue.
-    let sink_ctx = SinkContext::new(handle.clone(), service.clone());
-
-    // OS media controls / media keys (MPRIS, SMTC, Now Playing).
-    {
-        #[cfg(target_os = "windows")]
-        let hwnd = app
-            .get_webview_window("main")
-            .and_then(|w| w.hwnd().ok())
-            .map(|h| h.0 as *mut std::ffi::c_void);
-        #[cfg(not(target_os = "windows"))]
-        let hwnd: Option<*mut std::ffi::c_void> = None;
-        let h = handle.clone();
-        let handler: downlink_platform::MediaHandler = Arc::new(move |c| {
-            use downlink_platform::MediaCommand as M;
-            let Some(st) = h.try_state::<AppState>() else {
-                return;
-            };
-            let Some(pb) = st.playback.clone() else {
-                return;
-            };
-            match c {
-                M::Play => drop(pb.command(downlink_player::PlayerCommand::Resume)),
-                M::Pause => drop(pb.command(downlink_player::PlayerCommand::Pause)),
-                M::Toggle => drop(pb.command(downlink_player::PlayerCommand::TogglePause)),
-                M::Stop => {
-                    tauri::async_runtime::spawn(async move {
-                        let _ = pb.stop().await;
-                    });
-                }
-                M::Raise => {
-                    if let Some(w) = h.get_webview_window("main") {
-                        let _ = w.show();
-                        let _ = w.set_focus();
-                    }
-                }
-                M::Quit => h.exit(0),
-                M::Next | M::Previous => {}
-            }
-        });
-        match downlink_platform::MediaSession::new(hwnd, handler) {
-            Ok(m) => {
-                let _ = sink_ctx.extras.media.set(m);
-            }
-            Err(e) => tracing::warn!("media controls unavailable: {e}"),
-        }
-    }
-
-    if let Err(e) = tray::build(app) {
-        tracing::warn!("system tray unavailable: {e}");
-    }
+    // Deep links need no engine: register now so a launch URL is not lost.
     {
         use tauri_plugin_deep_link::DeepLinkExt;
         let dl = handle.deep_link();
-        // Registers the scheme for dev and portable runs; installers register it themselves.
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         if let Err(e) = dl.register_all() {
             tracing::debug!("deep link registration skipped: {e}");
@@ -201,100 +93,10 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             deeplink::forward(&handle, urls.iter().map(String::as_str));
         }
     }
-    let mut player = None;
-    let mut playback = None;
-    let mut surf = None;
-    let mut engine_error = None;
-    match downlink_player::load_from_env(selftest::bundled_mpv_dir(&handle).as_deref()) {
-        Ok(loaded) => {
-            tracing::info!(source = ?loaded.source, api = ?loaded.client_api_version, "libmpv loaded");
-            let prefs = dto::preferences_from_settings(&settings);
-            match Player::new(
-                &loaded,
-                prefs,
-                RenderBackend::platform_default(),
-                sink_ctx.sink(),
-            ) {
-                Ok(p) => {
-                    let p = Arc::new(p);
-                    let dh = handle.clone();
-                    let dispatch: MainThreadDispatch = Arc::new(move |f| {
-                        let _ = dh.run_on_main_thread(f);
-                    });
-                    match surface::attach(&handle, &p, dispatch) {
-                        Ok(s) => {
-                            let s = Arc::new(s);
-                            let for_rebind = s.clone();
-                            p.on_engine_replaced(move |engine| for_rebind.rebind(engine));
-                            surf = Some(s);
-                        }
-                        Err(e) => {
-                            tracing::error!("video surface unavailable: {e}");
-                            engine_error = Some(e);
-                        }
-                    }
-                    let _ = sink_ctx.extras.player.set(p.clone());
-                    playback = Some(Playback::new(service.clone(), p.clone(), &sink_ctx));
-                    player = Some(p);
-                }
-                Err(e) => engine_error = Some(e.to_string()),
-            }
-        }
-        Err(e) => {
-            tracing::error!("{e}");
-            engine_error = Some(e.to_string());
-        }
-    }
-
-    // Rule 6: sleep pauses and releases the stream.
-    if let Some(pb) = playback.clone() {
-        let cb: downlink_platform::PowerCallback = Arc::new(move |e| {
-            if e == downlink_platform::PowerEvent::Sleep {
-                tauri::async_runtime::block_on(pb.release_all());
-            }
-        });
-        if let Err(e) = downlink_platform::watch_power(cb) {
-            tracing::warn!("sleep notifications unavailable: {e}");
-        }
-    }
-
-    let updater = updates::UpdaterState::new(
-        &version,
-        settings
-            .get("updateChannel")
-            .and_then(serde_json::Value::as_str),
-    );
-    if std::env::var_os("DOWNLINK_NO_UPDATE_CHECK").is_none() {
-        updater.spawn_loop(handle.clone());
-    }
-
-    #[cfg(feature = "spike")]
-    if let (Some(p), Ok(urls)) = (player.clone(), std::env::var("DOWNLINK_SPIKE_URLS")) {
-        spike::spawn_autorun(handle.clone(), p, surf.clone(), urls);
-    }
-
-    #[cfg(feature = "e2e")]
-    if let Ok(mode) = std::env::var("DOWNLINK_E2E") {
-        e2e::spawn(handle.clone(), mode);
-    }
-
-    let resume_enabled = settings
-        .get("resumeLastChannel")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    app.manage(AppState {
-        service,
-        player,
-        playback,
-        surface: surf,
-        log,
-        updater,
-        engine_error,
-    });
-    resume::mark_setup_done();
-    if resume_enabled {
-        resume::spawn(handle.clone());
-    }
+    app.manage(AppState::new(updater, data_dir.clone()));
+    resume::mark_setup_returned();
+    // Everything heavy happens after the window is up; commands wait for it (see `state`).
+    tauri::async_runtime::spawn(boot::run(handle, version, data_dir, log_dir));
     Ok(())
 }
 
@@ -345,6 +147,10 @@ macro_rules! handlers {
             commands::diagnostics::set_debug_logging,
             commands::diagnostics::export_diagnostics,
             commands::diagnostics::reveal_path,
+            commands::app::report_ui_timing,
+            commands::app::archive_newer_database,
+            commands::app::trust_new_certificate,
+            commands::app::quit_app,
             commands::catalog::get_channel_by_uuid,
             commands::updates::get_update_status,
             commands::updates::set_update_channel,
@@ -433,7 +239,7 @@ fn main() {
             if let tauri::RunEvent::Exit = event
                 && let Some(st) = handle.try_state::<AppState>()
             {
-                if let Some(pb) = &st.playback {
+                if let Some(pb) = st.try_playback() {
                     tauri::async_runtime::block_on(pb.release_all());
                 }
                 st.updater.install_on_quit();

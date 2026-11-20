@@ -7,8 +7,8 @@ use crate::state::AppState;
 
 #[tauri::command]
 pub async fn get_diagnostics(state: State<'_, AppState>) -> CmdResult<Value> {
-    let d = state.service.diagnostics().await?;
-    let (player_state, hwdec, transitions) = match &state.playback {
+    let d = state.svc().await?.diagnostics().await?;
+    let (player_state, hwdec, transitions) = match state.playback().await.ok() {
         Some(pb) => (
             serde_json::to_value(pb.snapshot_dto()).unwrap_or(Value::Null),
             pb.snapshot().hwdec_current,
@@ -26,7 +26,7 @@ pub async fn get_diagnostics(state: State<'_, AppState>) -> CmdResult<Value> {
         "hwdecCurrent": hwdec,
         "os": d.os,
         "transitions": transitions,
-        "playerNotes": state.playback.as_ref().map(|p| p.notes()).unwrap_or_default(),
+        "playerNotes": state.playback().await.ok().map(|p| p.notes()).unwrap_or_default(),
         "logTail": d.log_tail,
     }))
 }
@@ -34,10 +34,11 @@ pub async fn get_diagnostics(state: State<'_, AppState>) -> CmdResult<Value> {
 #[tauri::command]
 pub async fn set_debug_logging(state: State<'_, AppState>, enabled: bool) -> CmdResult<()> {
     state
-        .service
+        .svc()
+        .await?
         .set_settings(json!({ "debugLogging": enabled }))
         .await?;
-    state.log.set_debug(enabled);
+    state.log().await.set_debug(enabled);
     Ok(())
 }
 
@@ -45,8 +46,8 @@ pub async fn set_debug_logging(state: State<'_, AppState>, enabled: bool) -> Cmd
 #[tauri::command]
 pub async fn export_diagnostics(app: AppHandle, state: State<'_, AppState>) -> CmdResult<String> {
     use downlink_core::AppError;
-    let d = state.service.diagnostics().await?;
-    let (player_state, hwdec, transitions, mpv) = match &state.playback {
+    let d = state.svc().await?.diagnostics().await?;
+    let (player_state, hwdec, transitions, mpv) = match state.playback().await.ok() {
         Some(pb) => (
             serde_json::to_value(pb.snapshot_dto()).unwrap_or(Value::Null),
             pb.snapshot().hwdec_current,
@@ -57,7 +58,7 @@ pub async fn export_diagnostics(app: AppHandle, state: State<'_, AppState>) -> C
                 .rev()
                 .map(|t| json!({ "at": t.at_unix_ms, "from": phase_name(t.from), "to": phase_name(t.to), "note": t.note }))
                 .collect::<Vec<_>>(),
-            state.player.as_ref().map(|p| p.diagnostics()).unwrap_or_default(),
+            state.player().await.map(|p| p.diagnostics()).unwrap_or_default(),
         ),
         None => (Value::Null, None, Vec::new(), Vec::new()),
     };
@@ -69,7 +70,7 @@ pub async fn export_diagnostics(app: AppHandle, state: State<'_, AppState>) -> C
                 "serverVersions": d.server_versions,
                 "os": d.os,
                 "arch": std::env::consts::ARCH,
-                "engineError": state.engine_error,
+                "engineError": state.engine.now().and_then(|e| e.error.clone()),
                 "update": state.updater.status(),
             }))
             .unwrap_or_default(),
@@ -80,7 +81,7 @@ pub async fn export_diagnostics(app: AppHandle, state: State<'_, AppState>) -> C
                 "state": player_state,
                 "hwdecCurrent": hwdec,
                 "transitions": transitions,
-                "notes": state.playback.as_ref().map(|p| p.notes()).unwrap_or_default(),
+                "notes": state.playback().await.ok().map(|p| p.notes()).unwrap_or_default(),
                 // GPU / renderer / decoder facts as reported by mpv.
                 "mpv": mpv.iter().map(|(k, v)| json!({ k: v })).collect::<Vec<_>>(),
             }))
