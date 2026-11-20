@@ -25,7 +25,7 @@ import { GuideBlock } from './GuideBlock';
 import { GuidePreview } from './GuidePreview';
 import {
   CHANNEL_CHUNK, SPANS_HOURS, TIME_CHUNK, blockState, enterAction, indexAt, isCovered, mergeProgrammes, moveFocus,
-  neededChunks, ppsFor, scrollToReveal, sliceRange, timeToX, totalHeight, totalWidth, visibleRange, withMargin, xToTime,
+  neededChunks, ppsFor, scrollToReveal, sliceRange, tickMarks, timeToX, totalHeight, totalWidth, visibleRange, withMargin, xToTime,
   type Focus, type FocusKey, type Geometry, type RenderRange, type SpanHours, type Viewport,
 } from './guideModel';
 import classes from './Guide.module.css';
@@ -162,17 +162,15 @@ const GuideRow = memo(function GuideRow({ row, ch, list, geo, t0, t1, now, focus
 });
 
 const GuideTicks = memo(function GuideTicks({ geo, t0, t1 }: { geo: Geometry; t0: number; t1: number }) {
-  const out: React.ReactNode[] = [];
-  for (let tt = floorToTick(t0); tt <= t1; tt += 1800) {
-    if (tt < geo.rangeStart || tt > geo.rangeEnd) continue;
-    const isDay = tt === startOfDay(tt);
-    out.push(
-      <div key={tt} className={classes.tick} data-day={isDay || undefined} style={{ left: timeToX(geo, tt), width: 1800 * geo.pps }}>
-        {isDay ? formatDay(tt) : formatClock(tt)}
-      </div>,
-    );
-  }
-  return <>{out}</>;
+  return (
+    <>
+      {tickMarks(geo, t0, t1).map((m) => (
+        <div key={m.t} className={classes.tick} data-day={m.isDay || undefined} style={{ left: timeToX(geo, m.t), width: 1800 * geo.pps }}>
+          {m.label}
+        </div>
+      ))}
+    </>
+  );
 });
 
 export function GuidePage() {

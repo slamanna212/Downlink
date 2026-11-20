@@ -1,6 +1,7 @@
 // Pure guide geometry and navigation logic: no DOM reads, unit-tested. The view only calls these
 // with numbers it already has (scroll offsets from the scroll event, sizes from ResizeObserver).
 import type { Channel, Programme } from '../../api/types';
+import { floorToTick, formatClock, formatDay, startOfDay } from '../../lib/time';
 
 export const CHANNEL_CHUNK = 40; // channels per get_guide call
 export const TIME_CHUNK = 6 * 3600; // seconds per get_guide call
@@ -186,5 +187,23 @@ export function scrollToReveal(
   const y1 = y0 + g.rowH;
   if (y0 < v.scrollTop) out.top = y0;
   else if (y1 > v.scrollTop + v.viewH - g.headerH) out.top = y1 - (v.viewH - g.headerH);
+  return out;
+}
+
+export interface TickMark {
+  t: number;
+  /** Day label at local midnight, clock label otherwise. */
+  label: string;
+  isDay: boolean;
+}
+
+/** 30-minute ticks in [t0, t1] clamped to the guide range; a day separator at each local midnight. */
+export function tickMarks(g: Pick<Geometry, 'rangeStart' | 'rangeEnd'>, t0: number, t1: number): TickMark[] {
+  const out: TickMark[] = [];
+  for (let t = floorToTick(t0); t <= t1; t += 1800) {
+    if (t < g.rangeStart || t > g.rangeEnd) continue;
+    const isDay = t === startOfDay(t);
+    out.push({ t, isDay, label: isDay ? formatDay(t) : formatClock(t) });
+  }
   return out;
 }

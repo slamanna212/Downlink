@@ -73,7 +73,9 @@ export const isLiveNow = (start: Epoch, end: Epoch, now: Epoch = nowEpoch()): bo
 export const minutesLeft = (end: Epoch, now: Epoch = nowEpoch()): number => Math.max(0, Math.ceil((end - now) / 60));
 
 /** Epoch of local midnight (display zone) for the day containing `epoch`. */
-export const startOfDay = (epoch: Epoch): Epoch => at(epoch).startOf('day').unix();
+export const startOfDay = (epoch: Epoch): Epoch =>
+  // dayjs.tz().startOf('day') mis-resolves times on a clock-change day; build the local midnight explicitly.
+  dayjs.tz(`${at(epoch).format('YYYY-MM-DD')}T00:00:00`, zone).unix();
 
 /** Floor to a guide tick (default 30 min) in the display zone. */
 export function floorToTick(epoch: Epoch, minutes = 30): Epoch {
@@ -91,7 +93,12 @@ export function formatUpdated(epoch: Epoch, now: Epoch = nowEpoch()): string {
 export const formatClockSeconds = (epoch: Epoch): string => at(epoch).format('HH:mm:ss');
 
 /** `n` calendar days from the display-zone midnight containing `epoch` (DST-safe). */
-export const addDays = (epoch: Epoch, n: number): Epoch => at(epoch).add(n, 'day').unix();
+export function addDays(epoch: Epoch, n: number): Epoch {
+  // dayjs.tz().add(n, 'day') adds n*24 h, which drifts an hour across a clock change. Add on the naive
+  // wall-clock date instead and re-resolve it in the display zone.
+  const naive = dayjs.utc(at(epoch).format('YYYY-MM-DDTHH:mm:ss')).add(n, 'day').format('YYYY-MM-DDTHH:mm:ss');
+  return dayjs.tz(naive, zone).unix();
+}
 
 /** "Today", "Tomorrow", "Yesterday" or "Thu 20 Nov". */
 export function dayLabel(epoch: Epoch, now: Epoch = nowEpoch()): string {
