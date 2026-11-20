@@ -586,7 +586,7 @@ catchup="default" catchup-days="7"
 catchup-source="http://host/streaming/timeshift.php?username=U&password=P&stream=<id>&utc={utc}&duration={duration:60}"
 ```
 
-`{utc}` is programme start in Unix seconds; `{duration:60}` is length in seconds. Template-path
+`{utc}` is programme start in Unix seconds; `{duration:N}` is length in seconds divided by N (Kodi convention), so `{duration:60}` is minutes; bare `{duration}` is seconds. Template-path
 sessions have no server session to delete.
 
 ### 5.4 Acceptance
