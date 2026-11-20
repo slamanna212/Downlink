@@ -127,7 +127,7 @@ export function HomePage() {
     <div className={classes.page}>
       <div className={classes.top}>
         <h1 className={classes.title}>{t('home.title')}</h1>
-        <DLButton variant="default" justify="space-between" className={classes.searchBtn} icon={IconSearch} onClick={openPalette} aria-label={t('home.search')}>
+        <DLButton variant="default" justify="space-between" className={classes.searchBtn} icon={IconSearch} onClick={openPalette}>
           <span className={classes.searchLabel}>{t('home.search')}</span> <span className={classes.kbd}>{modKeyLabel()}</span>
         </DLButton>
       </div>

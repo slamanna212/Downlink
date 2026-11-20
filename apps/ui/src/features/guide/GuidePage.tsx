@@ -76,7 +76,7 @@ const GuideControls = memo(function GuideControls({ span, onSpan, groupId, group
         />
         <Menu position="bottom-end">
           <Menu.Target>
-            <DLButton variant="default" size="sm" icon={IconCalendar} aria-label={t('guide.jumpDay')}>
+            <DLButton variant="default" size="sm" icon={IconCalendar} aria-label={`${formatDay(leftTime)}, ${t('guide.jumpDay')}`}>
               {formatDay(leftTime)}
             </DLButton>
           </Menu.Target>

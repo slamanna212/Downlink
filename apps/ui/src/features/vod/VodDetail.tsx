@@ -88,7 +88,7 @@ export function MovieDetail() {
 function EpisodeRow({ ep, season, next, onPlay }: { ep: Episode; season: number; next: boolean; onPlay: () => void }) {
   const prog = progressOf(ep.resumeSecs, ep.durationSecs);
   return (
-    <UnstyledButton className={classes.epRow} data-next={next || undefined} onClick={onPlay} aria-label={`${t('vod.episode', { n: ep.number })}, ${ep.title}${next ? `, ${t('vod.next')}` : ''}`}>
+    <UnstyledButton className={classes.epRow} data-next={next || undefined} onClick={onPlay}>
       <span className={classes.epNum}>{ep.number}</span>
       <span className={classes.epStill}>
         <Poster src={ep.still} title={`S${season} E${ep.number}`} shape="wide" />

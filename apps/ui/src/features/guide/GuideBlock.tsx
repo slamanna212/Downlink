@@ -28,7 +28,7 @@ export const GuideBlock = memo(function GuideBlock({ p, row, state, x, y, w, h, 
     <div
       className={classes.block}
       role="gridcell"
-      aria-label={`${channelName ? `${channelName}, ` : ''}${p.title ?? ''}, ${formatRange(p.startUtc, p.endUtc)}`}
+      aria-description={channelName}
       aria-disabled={state === 'past-none' || undefined}
       aria-selected={focused}
       tabIndex={tabbable ? 0 : -1}

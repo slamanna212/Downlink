@@ -191,7 +191,6 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
                         id={`vt-${i}`}
                         role="gridcell"
                         aria-selected={i === active}
-                        aria-label={[tile.title, tile.sub].filter(Boolean).join(', ')}
                         className={classes.tile}
                         data-active={i === active || undefined}
                         onClick={() => {
