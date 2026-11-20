@@ -47,14 +47,18 @@ test('multiview: add a tile from the picker without any play while browsing, lis
   await page.getByRole('button', { name: 'Multiview' }).click();
   await expect(page).toHaveURL(/\/multiview$/);
   const plays = async () => (await calls(page)).filter((c) => c.startsWith('play_') || c === 'multiview_set_tile').length;
+  const tiles = page.locator('[role=group][aria-label^="Slot"]');
+  await expect(tiles).toHaveCount(1); // one channel fills the view, no empty slots to pick a grid for
   const before = await plays();
-  await page.getByRole('button', { name: 'Add channel' }).first().click();
+  await page.getByRole('button', { name: 'Add channel' }).click();
   await page.getByLabel('Search channels').fill('Cobalt');
   await page.waitForTimeout(400);
   expect(await plays()).toBe(before); // browsing the picker is SQLite only (rule 4)
   await page.getByRole('option', { name: /Cobalt Sports/ }).first().click();
   await expect(page.getByRole('group', { name: /Slot 2: Cobalt Sports/ })).toBeVisible();
   await expect(page.getByText('2 of 4 streams')).toBeVisible();
+  await expect(tiles).toHaveCount(2); // reflowed side by side on its own
+  await expect(page.getByRole('radiogroup', { name: 'Layout (L)' })).toHaveCount(0); // two tiles have one layout
   await page.keyboard.press('2');
   await expect.poll(async () => (await calls(page)).includes('multiview_set_audio')).toBe(true);
   await page.keyboard.press('Escape');

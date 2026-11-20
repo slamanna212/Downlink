@@ -149,17 +149,23 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 
 ## 9. Multiview
 In 1.0 (PLAN §1.5, §4.11, D17).
-- Layouts 2-up, 2×2, 1+3, 3×3. Max 4 tiles (9 if hardware allows). 4 px gaps on `--dl-multiview-canvas`.
+- Automatic layout: the grid follows the tiles on screen, in slot order, main player first. One tile fills
+  the view, two sit side by side, more reflow into a balanced grid with a short last row centred
+  (3 = 2+1, 5 = 3+2, 7 = 3+2+2, 9 = 3×3). No empty slots; removing a tile closes the gap. Counts with a
+  second arrangement also offer "featured", one large tile plus the rest: 3–4 = side column, 5 = bottom
+  strip, 6 and 8 = L border. Max 4 tiles (9 if hardware allows). 4 px gaps on `--dl-multiview-canvas`.
 - One tile audible: AUDIO badge (accent tint) top-right; others show a muted icon. "Audio follows focus" on.
 - Focused tile: **inset** 3 px accent ring (an outer ring would be clipped) + accent wash.
 - Tile label pill top-left (`--dl-glass`, logo 48×24, number, name). Programme + progress on scrim at bottom.
 - Hover/focus actions centred: listen, make main, full screen, replace, remove (remove in live-text).
 - Stream budget always visible: toolbar "3 of 3 streams" with pips, picker footer "Uses 1 stream · 3 of 4 in use".
 - Stream-limit tile: amber gauge icon, "Your server is at its stream limit", one sentence, Replace channel / Remove tile.
-- Picker: popover anchored to the empty slot; search + Favourites / Recent / All; on-screen channels
-  disabled with "Already in slot N".
-- Floating toolbar bottom centre: layout segmented (icons), audio-follows-focus switch, budget, Exit (Esc).
-- Keys: 1–9 focus · A audio · Enter make main · F full screen · Del remove · L cycle layout · Esc exit.
+- Picker: popover anchored to the toolbar "Add channel" button (or the single empty slot when nothing
+  plays); the new channel takes the first free slot. Search + Favourites / Recent / All; on-screen
+  channels disabled with "Already in slot N".
+- Floating toolbar bottom centre: Add channel (N), layout segmented (icons; only when the count has more than
+  one layout), audio-follows-focus switch, budget, Exit (Esc).
+- Keys: 1–9 focus · A audio · Enter make main · F full screen · Del remove · N add channel · L cycle layout · Esc exit.
 - Entry: grid icon in the player control bar; "Add to multiview" in the channel context menu.
 
 ## 10. Copy

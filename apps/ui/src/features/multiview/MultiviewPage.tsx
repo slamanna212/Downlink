@@ -5,13 +5,11 @@ import { Popover, SegmentedControl, Switch, TextInput, VisuallyHidden } from '@m
 import {
   IconArrowsMaximize,
   IconGauge,
-  IconLayoutColumns,
   IconLayoutGrid,
   IconLayoutSidebarRight,
   IconPlus,
   IconReplace,
   IconSquareRoundedArrowUp,
-  IconTable,
   IconVolume,
   IconVolumeOff,
   IconX,
@@ -31,10 +29,10 @@ import { useVideoBounds } from '../../lib/useVideoBounds';
 import { usePlayerStore } from '../../store/player';
 import { playChannel } from '../player/actions';
 import { holdSession, releaseSession } from '../player/session';
-import { availableLayouts, fitLayout, gridArea, gridTemplate, layoutSize, nextLayout, type MultiviewLayout } from './layout';
+import { layoutFor, nextStyle, stylesFor, type GridArea, type LayoutStyle } from './layout';
 import classes from './Multiview.module.css';
 
-const LAYOUT_ICON = { '2-up': IconLayoutColumns, '2x2': IconLayoutGrid, '1+3': IconLayoutSidebarRight, '3x3': IconTable } as const;
+const STYLE_ICON = { grid: IconLayoutGrid, featured: IconLayoutSidebarRight } as const;
 
 const EMPTY: MultiviewState = { tiles: [], audible: 0, maxTiles: 4, streamLimit: null };
 
@@ -128,7 +126,9 @@ function ChannelPicker({ channels, recents, onScreen, budgetText, onPick }: {
 
 interface TileProps {
   slot: number;
-  layout: MultiviewLayout;
+  /** 0-based place in the reflowed grid; labels and the 1–9 keys use it. */
+  position: number;
+  area: GridArea;
   tile: MultiviewTile | undefined;
   channel: Channel | undefined;
   focused: boolean;
@@ -148,23 +148,23 @@ interface TileProps {
 function Tile(p: TileProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   // Slot 0 is the main player's surface; tiles position their own.
-  useVideoBounds(ref, !!p.tile && p.tile.failure == null, p.slot);
+  useVideoBounds(ref, !!p.tile && p.tile.failure == null, p.slot, `${p.area.gridColumn}|${p.area.gridRow}`);
   const failed = p.tile?.state === 'Failed';
   const loading = p.tile && ['Resolving', 'Connecting', 'Buffering'].includes(p.tile.state);
   return (
     <div
       ref={ref}
       className={classes.tile}
-      style={gridArea(p.layout, p.slot)}
+      style={p.area}
       data-focused={p.focused || undefined}
       data-audible={(p.audible && !!p.tile) || undefined}
       data-empty={!p.tile || undefined}
       data-failed={failed || undefined}
       onMouseDown={p.onFocus}
-      aria-label={p.channel ? t('multiview.tileLabel', { n: p.slot + 1, name: p.channel.name }) : t('multiview.emptySlot', { n: p.slot + 1 })}
+      aria-label={p.channel ? t('multiview.tileLabel', { n: p.position + 1, name: p.channel.name }) : t('multiview.emptySlot', { n: p.position + 1 })}
       role="group"
     >
-      {!inTauri() && p.tile && !failed && <div className={classes.devVideo} aria-hidden>tile {p.slot + 1}</div>}
+      {!inTauri() && p.tile && !failed && <div className={classes.devVideo} aria-hidden>tile {p.position + 1}</div>}
       {!p.tile ? (
         <Popover opened={p.pickerOpen} onChange={p.onPickerChange} width={360} position="bottom" trapFocus withinPortal shadow="lg">
           <div className={classes.empty}>
@@ -258,15 +258,19 @@ export function MultiviewPage() {
     }
     return m;
   }, [mv.tiles, mainChannel, player.state, player.error]);
-  const occupied = Math.max(0, ...[...tiles.keys()].map((s) => s + 1));
-  const [layout, setLayout] = useState<MultiviewLayout>(() => fitLayout(Math.max(2, occupied + 1), mv.maxTiles));
-  const allowed = availableLayouts(mv.maxTiles, occupied);
-  const effectiveLayout = allowed.includes(layout) ? layout : fitLayout(Math.max(2, occupied), mv.maxTiles);
-  const size = layoutSize(effectiveLayout);
+  // The grid follows the tiles on screen, in slot order (the main player first); holes left by a
+  // removed tile close up. With nothing playing, one empty slot 0 offers the picker.
+  const order = useMemo(() => [...tiles.keys()].sort((a, b) => a - b), [tiles]);
+  const shown = order.length ? order : [0];
+  const styles = stylesFor(shown.length);
+  const [style, setStyle] = useState<LayoutStyle>('grid');
+  const effectiveStyle = styles.includes(style) ? style : 'grid';
+  const spec = layoutFor(shown.length, effectiveStyle);
 
   const [focused, setFocused] = useState(0);
   const [audioFollows, setAudioFollows] = useState(true);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
 
   // Keep the session (main player) alive while here; every tile stops when leaving (rule 6).
   useEffect(() => {
@@ -288,7 +292,8 @@ export function MultiviewPage() {
   const inUse = tiles.size;
   const budget = Math.min(mv.maxTiles, mv.streamLimit ?? mv.maxTiles);
   const budgetText = t('multiview.budget', { used: inUse, total: budget });
-  const onScreen = useMemo(() => new Map([...tiles.values()].map((x) => [x.channelId, x.slot])), [tiles]);
+  const onScreen = useMemo(() => new Map(order.map((slot, i) => [tiles.get(slot)?.channelId ?? -1, i])), [order, tiles]);
+  const freeSlot = Array.from({ length: mv.maxTiles }, (_, i) => i).find((s) => !tiles.has(s)) ?? null;
 
   const assignTile = useCallback(
     async (slot: number, channelId: number) => {
@@ -307,6 +312,7 @@ export function MultiviewPage() {
   const setTile = useCallback(
     (slot: number, channelId: number) => {
       setPickerSlot(null);
+      setAddOpen(false);
       return assignTile(slot, channelId);
     },
     [assignTile],
@@ -315,11 +321,10 @@ export function MultiviewPage() {
   useEffect(() => {
     if (added.current || pendingAdd == null || !mv.maxTiles) return;
     added.current = true;
-    const free = Array.from({ length: mv.maxTiles }, (_, i) => i).find((s) => !tiles.has(s));
-    if (free == null) notifyError(t('multiview.full'));
-    // The layout grows on its own: smaller layouts that cannot hold every occupied slot are not offered.
-    else void assignTile(free, pendingAdd);
-  }, [pendingAdd, mv.maxTiles, tiles, assignTile]);
+    // The grid reflows on its own once the tile lands.
+    if (freeSlot == null) notifyError(t('multiview.full'));
+    else void assignTile(freeSlot, pendingAdd);
+  }, [pendingAdd, mv.maxTiles, freeSlot, assignTile]);
 
   const listen_ = useCallback((slot: number) => void invoke('multiview_set_audio', { slot }), []);
   const focus = useCallback(
@@ -342,24 +347,25 @@ export function MultiviewPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || pickerSlot != null) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || pickerSlot != null || addOpen) return;
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
       if (/^[1-9]$/.test(e.key)) {
-        const slot = Number(e.key) - 1;
-        if (slot < size) focus(slot);
+        const slot = order[Number(e.key) - 1];
+        if (slot != null) focus(slot);
       } else if (e.key === 'a' || e.key === 'A') listen_(focused);
       else if (e.key === 'Enter' && focused !== 0) makeMain(focused);
       else if (e.key === 'f' || e.key === 'F') void fullScreen(focused);
       else if ((e.key === 'Delete' || e.key === 'Backspace') && focused !== 0) remove(focused);
-      else if (e.key === 'l' || e.key === 'L') setLayout(nextLayout(effectiveLayout, allowed));
+      else if ((e.key === 'n' || e.key === 'N') && freeSlot != null) setAddOpen(true);
+      else if (e.key === 'l' || e.key === 'L') setStyle(nextStyle(effectiveStyle, styles));
       else if (e.key === 'Escape') exit();
       else return;
       e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [size, focused, pickerSlot, focus, listen_, makeMain, fullScreen, remove, exit, effectiveLayout, allowed]);
+  }, [order, focused, pickerSlot, addOpen, freeSlot, focus, listen_, makeMain, fullScreen, remove, exit, effectiveStyle, styles]);
 
   const picker = (slot: number) => (
     <ChannelPicker
@@ -373,15 +379,16 @@ export function MultiviewPage() {
 
   return (
     <div className={classes.root}>
-      <div className={classes.grid} style={gridTemplate(effectiveLayout)}>
-        {Array.from({ length: size }, (_, slot) => {
+      <div className={classes.grid} style={{ gridTemplateColumns: spec.gridTemplateColumns, gridTemplateRows: spec.gridTemplateRows }}>
+        {shown.map((slot, position) => {
           const tile = tiles.get(slot);
           const prog = tile ? nowOf(tile.channelId) : null;
           return (
             <Tile
               key={slot}
               slot={slot}
-              layout={effectiveLayout}
+              position={position}
+              area={spec.areas[position] ?? { gridColumn: 'auto', gridRow: 'auto' }}
               tile={tile}
               channel={tile ? byId.get(tile.channelId) : undefined}
               focused={focused === slot}
@@ -401,21 +408,33 @@ export function MultiviewPage() {
         })}
       </div>
       <div className={`${classes.toolbar} ${classes.glass}`} role="toolbar" aria-label={t('player.multiview')}>
-        <SegmentedControl
-          size="xs"
-          value={effectiveLayout}
-          onChange={(v) => setLayout(v as MultiviewLayout)}
-          aria-label={t('multiview.layout')}
-          data={allowed.map((l) => ({
-            value: l,
-            label: (
-              <>
-                <Icon icon={LAYOUT_ICON[l]} size={16} />
-                <VisuallyHidden>{t(`multiview.layout.${l}` as MessageKey)}</VisuallyHidden>
-              </>
-            ),
-          }))}
-        />
+        {order.length > 0 && (
+          <Popover opened={addOpen} onChange={setAddOpen} width={360} position="top" trapFocus withinPortal shadow="lg">
+            <Popover.Target>
+              <DLButton variant="default" size="sm" icon={IconPlus} keyHint="N" disabled={freeSlot == null} onClick={() => setAddOpen((o) => !o)}>
+                {t('multiview.addChannel')}
+              </DLButton>
+            </Popover.Target>
+            <Popover.Dropdown>{freeSlot != null && picker(freeSlot)}</Popover.Dropdown>
+          </Popover>
+        )}
+        {styles.length > 1 && (
+          <SegmentedControl
+            size="xs"
+            value={effectiveStyle}
+            onChange={(v) => setStyle(v as LayoutStyle)}
+            aria-label={t('multiview.layout')}
+            data={styles.map((l) => ({
+              value: l,
+              label: (
+                <>
+                  <Icon icon={STYLE_ICON[l]} size={16} />
+                  <VisuallyHidden>{t(`multiview.layout.${l}` as MessageKey)}</VisuallyHidden>
+                </>
+              ),
+            }))}
+          />
+        )}
         <Switch size="sm" checked={audioFollows} onChange={(e) => setAudioFollows(e.currentTarget.checked)} label={t('multiview.audioFollows')} />
         <span className={classes.budget} aria-label={budgetText}>
           <span className={classes.pips} aria-hidden>

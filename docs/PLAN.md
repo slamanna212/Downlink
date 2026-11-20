@@ -100,7 +100,7 @@ Differentiators, in order:
 - **Stream picker** (Dispatcharr only, and only when the account may switch streams): list the
   channel's provider streams in failover order and switch the live channel to one (§3.4).
 - **Multiview**: up to 4 live channels at once (9 when hardware and the server's stream limit allow),
-  one audible, layouts 2-up / 2×2 / 1+3 / 3×3 (§4.11, DESIGN.md §9).
+  one audible, layouts follow the tile count automatically, with a featured option where one exists (§4.11, DESIGN.md §9).
 - **Catch-up**: restart current programme, play past programmes from the guide, seek within the
   archive window, jump back to live (§5).
 - VOD: movies and series browse, detail, resume, next episode.
