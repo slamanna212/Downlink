@@ -47,7 +47,8 @@ export const DLIconButton = forwardRef<HTMLButtonElement, DLIconButtonProps>(fun
         aria-busy={loading || undefined}
         data-busy={loading || undefined}
         onClick={loading ? (e) => e.preventDefault() : onClick}
-        style={style}
+        // --mantine-scale (1.25 in 10-foot) would scale a rem size again; keep it equal to DLButton's px height.
+        style={{ ['--ai-size' as string]: `${px}px`, ...style }}
       >
         {loading ? <Loader size={glyph} color="currentColor" type="oval" /> : <Icon icon={icon} size={glyph} filled={filledGlyph} />}
       </ActionIcon>

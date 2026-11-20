@@ -1,7 +1,7 @@
 .page { padding: var(--mantine-spacing-xl) 2.5rem 3rem; }
 .top { display: flex; align-items: center; justify-content: space-between; gap: var(--mantine-spacing-lg); margin-bottom: var(--mantine-spacing-xl); }
 .title { margin: 0; font-size: var(--mantine-h1-font-size); line-height: var(--mantine-h1-line-height); font-weight: 650; letter-spacing: -0.015em; }
-.searchBtn { width: 320px; }
+.searchBtn { width: 20rem; }
 .kbd { font-family: var(--mantine-font-family-monospace); font-size: 0.6875rem; color: var(--dl-text-dim); }
 
 .sectionHead { display: flex; align-items: center; justify-content: space-between; margin: var(--mantine-spacing-xl) 0 var(--mantine-spacing-md); }
