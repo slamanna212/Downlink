@@ -1,14 +1,9 @@
-# Production release: every push to main (except docs-only or "[skip release]") publishes the version in the
-# ROOT package.json, unless a release for that version already exists. Mirrors Apogee's release.yml.
-# See docs/release.md.
+# Production release: publishes the version in the ROOT package.json, unless a release for that version
+# already exists. Mirrors Apogee's release.yml. See docs/release.md.
+# DISABLED: the push-to-main trigger is off until the owner turns it back on. Manual dispatch only.
 name: Release
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "README.md"
-      - "docs/**"
   workflow_dispatch:
 
 permissions:
