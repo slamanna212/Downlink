@@ -1,9 +1,21 @@
-/* Multiview (DESIGN.md §9). Tiles are transparent so each mpv surface shows through; the 4 px gaps
-   and the empty slots paint the multiview canvas. */
+/* Multiview (DESIGN.md §9). Tiles with video are transparent so each mpv surface shows through; the
+   canvas SVG paints everything else (gaps, centred short rows, empty / loading / failed tiles). */
 .root {
   position: absolute;
   inset: 0;
   overflow: hidden;
+}
+
+.root[data-idle] { cursor: none; }
+
+/* Full-view path with a hole per video tile (useCanvasPath). */
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  fill: var(--dl-multiview-canvas);
 }
 
 .grid {
@@ -12,8 +24,7 @@
   display: grid;
   gap: 0.25rem; /* theme.other.multiview.tileGap (4 px) */
   padding: 0.25rem;
-  /* No background here: it would cover the native video surfaces under the webview. The canvas
-     colour is painted by empty / failed tiles; gaps show the window's own dark base. */
+  /* No background here: it would cover the native video surfaces under the webview. */
   background: transparent;
 }
 
@@ -36,7 +47,12 @@
   pointer-events: none;
   box-shadow: inset 0 0 0 3px var(--dl-accent);
   background: var(--dl-accent-wash);
+  transition: opacity 240ms ease;
 }
+
+/* Idle: the focus ring and audio indicator fade so they don't sit on the picture. */
+.root[data-idle] .tile[data-focused]::after,
+.root[data-idle] .audio { opacity: 0; }
 
 .glass {
   background: var(--dl-glass-solid);
@@ -98,6 +114,7 @@
   right: var(--mantine-spacing-sm);
   display: flex;
   color: var(--dl-text-dim);
+  transition: opacity 240ms ease;
 }
 
 .audioBadge {
@@ -128,12 +145,31 @@
   gap: var(--mantine-spacing-xs);
   transform: translate(-50%, -50%);
   opacity: 0;
+  pointer-events: none;
   transition: opacity 160ms ease;
 }
 
+/* Hover, keyboard focus or an open picker shows them; a mouse click leaves no sticky focus. */
 .tile:hover .actions,
-.tile[data-focused] .actions,
-.tile:focus-within .actions { opacity: 1; }
+.tile:has(:focus-visible) .actions,
+.tile[data-picker] .actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.root[data-idle] .tile:not([data-picker]) .actions {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Solid backing so the buttons read on any picture (the shared overlay variant is too faint here). */
+.actions button[data-variant='overlay'] {
+  background: var(--dl-tile-btn);
+  border: 1px solid var(--dl-hairline-strong);
+}
+.actions button[data-variant='overlay']:hover { background: var(--dl-tile-btn-hover); }
+.actions button[data-variant='overlay']:active { background: var(--dl-tile-btn-pressed); }
+.actions button[data-variant='danger'] { background: var(--dl-tile-btn); }
 
 .programme {
   position: absolute;
@@ -202,6 +238,12 @@
   border-radius: var(--mantine-radius-xl);
   box-shadow: var(--mantine-shadow-lg);
   transform: translateX(-50%);
+  transition: opacity 240ms ease;
+}
+
+.root[data-idle] .toolbar {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .budget {
@@ -277,6 +319,23 @@
   text-overflow: ellipsis;
 }
 
+.pickerText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pickerNow {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--dl-text-dim);
+}
+
+.pickerRow:disabled .pickerNow { color: var(--dl-text-faint); }
+
 .pickerHint {
   font-size: var(--mantine-font-size-xs);
 }
@@ -296,5 +355,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .actions { transition: none; }
+  .actions,
+  .audio,
+  .toolbar,
+  .tile[data-focused]::after { transition: none; }
 }

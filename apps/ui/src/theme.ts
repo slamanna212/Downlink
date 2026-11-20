@@ -156,6 +156,9 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-video-btn': 'rgb(255 255 255 / 0.10)',
     '--dl-video-btn-hover': 'rgb(255 255 255 / 0.16)',
     '--dl-video-btn-pressed': 'rgb(255 255 255 / 0.22)',
+    '--dl-tile-btn': 'rgb(12 14 17 / 0.78)',          // multiview tile actions: solid enough to read on any picture
+    '--dl-tile-btn-hover': 'rgb(32 37 43 / 0.9)',
+    '--dl-tile-btn-pressed': 'rgb(44 50 58 / 0.92)',
     '--dl-ease': 'cubic-bezier(0.2, 0, 0, 1)',
   },
   light: {},
