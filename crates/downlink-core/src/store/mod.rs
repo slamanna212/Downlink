@@ -163,7 +163,7 @@ async fn backup_before_migrate(pool: &SqlitePool, db: &Path) -> Result<()> {
         .to_str()
         .ok_or_else(|| crate::AppError::local("The database path is not valid text."))?
         .replace('\'', "''");
-    sqlx::query(&format!("VACUUM INTO '{target_str}'"))
+    sqlx::query(sqlx::AssertSqlSafe(format!("VACUUM INTO '{target_str}'")))
         .execute(pool)
         .await?;
     tracing::info!("database backed up before migration");

@@ -44,20 +44,20 @@ pub async fn now_next_many(
 ) -> Result<HashMap<i64, NowNext>> {
     let mut out: HashMap<i64, NowNext> = HashMap::new();
     for &id in channel_ids {
-        let cur: Option<ProgrammeRow> = sqlx::query_as(&format!(
+        let cur: Option<ProgrammeRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {PCOLS} FROM programme WHERE channel_id = ? AND start_utc <= ? AND end_utc > ?
              ORDER BY start_utc DESC LIMIT 1"
-        ))
+        )))
         .bind(id)
         .bind(now)
         .bind(now)
         .fetch_optional(store.pool())
         .await?;
         let after = cur.as_ref().map_or(now, |c| c.end_utc);
-        let next: Option<ProgrammeRow> = sqlx::query_as(&format!(
+        let next: Option<ProgrammeRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {PCOLS} FROM programme WHERE channel_id = ? AND start_utc >= ?
              ORDER BY start_utc LIMIT 1"
-        ))
+        )))
         .bind(id)
         .bind(after)
         .fetch_optional(store.pool())
@@ -75,10 +75,10 @@ pub async fn window(
 ) -> Result<Vec<ProgrammeRow>> {
     let mut out = Vec::new();
     for &id in channel_ids {
-        let mut rows: Vec<ProgrammeRow> = sqlx::query_as(&format!(
+        let mut rows: Vec<ProgrammeRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {PCOLS} FROM programme WHERE channel_id = ? AND start_utc < ? AND end_utc > ?
              ORDER BY start_utc"
-        ))
+        )))
         .bind(id)
         .bind(w.end_utc)
         .bind(w.start_utc)

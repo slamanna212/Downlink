@@ -160,7 +160,7 @@ pub async fn list_channels(
              LIMIT ?5 OFFSET ?6"
         )
     };
-    Ok(sqlx::query_as(&sql)
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(search)
         .bind(f.source_id)
         .bind(f.group_id)
@@ -190,7 +190,7 @@ pub async fn list_groups(store: &Store, f: &ChannelFilter) -> Result<Vec<GroupRo
          WHERE (?1 IS NULL OR g.source_id = ?1)
          GROUP BY g.id ORDER BY g.name COLLATE NOCASE"
     );
-    Ok(sqlx::query_as(&sql)
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(f.source_id)
         .fetch_all(store.pool())
         .await?)
@@ -205,9 +205,9 @@ pub async fn channels_by_ids(
     let vis = visibility_sql(f);
     let mut out = Vec::with_capacity(ids.len());
     for &id in ids {
-        let row: Option<ChannelRow> = sqlx::query_as(&format!(
+        let row: Option<ChannelRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {COLS} FROM channel c WHERE c.id = ?1 AND {vis}"
-        ))
+        )))
         .bind(id)
         .fetch_optional(store.pool())
         .await?;
@@ -238,7 +238,7 @@ pub async fn search_programmes(
            AND (?3 IS NULL OR c.source_id = ?3)
          ORDER BY bm25(programme_fts), p.start_utc LIMIT ?4"
     );
-    Ok(sqlx::query_as(&sql)
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(q)
         .bind(from_utc)
         .bind(f.source_id)
@@ -258,7 +258,7 @@ pub async fn channel_by_number(
         "SELECT {COLS} FROM channel c WHERE {vis} AND (?1 IS NULL OR c.source_id = ?1)
            AND c.number >= ?2 ORDER BY c.number, c.sort_key LIMIT 1"
     );
-    Ok(sqlx::query_as(&sql)
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(f.source_id)
         .bind(number)
         .fetch_optional(store.pool())
@@ -268,9 +268,9 @@ pub async fn channel_by_number(
 /// Total visible channel count for a filter (ignores `search`).
 pub async fn count_channels(store: &Store, f: &ChannelFilter) -> Result<i64> {
     let vis = visibility_sql(f);
-    Ok(sqlx::query_scalar(&format!(
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT count(*) FROM channel c WHERE {vis} AND (?1 IS NULL OR c.source_id = ?1)"
-    ))
+    )))
     .bind(f.source_id)
     .fetch_one(store.pool())
     .await?)

@@ -202,18 +202,18 @@ impl Store {
     }
 
     pub async fn channel(&self, id: i64) -> Result<Option<ChannelRow>> {
-        Ok(sqlx::query_as(&format!(
+        Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {CHANNEL_COLUMNS} FROM channel WHERE id = ?"
-        ))
+        )))
         .bind(id)
         .fetch_optional(self.pool())
         .await?)
     }
 
     pub async fn channel_by_ext(&self, source_id: i64, ext_id: &str) -> Result<Option<ChannelRow>> {
-        Ok(sqlx::query_as(&format!(
+        Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {CHANNEL_COLUMNS} FROM channel WHERE source_id = ? AND ext_id = ?"
-        ))
+        )))
         .bind(source_id)
         .bind(ext_id)
         .fetch_optional(self.pool())
