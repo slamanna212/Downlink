@@ -8,7 +8,7 @@ different third-party panel does it. A correct client must decode both sets into
 |---|---|---|
 | Numbers | `num`, `stream_id` as ints; `is_adult`, `tv_archive` as `"0"`/`"1"` strings (some `tv_archive_duration` strings) | `num`, `stream_id`, `series_id`, `category_id` as strings; `is_adult`, `tv_archive`, `tv_archive_duration` as ints; `category_id` of categories as int, `parent_id` as string; `rating` numeric, `rating_5based` string |
 | Booleans | `"0"`/`"1"` | real JSON booleans (`auth: true`, `is_trial: false`, `is_adult: false` on VOD) |
-| Times | epoch strings (`added`, `last_modified`, `exp_date`) | `added`/`last_modified`/`added` on episodes as `"YYYY-MM-DD HH:MM:SS"` for live, series and episodes; VOD `added`, `exp_date`, `created_at` as epoch ints; `timestamp_now` as a string; EPG `start`/`end` as epoch ints (base: datetime strings alongside epoch strings in `start_timestamp`/`stop_timestamp`) |
+| Times | epoch strings (`added`, `last_modified`, `exp_date`) | live, series and episode `added`/`last_modified` as `"YYYY-MM-DD HH:MM:SS"`; VOD `added`, `exp_date`, `created_at` as epoch ints; `timestamp_now` as a string; EPG `start`/`end` as epoch ints (base: datetime strings, plus epoch strings in `start_timestamp`/`stop_timestamp`) |
 | Empty values | `""` for missing icon and EPG id | `null` for icon, `epg_channel_id`, `custom_sid`, `rating`; `epg_channel_id` key absent on one channel in both sets |
 | Empty containers | `[]` | `{}` for an empty `epg_listings` (`get_short_epg_empty.json`) and for an empty series `backdrop_path`; `seasons` is an object keyed by season number instead of an array |
 | Field order | as the base generator | reversed key order everywhere |
