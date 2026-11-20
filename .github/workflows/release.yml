@@ -1,10 +1,13 @@
-# Production release: publishes the version in the ROOT package.json, unless a release for that version
-# already exists. Mirrors Apogee's release.yml. See docs/release.md.
-# DISABLED: the push-to-main trigger is off until the owner turns it back on. Manual dispatch only.
+# Stable release: when a push to main changes the root package.json, build that version as a DRAFT release
+# (unless a release for it already exists). You edit the notes and publish it by hand. Pushes that don't touch
+# package.json start no run at all. Same model as Apogee/MatchExec. See docs/release.md.
 name: Release
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch: # retry a failed release by hand (main only)
 
 permissions:
   contents: read
@@ -17,59 +20,45 @@ concurrency:
 jobs:
   check-version:
     name: Check version
-    runs-on: ubuntu-latest
-    if: "!contains(github.event.head_commit.message, '[skip release]')"
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
     outputs:
-      version: ${{ steps.package_version.outputs.version }}
-      tag: ${{ steps.package_version.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
       release_exists: ${{ steps.check_release.outputs.exists }}
-      prerelease: ${{ steps.prerelease.outputs.value }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Get package version
-        id: package_version
+      - name: Read package.json version
+        id: v
         run: |
-          VERSION=$(node -p "require('./package.json').version")
+          VERSION=$(jq -r .version package.json)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          # A -suffix version (0.8.0-beta.1) becomes a pre-release, which the stable update channel ignores.
+          if [[ "$VERSION" == *-* ]]; then echo "prerelease=true"; else echo "prerelease=false"; fi >> "$GITHUB_OUTPUT"
 
       - name: Check if a release already exists for this tag
         id: check_release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.package_version.outputs.tag }}
+          TAG: ${{ steps.v.outputs.tag }}
         run: |
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Release $TAG already exists; nothing to do. Bump package.json to publish a new version."
+            echo "Release $TAG already exists; nothing to do. Bump package.json to release a new version."
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Determine prerelease flag
-        id: prerelease
-        env:
-          VERSION: ${{ steps.package_version.outputs.version }}
-        run: |
-          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-.+ ]]; then
-            echo "value=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  # Lint / typecheck / tests (the full quality gates) before anything is built.
   ci:
-    name: CI gate
+    name: Tests (Linux)
     needs: check-version
     if: needs.check-version.outputs.release_exists == 'false'
     uses: ./.github/workflows/ci.yml
     with:
-      linux-runner: ${{ vars.LINUX_RUNNER || 'ubuntu-22.04' }}
+      linux-runner: ${{ vars.LINUX_RUNNER || 'ubuntu-24.04' }}
 
   build:
     name: Build and publish
@@ -77,12 +66,10 @@ jobs:
     uses: ./.github/workflows/build.yml
     permissions:
       contents: write
-      id-token: write
-      attestations: write
     secrets: inherit
     with:
       version: ${{ needs.check-version.outputs.version }}
       tag: ${{ needs.check-version.outputs.tag }}
       prerelease: ${{ needs.check-version.outputs.prerelease == 'true' }}
       channel: stable
-      linux-runner: ${{ vars.LINUX_RUNNER || 'ubuntu-22.04' }}
+      linux-runner: ${{ vars.LINUX_RUNNER || 'ubuntu-24.04' }}

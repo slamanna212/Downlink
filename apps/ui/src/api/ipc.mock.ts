@@ -166,7 +166,7 @@ export function createMockBackend(): Backend {
     liveBufferSecs: 2, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
     deinterlace: 'auto', subtitleSize: 100, subtitleBackground: true, resumeLastChannel: false,
   };
-  let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, lastChecked: null };
+  let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, notes: null, lastChecked: null };
   let searchIndex: { programme: Programme; channel: Channel; hay: string }[] | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let player = idleState();

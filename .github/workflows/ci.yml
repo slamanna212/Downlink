@@ -1,19 +1,15 @@
 name: CI
 
-# Quality gates (CLAUDE.md / PLAN §11.3). Reusable: called by pr-ci.yml (PRs to dev), release.yml and
-# dev-prerelease.yml (before building). Also runnable by hand.
+# Quality gates (CLAUDE.md / PLAN §11.3), Linux only: the Windows release build is the Windows compile check.
+# Reusable: called by pr-ci.yml (PRs to dev), release.yml and dev-build.yml (before building). Also runnable by hand.
 on:
   workflow_dispatch:
   workflow_call:
     inputs:
-      ref:
-        description: Git ref to test (empty = the caller's ref).
-        type: string
-        default: ""
       linux-runner:
         description: Runner label for the Linux legs.
         type: string
-        default: ubuntu-22.04
+        default: ubuntu-24.04
 
 permissions:
   contents: read
@@ -30,19 +26,13 @@ env:
 
 jobs:
   rust:
-    name: Rust (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ["${{ inputs.linux-runner || 'ubuntu-22.04' }}", windows-latest, macos-latest]
+    name: Rust
+    runs-on: ${{ inputs.linux-runner || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
 
       - name: Install Linux build dependencies (PLAN §13.2)
-        if: runner.os == 'Linux' && runner.environment == 'github-hosted'
+        if: runner.environment == 'github-hosted'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -71,19 +61,15 @@ jobs:
 
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: cargo deny
-        if: runner.os == 'Linux'
-        run: cargo deny check
+      - run: cargo deny check
       - name: cargo nextest
         run: cargo nextest run --workspace --no-tests=warn
 
   ui:
     name: UI
-    runs-on: ${{ inputs.linux-runner || 'ubuntu-22.04' }}
+    runs-on: ${{ inputs.linux-runner || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -99,7 +85,7 @@ jobs:
 
   workflows:
     name: Lint workflows and scripts
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: actionlint

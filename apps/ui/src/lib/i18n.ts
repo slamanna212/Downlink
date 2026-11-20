@@ -255,6 +255,7 @@ export const en = {
   'settings.updates.upToDate': 'You are up to date. Last checked {time}.',
   'settings.updates.never': 'Not checked yet.',
   'settings.updates.check': 'Check now',
+  'settings.updates.whatsNew': "What's new in {available}",
   'settings.audioDevice': 'Audio device',
   'settings.audioDevice.help': 'Remembered on this machine. Re-selected when HDMI reconnects.',
   'settings.audioDevice.default': 'System default',

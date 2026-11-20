@@ -302,6 +302,8 @@ export interface UpdateStatus {
   current: string;
   /** Newer version, if any. */
   available?: string | null;
+  /** Release notes (Markdown) of the available update. */
+  notes?: string | null;
   /** UTC seconds. */
   lastChecked?: number | null;
 }

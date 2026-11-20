@@ -51,6 +51,35 @@
 }
 .divider { border-top: 1px solid var(--dl-hairline); }
 
+.notes {
+  margin-top: var(--mantine-spacing-lg);
+  padding: var(--mantine-spacing-md) var(--mantine-spacing-lg);
+  border: 1px solid var(--dl-hairline);
+  border-radius: var(--mantine-radius-md);
+  background: var(--dl-surface-1);
+  max-height: 320px;
+  overflow-y: auto;
+  font-size: var(--mantine-font-size-sm);
+  color: var(--dl-text-2);
+}
+.notesTitle {
+  margin: 0 0 var(--mantine-spacing-xs);
+  font-size: var(--mantine-font-size-md);
+  font-weight: 600;
+  color: var(--dl-text);
+}
+.notesHeading {
+  margin: var(--mantine-spacing-sm) 0 var(--mantine-spacing-xs);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 600;
+  color: var(--dl-text);
+}
+.notesList {
+  margin: 0;
+  padding-left: var(--mantine-spacing-lg);
+}
+.notesPara { margin: var(--mantine-spacing-xs) 0; }
+
 .end { justify-content: flex-end; }
 .actions {
   display: flex;

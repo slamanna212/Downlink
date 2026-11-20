@@ -2,8 +2,7 @@
   "bundle": {
     "linux": {
       "appimage": { "files": { "usr/lib": "../../tools/mpv/out/linux/lib" } },
-      "deb": { "files": { "/usr/lib/downlink/mpv": "../../tools/mpv/out/linux/lib" }, "depends": [] },
-      "rpm": { "files": { "/usr/lib/downlink/mpv": "../../tools/mpv/out/linux/lib" } }
+      "deb": { "files": { "/usr/lib/downlink/mpv": "../../tools/mpv/out/linux/lib" }, "depends": [] }
     }
   }
 }

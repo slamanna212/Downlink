@@ -14,7 +14,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 pub const STABLE_ENDPOINT: &str =
     "https://github.com/slamanna212/Downlink/releases/latest/download/latest.json";
 pub const DEV_ENDPOINT: &str =
-    "https://github.com/slamanna212/Downlink/releases/download/dev/latest.json";
+    "https://github.com/slamanna212/Downlink/releases/download/dev-channel/latest.json";
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 3600);
 
 #[derive(Debug, Clone, Serialize)]
@@ -23,6 +23,8 @@ pub struct UpdateStatus {
     pub channel: String,
     pub current: String,
     pub available: Option<String>,
+    /// Release notes (Markdown) of the available update, from the GitHub release via latest.json.
+    pub notes: Option<String>,
     pub last_checked: Option<i64>,
 }
 
@@ -64,6 +66,7 @@ impl UpdaterState {
                 channel,
                 current: current.to_owned(),
                 available: None,
+                notes: None,
                 last_checked: None,
             }),
             pending: Mutex::new(Pending::default()),
@@ -108,6 +111,7 @@ impl UpdaterState {
         let st = self.update_status(|s| {
             s.channel = channel.to_owned();
             s.available = None;
+            s.notes = None;
         });
         if let Ok(mut p) = self.pending.lock() {
             *p = Pending::default();
@@ -134,6 +138,7 @@ impl UpdaterState {
         let st = match found {
             Ok(Some(update)) => {
                 let version = update.version.clone();
+                let notes = update.body.clone().filter(|b| !b.trim().is_empty());
                 tracing::info!("update available: {version}");
                 if let Ok(mut p) = self.pending.lock() {
                     *p = Pending {
@@ -144,11 +149,13 @@ impl UpdaterState {
                 self.spawn_download(update);
                 self.update_status(|s| {
                     s.available = Some(version);
+                    s.notes = notes;
                     s.last_checked = Some(now_s());
                 })
             }
             Ok(None) => self.update_status(|s| {
                 s.available = None;
+                s.notes = None;
                 s.last_checked = Some(now_s());
             }),
             Err(e) => {
@@ -208,9 +215,7 @@ mod tests {
     fn channel_defaults_follow_version() {
         assert_eq!(UpdaterState::new("0.1.0", None).status().channel, "stable");
         assert_eq!(
-            UpdaterState::new("0.1.0-dev.abc1234", None)
-                .status()
-                .channel,
+            UpdaterState::new("0.1.1-dev.12", None).status().channel,
             "dev"
         );
         assert_eq!(
@@ -221,7 +226,7 @@ mod tests {
 
     #[test]
     fn endpoints_differ_by_channel() {
-        assert!(endpoint("dev").contains("/download/dev/"));
+        assert!(endpoint("dev").contains("/download/dev-channel/"));
         assert!(endpoint("stable").contains("/latest/download/"));
     }
 }

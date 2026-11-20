@@ -1228,7 +1228,7 @@ the app stable.
 
 ### M6 — 1.0 (Windows + Linux)
 
-Stable channel opens; releases cover Windows and Linux only (`ENABLE_MACOS` stays off); signing as
+Stable channel opens; releases cover Windows and Linux only; signing as
 §10.5; README, disclaimer, install notes; clean-machine QA on Windows 11 and Linux; Windows-specific
 bugs (surface z-order, DPI, fullscreen, taskbar auto-hide, multiview HWNDs) fixed before 1.0 ships;
 update path tested stable → stable and dev → stable.
@@ -1241,7 +1241,7 @@ Acceptance:
 
 ### M7 — macOS
 
-Turn on `ENABLE_MACOS`; Developer ID signing and notarisation (§10.5); universal libmpv; the macOS
+Add the macOS build job; Developer ID signing and notarisation (§10.5); universal libmpv; the macOS
 surface reworked for several instances so multiview works; Mac testers verify the M0 checks and every
 milestone's acceptance; fix what they find, then ship macOS on the stable channel.
 
@@ -1264,80 +1264,63 @@ a detached floating PiP window. (macOS ships after 1.0, in M7.)
 
 ## 10. Releases, packaging, auto-update
 
-Mirrors Apogee's release layout.
+Same model as Apogee and MatchExec: version bump on `main` → draft release; dev builds on demand.
 
 ### 10.1 Artefacts per release
 
-Versioned (with `.sig` updater signatures where listed):
+Windows and Linux for now; macOS is added later (§10.5). Versioned, with `.sig` updater signatures:
 
 ```
 Downlink_<ver>_x64-setup.exe          + .sig     Windows (NSIS)
-Downlink_<ver>_universal.dmg                      macOS install
-Downlink_<ver>_universal.app.tar.gz   + .sig     macOS updater payload
 Downlink_<ver>_amd64.AppImage         + .sig     Linux
 Downlink_<ver>_amd64.deb              + .sig     Linux (Debian/Ubuntu)
-Downlink-<ver>-1.x86_64.rpm           + .sig     Linux (Fedora/RHEL)
 latest.json                                       updater manifest
-SHA256SUMS-linux-x86_64.txt                       checksums
 ```
 
-Unversioned copies for stable "latest" download links
-(`/releases/latest/download/<name>`):
+Unversioned copies on stable releases for "latest" download links (`/releases/latest/download/<name>`):
+`Downlink_x64-setup.exe`, `Downlink_amd64.AppImage`, `Downlink_amd64.deb`.
 
-```
-Downlink_x64-setup.exe
-Downlink_universal.dmg
-Downlink_amd64.AppImage
-Downlink_amd64.deb
-Downlink-x86_64.rpm
-```
+Not shipped: rpm, MSI, Windows arm64, Linux arm64, Flatpak, store listings, build attestations.
 
-Plus GitHub's source archives and a **release attestation** (`actions/attest-build-provenance`).
+### 10.2 Build pipeline (GitHub Actions)
 
-Not shipped: MSI, Windows arm64, separate per-arch macOS builds, Linux arm64, Flatpak, store
-listings.
+Kept deliberately small (details in `docs/release.md`):
 
-### 10.2 Build matrix (GitHub Actions)
+- `release.yml`: a push to `main` that changes the root `package.json` builds that version as a **draft**
+  release unless it already exists; Sam edits the notes and publishes by hand (Apogee/MatchExec model). Other
+  pushes start nothing.
+- `dev-build.yml`: manual only, any branch (normally `dev`); publishes a pre-release straight away.
+- Both run the quality gates on **Linux only** (`ci.yml`), then the shared `build.yml`: Windows
+  (`windows-latest`, NSIS) and Linux (`ubuntu-24.04`, AppImage + deb; the oldest image with `libmpv.so.2`, glibc
+  2.39 baseline) build in parallel with `tauri-action` into the draft, then a publish job writes `latest.json`
+  (`tools/release/make-latest-json.py`). A failed build deletes the draft.
+- `release-notes.yml`: when a release is published or edited, its text is copied into its `latest.json`.
 
-| Runner | Produces |
-|---|---|
-| `windows-latest` | NSIS `.exe` + `.sig` |
-| `macos-latest` (arm64), target `universal-apple-darwin` | `.dmg`, `.app.tar.gz` + `.sig` (universal libmpv from §4.10) |
-| `ubuntu-22.04` (pinned container for libmpv collection) | AppImage, `.deb`, `.rpm` + `.sig`, `SHA256SUMS-linux-x86_64.txt` |
-
-`tauri-apps/tauri-action` builds and uploads to a draft release; a final job generates `latest.json`
-(`tools/release/make-latest-json.py`), copies the unversioned assets, creates the attestation and publishes.
-Workflow layout follows Apogee: `release.yml` (push to `main`), `dev-prerelease.yml` (manual, `dev` branch),
-`pr-ci.yml` (PRs to `dev`), plus reusable `ci.yml` and `build.yml`. The Linux runner label is the repo variable
-`LINUX_RUNNER` (default `ubuntu-22.04`). macOS jobs run only when repo variable `ENABLE_MACOS` is `true`
-(releases start as Windows + Linux; macOS follows with a Developer ID, §10.5). Without
-`TAURI_SIGNING_PRIVATE_KEY` builds still publish installers, minus `.sig` files and `latest.json`.
-
-`tauri.conf.json`: `bundle.targets = ["nsis", "dmg", "app", "appimage", "deb", "rpm"]`,
-`bundle.createUpdaterArtifacts = true`, `bundle.macOS.signingIdentity = "-"` (ad-hoc) until a
-Developer ID exists.
+Without `TAURI_SIGNING_PRIVATE_KEY` builds still publish installers, minus `.sig` files and `latest.json`.
 
 ### 10.3 Auto-update
 
 - `tauri-plugin-updater` with the minisign public key compiled in; private key and password in GitHub
   secrets (`TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`), never in the repo.
   The updater refuses any payload whose signature doesn't verify.
-- `latest.json` platform keys: `windows-x86_64` (NSIS), `darwin-aarch64` and `darwin-x86_64` (both
-  → the universal `.app.tar.gz`), `linux-x86_64` (AppImage), `linux-x86_64-deb`, `linux-x86_64-rpm`.
+- `latest.json` platform keys: `windows-x86_64` (NSIS), `linux-x86_64` (AppImage), `linux-x86_64-deb`; later
+  `darwin-aarch64` and `darwin-x86_64` (both → the universal `.app.tar.gz`).
 - **Channels**:
   - **stable**: endpoint `https://github.com/slamanna212/Downlink/releases/latest/download/latest.json`
-    (GitHub's `latest` excludes pre-releases). Every push to `main` builds `vX.Y.Z` from the root
-    `package.json` version unless that release already exists, and leaves it as a draft to publish by hand
-    (a `-suffix` version is marked pre-release).
-  - **dev**: pre-releases tagged `vX.Y.Z-dev.<shortsha>` (Apogee's scheme), built from the `dev` branch only
-    when triggered by hand (`dev-prerelease.yml`). A rolling `dev` release always holds the newest dev
-    `latest.json`; endpoint `…/releases/download/dev/latest.json`.
+    (GitHub's `latest` excludes pre-releases). A push to `main` that changes the root `package.json` builds
+    `vX.Y.Z` unless that release already exists, and leaves it as a draft to publish by hand (a `-suffix`
+    version is marked pre-release).
+  - **dev**: pre-releases tagged `vX.Y.Z-dev.<run number>`, built by hand (`dev-build.yml`, normally from the
+    `dev` branch). The run number keeps dev builds ordered; `X.Y.Z` is the next patch after the newest stable
+    release unless `package.json` is already ahead. A rolling `dev-channel` release holds the newest dev
+    `latest.json`; endpoint `…/releases/download/dev-channel/latest.json`.
   - Chosen in Settings → Updates. Switching dev → stable only offers a build newer than the installed
     one (no automatic downgrade).
 - **UX**: check on startup and every 6 h. Download in the background. Never interrupt playback:
   a quiet "Update ready — restart to install" banner plus an "install on quit" default. "What's new"
-  from the release notes. No modal unless the user clicks.
-- deb/rpm updates install with elevation (polkit prompt); AppImage replaces itself; NSIS runs
+  from the release notes: the published GitHub release text, copied into `latest.json` on publish/edit and
+  shown in Settings → Updates. No modal unless the user clicks.
+- deb updates install with elevation (polkit prompt); AppImage replaces itself; NSIS runs
   passive; macOS swaps the `.app`.
 - Downgrade guard: a DB newer than the app refuses to open (§7.6), so dev → stable never corrupts
   state.
@@ -1347,8 +1330,8 @@ Developer ID exists.
 Semver. Conventional Commits; `git-cliff` generates release notes, user-visible section hand-edited.
 The **root `package.json` `version` is the single source of truth** (bumped with
 `tools/release/bump-version.sh`); `tauri.conf.json`, `Cargo.toml` and `apps/ui/package.json` are overwritten from it
-at build time (`tools/release/set-version.mjs`) so they cannot drift. `[skip release]` in a commit message and
-docs-only changes skip the release workflow.
+at build time (`tools/release/set-version.mjs`) so they cannot drift. Only pushes to `main` that change the root
+`package.json` start the release workflow.
 README and About show "Works with Dispatcharr ≥ 0.32.0, tested with <latest>".
 
 ### 10.5 Signing (decide before 1.0)
@@ -1362,8 +1345,8 @@ README and About show "Works with Dispatcharr ≥ 0.32.0, tested with <latest>".
 Updater signatures (minisign) are required regardless of OS code signing.
 
 **Decided 2026-11-20 (Sam):** releases start with **Windows and Linux**; Windows stays unsigned for now.
-**macOS** follows soon, signed and notarised with Sam's existing **Apple Developer ID** (the macOS release jobs
-are gated behind the `ENABLE_MACOS` repo variable until then). Azure Trusted Signing is not planned.
+**macOS** follows soon, signed and notarised with Sam's existing **Apple Developer ID** (macOS release jobs are added to
+`build.yml` then; the staging script and overlay already exist). Azure Trusted Signing is not planned.
 
 ---
 
