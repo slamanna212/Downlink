@@ -444,6 +444,16 @@ pub async fn all_channels(
     src: &dyn Source,
     page_size: u32,
 ) -> Result<(Vec<SourceChannel>, Option<u64>)> {
+    all_channels_with(src, page_size, &|_, _| {}).await
+}
+
+/// [`all_channels`] reporting `(fetched so far, total if the source says)` after every page, so a
+/// big first import shows progress instead of sitting silent.
+pub async fn all_channels_with(
+    src: &dyn Source,
+    page_size: u32,
+    on_page: &(dyn Fn(usize, Option<u64>) + Sync),
+) -> Result<(Vec<SourceChannel>, Option<u64>)> {
     let mut out = Vec::new();
     let mut count = None;
     let mut page = 1u32;
@@ -452,6 +462,7 @@ pub async fn all_channels(
         count = count.or(p.count);
         let empty = p.channels.is_empty();
         out.extend(p.channels);
+        on_page(out.len(), count);
         if !p.has_next || empty || page >= 10_000 {
             break;
         }

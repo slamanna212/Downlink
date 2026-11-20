@@ -1002,6 +1002,29 @@ impl DispatcharrClient {
         Ok(())
     }
 
+    /// Start a live HLS session: `GET /proxy/ts/stream/{uuid}?output_format=hls` with the API key and
+    /// redirects off. The server answers `302 Location: /proxy/hls/<token>/index.m3u8`; the token is
+    /// the only credential of the resulting URL. This IS a play (it opens the channel): call it only
+    /// at an actual play. Returns `(playlist url, token)`.
+    pub async fn mint_hls(&self, channel_uuid: &str) -> Result<(String, String)> {
+        let url = self
+            .base
+            .join(&format!("proxy/ts/stream/{channel_uuid}?output_format=hls"))?;
+        let auth = self.auth_header().await?;
+        match crate::source::probe_redirect(url.as_str(), &[auth], self.insecure_tls).await? {
+            crate::source::RedirectOutcome::Redirect(loc) => {
+                let u = reqwest::Url::parse(loc.expose())?;
+                let token = hls_token_of(u.path()).ok_or_else(|| {
+                    AppError::server("The server did not start a live HLS session.")
+                })?;
+                Ok((u.to_string(), token))
+            }
+            crate::source::RedirectOutcome::Direct => Err(AppError::server(
+                "The server did not start a live HLS session.",
+            )),
+        }
+    }
+
     /// `DELETE /api/proxy/hls/sessions/{token}/`. Idempotent (404 means already gone).
     pub async fn delete_hls_session(&self, token: &str) -> Result<()> {
         let r = self
@@ -1114,6 +1137,13 @@ fn mask_urls(v: &mut Value) {
         Value::String(s) => *s = crate::redact::redact(s),
         _ => {}
     }
+}
+
+/// The session token of a `/proxy/hls/<token>/…` path.
+fn hls_token_of(path: &str) -> Option<String> {
+    let rest = path.split("/proxy/hls/").nth(1)?;
+    let token = rest.split('/').next()?;
+    (!token.is_empty()).then(|| token.to_owned())
 }
 
 /// Pure plan construction. Never performs I/O.

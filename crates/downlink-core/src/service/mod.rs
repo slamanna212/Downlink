@@ -88,6 +88,10 @@ pub struct Service {
     registered_logos: Mutex<HashSet<String>>,
     /// Failover position (0-based) believed to be in use, per channel row id.
     current_stream: Mutex<HashMap<i64, usize>>,
+    /// The live HLS session in use, `(source id, token)`: one at a time.
+    live_hls: Mutex<Option<(i64, String)>>,
+    /// Channels whose HLS session was already re-minted since their last `play_channel`.
+    hls_reminted: Mutex<HashSet<i64>>,
     /// Category id -> (source id, server category id) for ids that were hashed.
     vod_cats: Mutex<HashMap<i64, (i64, String)>>,
     log_tail: LogTail,
@@ -131,6 +135,8 @@ impl Service {
             status: Mutex::new(HashMap::new()),
             registered_logos: Mutex::new(HashSet::new()),
             current_stream: Mutex::new(HashMap::new()),
+            live_hls: Mutex::new(None),
+            hls_reminted: Mutex::new(HashSet::new()),
             vod_cats: Mutex::new(HashMap::new()),
             log_tail: LogTail::new(),
             app_version,
@@ -754,9 +760,21 @@ impl Service {
         self.progress(source_id, "connect", 0, 4);
         let info = sync::connect_and_record(client.as_ref(), &self.store, source_id).await?;
         self.progress(source_id, "channels", 1, 4);
-        sync::sync_channels(client.as_ref(), &self.store, source_id, info.user_level).await?;
+        sync::sync_channels_with(
+            client.as_ref(),
+            &self.store,
+            source_id,
+            info.user_level,
+            // (fetched, total): total is 0 when the source does not say.
+            &|done, total| {
+                self.progress(source_id, "channels", done, total.map_or(0, |t| t as usize))
+            },
+        )
+        .await?;
         let uuid = self.store.source(source_id).await?.uuid;
         self.persist_credentials(&uuid, client.as_ref())?;
+        // The channel list is complete and committed: show it now, the guide fills in behind it.
+        self.emit(Event::CatalogUpdated(self.counts(source_id).await?));
         self.progress(source_id, "guide", 2, 4);
         if let Err(e) = self.sync_guide_for(source_id, client.as_ref()).await {
             // The guide is not critical: channels stay usable.
@@ -787,12 +805,14 @@ impl Service {
                     start_utc: epg::retention_cutoff(now, days),
                     end_utc: now + 7 * 86_400,
                 };
-                let r = crate::xmltv::ingest::ingest(
+                // Programmes written so far after each batch (total unknown: 0).
+                let r = crate::xmltv::ingest::ingest_with_progress(
                     &self.store,
                     source_id,
                     feed.file.path().to_path_buf(),
                     tz,
                     keep,
+                    &|n| self.progress(source_id, "guide", n, 0),
                 )
                 .await;
                 match r {
@@ -1392,11 +1412,113 @@ impl Service {
     /// request). Records a recent. The caller hands the plan to the player.
     pub async fn play_channel(&self, channel_id: i64) -> Result<PlayPlan> {
         let plan = self.live_plan(channel_id).await?;
+        if let Ok(mut g) = self.hls_reminted.lock() {
+            g.remove(&channel_id);
+        }
+        if plan.session.is_none() {
+            // Zapped from an HLS channel to a normal one: release the old session.
+            self.stop_live_hls().await;
+        }
         if let Ok(mut g) = self.current_stream.lock() {
             g.insert(channel_id, 0);
         }
         self.store.touch_recent(channel_id, now_utc()).await?;
         Ok(plan)
+    }
+
+    /// Mint a live HLS session at play time (`GET /proxy/ts/stream/{uuid}?output_format=hls`, one
+    /// request, API key, no redirects followed). The resulting URL has no headers: the token in
+    /// the path is the credential. The token is persisted in `open_session` before the plan is
+    /// returned (crash cleanup), and the previous live session, if any, is released.
+    async fn mint_hls_plan(
+        &self,
+        ch: &crate::store::ChannelRow,
+        src: &SourceRow,
+    ) -> Result<PlayPlan> {
+        use crate::redact::RedactionSet;
+        use crate::source::{PlayProfile, SessionId, Surface};
+        let uuid = ch
+            .uuid
+            .as_deref()
+            .filter(|u| !u.is_empty())
+            .ok_or_else(|| {
+                AppError::stream(
+                    "This channel has no stream address yet; refresh the channel list.",
+                )
+            })?;
+        self.client(src.id).await?; // builds and caches the typed client
+        let c = self.dispatcharr.read().await.get(&src.id).cloned();
+        let c = c.ok_or_else(|| AppError::local("This source is not available."))?;
+        let (url, token) = c.mint_hls(uuid).await?;
+        sessions::track(&self.store, src.id, sessions::KIND_HLS, &token).await?;
+        let previous = self
+            .live_hls
+            .lock()
+            .ok()
+            .and_then(|mut g| g.replace((src.id, token.clone())));
+        if let Some((sid, old)) = previous
+            && old != token
+        {
+            let _ = sessions::release(&self.store, self, sid, sessions::KIND_HLS, &old).await;
+        }
+        let mut redact = RedactionSet::new();
+        redact.add(&token);
+        Ok(PlayPlan {
+            url,
+            headers: Vec::new(),
+            surface: Surface::Hls,
+            profile: PlayProfile::Live,
+            session: Some(SessionId(token)),
+            redact,
+            needs_redirect_resolve: false,
+            unknown_profile: false,
+        })
+    }
+
+    /// Release the live HLS session, if one is open (navigate-away, stop, zap to a non-HLS channel).
+    /// Failures stay in `open_session` and are retried at the next start.
+    pub async fn stop_live_hls(&self) {
+        let cur = self.live_hls.lock().ok().and_then(|mut g| g.take());
+        if let Some((sid, token)) = cur {
+            let _ = sessions::release(&self.store, self, sid, sessions::KIND_HLS, &token).await;
+        }
+    }
+
+    /// The player got `410` on a live HLS playlist or segment: the session ended on the server.
+    /// Mint a fresh one, at most once per `play_channel`; a second call is an error so a dying
+    /// stream cannot loop.
+    pub async fn remint_hls(&self, channel_id: i64) -> Result<PlayPlan> {
+        let first = self
+            .hls_reminted
+            .lock()
+            .map(|mut g| g.insert(channel_id))
+            .unwrap_or(false);
+        if !first {
+            return Err(AppError::stream(
+                "The live stream ended and could not be restarted.",
+            ));
+        }
+        self.live_plan(channel_id).await
+    }
+
+    /// Change per-source options (currently the opt-in HLS transport). Only sources that support
+    /// the option accept it. Takes effect at the next play.
+    pub async fn set_source_options(&self, args: SetSourceOptionsArgs) -> Result<SourceDto> {
+        let row = self.store.source(args.source_id).await?;
+        if row.kind != "dispatcharr" {
+            return Err(AppError::local(
+                "This source does not offer an HLS transport option.",
+            ));
+        }
+        if !args.hls_transport {
+            self.stop_live_hls().await;
+        }
+        self.store
+            .set_source_hls_transport(args.source_id, args.hls_transport)
+            .await?;
+        let row = self.store.source(args.source_id).await?;
+        let days = refresh::max_catchup_days(&self.store, row.id).await?;
+        Ok(SourceDto::from_row(&row, self.status_of(&row), days))
     }
 
     async fn live_plan(&self, channel_id: i64) -> Result<PlayPlan> {
@@ -1407,6 +1529,11 @@ impl Service {
             .ok_or_else(|| AppError::local("That channel is no longer in the list."))?;
         let src = self.store.source(ch.source_id).await?;
         if SourceKind::parse(&src.kind) == Some(SourceKind::Dispatcharr) {
+            // Opt-in HLS transport: only for channels the server proxies (a Redirect-profile channel
+            // is answered before the output format is considered, so it keeps its normal path).
+            if src.hls_transport && ch.stream_redirect == crate::source::StreamMode::Proxy {
+                return self.mint_hls_plan(&ch, &src).await;
+            }
             let plan = catalog::resolve_play_plan(&self.store, self, channel_id).await?;
             plan.resolve_at_play(src.tls_insecure).await
         } else {
@@ -1610,6 +1737,9 @@ impl Service {
 
     /// Sleep / quit / navigate-away: stop every open session.
     pub async fn stop_all_sessions(&self) -> Result<sessions::CleanupReport> {
+        if let Ok(mut g) = self.live_hls.lock() {
+            g.take();
+        }
         sessions::stop_all(&self.store, self).await
     }
 

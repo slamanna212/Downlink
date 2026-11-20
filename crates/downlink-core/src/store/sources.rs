@@ -31,6 +31,8 @@ pub struct SourceRow {
     pub tls_insecure: bool,
     /// SHA-256 of the pinned leaf certificate (hex), for sources that allow self-signed.
     pub tls_pin: Option<String>,
+    /// Opt-in: live channels on this (Dispatcharr) source play through its HLS output.
+    pub hls_transport: bool,
     pub last_sync_at: Option<i64>,
     pub created_at: i64,
 }
@@ -88,6 +90,15 @@ impl Store {
         .bind(id)
         .execute(self.pool())
         .await?;
+        Ok(())
+    }
+
+    pub async fn set_source_hls_transport(&self, id: i64, on: bool) -> Result<()> {
+        sqlx::query("UPDATE source SET hls_transport = ? WHERE id = ?")
+            .bind(on)
+            .bind(id)
+            .execute(self.pool())
+            .await?;
         Ok(())
     }
 

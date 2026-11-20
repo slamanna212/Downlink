@@ -224,8 +224,16 @@ pub async fn channels_by_ids(
     Ok(out)
 }
 
+/// Programme candidates taken from FTS before the time/visibility filter. A narrow query has
+/// fewer matches than this, so its result is exact; a very broad prefix ("n") is judged on its
+/// first candidates, which is fine because the user keeps typing. Ranking every match (bm25 over
+/// ~100k rows) was what made this leg slow.
+const PROGRAMME_CANDIDATES: i64 = 5_000;
+
 /// Local guide search (FTS5 over title/subtitle/description), restricted to visible channels and
-/// to programmes that have not ended before `from_utc`. Ranked by bm25, then start time.
+/// to programmes that have not ended before `from_utc` and start within the next 7 days. The
+/// FTS leg only yields rowids (limit applied inside FTS); the rest is a primary-key probe per
+/// candidate. Ordered by what is on or next first: airing now, then soonest upcoming.
 pub async fn search_programmes(
     store: &Store,
     f: &ChannelFilter,
@@ -240,17 +248,20 @@ pub async fn search_programmes(
     let sql = format!(
         "SELECT p.channel_id, p.start_utc, p.end_utc, p.ext_id, p.title, p.subtitle, p.description,
                 p.season, p.episode, p.flags
-         FROM programme_fts JOIN programme p ON p.rowid = programme_fts.rowid
+         FROM (SELECT rowid FROM programme_fts WHERE programme_fts MATCH ?1 LIMIT ?5) f
+         JOIN programme p ON p.rowid = f.rowid
          JOIN channel c ON c.id = p.channel_id
-         WHERE programme_fts MATCH ?1 AND {vis} AND p.end_utc >= ?2
+         WHERE {vis} AND p.end_utc >= ?2 AND p.start_utc <= ?6
            AND (?3 IS NULL OR c.source_id = ?3)
-         ORDER BY bm25(programme_fts), p.start_utc LIMIT ?4"
+         ORDER BY p.start_utc, p.channel_id LIMIT ?4"
     );
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(q)
         .bind(from_utc)
         .bind(f.source_id)
         .bind(limit)
+        .bind(PROGRAMME_CANDIDATES)
+        .bind(from_utc + 7 * 86_400)
         .fetch_all(store.pool())
         .await?)
 }

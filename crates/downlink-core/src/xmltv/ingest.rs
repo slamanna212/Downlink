@@ -191,6 +191,18 @@ pub async fn ingest(
     default_tz: Tz,
     keep: TimeWindow,
 ) -> Result<IngestReport> {
+    ingest_with_progress(store, source_id, path, default_tz, keep, &|_| {}).await
+}
+
+/// [`ingest`] calling `on_batch(programmes written so far)` after every committed batch.
+pub async fn ingest_with_progress(
+    store: &Store,
+    source_id: i64,
+    path: PathBuf,
+    default_tz: Tz,
+    keep: TimeWindow,
+    on_batch: &(dyn Fn(usize) + Sync),
+) -> Result<IngestReport> {
     let p1 = path.clone();
     let xmltv = tokio::task::spawn_blocking(move || parse_channels(&p1))
         .await
@@ -264,6 +276,7 @@ pub async fn ingest(
     let mut written = 0usize;
     while let Some(batch) = rx.recv().await {
         written += store.upsert_programmes(&batch).await?;
+        on_batch(written);
     }
     let (stats, unmatched, outside, cov) = parser
         .await

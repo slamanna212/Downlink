@@ -53,7 +53,12 @@ entries). Numbers are from this VM; a real desktop should be at least as fast.
 
 Initial import of the 20k-channel playlist and 672k-programme guide: 58 s.
 
-### Core-side findings
+### Core-side fixes (after the findings below)
+- Programme search: FTS now yields only rowids (limit applied inside FTS, no bm25 over every match), then a primary-key probe, the time/visibility filter and a start-time order. `search_bench::programme_search_p95_under_30ms_on_672k_programmes` (release, 20k channels x 34 programmes, every keystroke of eight queries): p50 9.7 ms, p95 24.2 ms (was p95 188 ms).
+- `get_guide`: one `channel_id IN (json_each(...))` range query for the whole page.
+- First import: `task://progress` per channel page (`channels`, done = fetched, total = server count or 0) and per XMLTV batch (`guide`, done = programmes written, total 0); `catalog://updated` fires as soon as the channel list is committed, before the guide.
+
+### Core-side findings (original, kept for the record)
 - Unified `search` programme leg (FTS5 over 672k programmes) is the one budget miss: p95 188 ms. Candidates: a prefix-only query for short inputs, a lower per-keystroke limit, or a cap on the FTS candidate set before the join with visible channels.
 - `get_guide` scroll chunks p95 43 ms are fine, but they query per channel (`epg::window` loops over channel ids); one query with `channel_id IN (...)` would cut it.
 - First import is a single 58 s step with no incremental visibility; chunked commits would let the list appear earlier.

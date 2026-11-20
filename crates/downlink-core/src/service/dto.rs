@@ -34,6 +34,19 @@ pub struct SourceDto {
     pub last_sync_at: Option<i64>,
     /// Longest catch-up window across the source's channels, in days (0 = none).
     pub archive_days: i64,
+    /// Whether live playback goes through the server's HLS output (user opt-in).
+    pub hls_transport: bool,
+    /// Whether this source can offer that option (Dispatcharr only); the UI shows the toggle on this,
+    /// never on `kind`.
+    pub supports_hls_transport: bool,
+}
+
+/// Arguments of `set_source_options`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSourceOptionsArgs {
+    pub source_id: i64,
+    pub hls_transport: bool,
 }
 
 impl SourceDto {
@@ -59,6 +72,8 @@ impl SourceDto {
             server_version: r.server_version.clone(),
             last_sync_at: r.last_sync_at,
             archive_days,
+            hls_transport: r.hls_transport,
+            supports_hls_transport: r.kind == "dispatcharr",
         }
     }
 }

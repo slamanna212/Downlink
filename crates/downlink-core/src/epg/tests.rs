@@ -104,6 +104,62 @@ async fn window_overlap_and_order() {
     );
 }
 
+#[tokio::test]
+async fn window_for_many_channels_is_one_query_in_the_callers_channel_order() {
+    let (store, src, c1) = seeded().await;
+    let g = store.sync_groups(src, &[]).await.unwrap();
+    store
+        .sync_channels(
+            src,
+            &[
+                ChannelUpsert {
+                    ext_id: "1".into(),
+                    name: "One".into(),
+                    ..Default::default()
+                },
+                ChannelUpsert {
+                    ext_id: "2".into(),
+                    name: "Two".into(),
+                    ..Default::default()
+                },
+            ],
+            &g,
+        )
+        .await
+        .unwrap();
+    let c2: i64 = sqlx::query_scalar("SELECT id FROM channel WHERE source_id = ? AND ext_id = '2'")
+        .bind(src)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    store
+        .upsert_programmes(&[
+            p(c1, 100, 200, "one-b"),
+            p(c1, 0, 100, "one-a"),
+            p(c2, 0, 100, "two-a"),
+        ])
+        .await
+        .unwrap();
+    let w = TimeWindow {
+        start_utc: 0,
+        end_utc: 500,
+    };
+    let titles = |rows: Vec<ProgrammeRow>| {
+        rows.into_iter()
+            .map(|r| r.title.unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        titles(window(&store, &[c2, c1], w).await.unwrap()),
+        ["two-a", "one-a", "one-b"]
+    );
+    assert_eq!(
+        titles(window(&store, &[c1, c2], w).await.unwrap()),
+        ["one-a", "one-b", "two-a"]
+    );
+    assert!(window(&store, &[], w).await.unwrap().is_empty());
+}
+
 #[test]
 fn windows_and_retention() {
     let w = visible_window(10_000);

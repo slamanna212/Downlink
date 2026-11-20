@@ -109,6 +109,44 @@ async fn added() -> (MockServer, Env, i64) {
     (server, e, s.id)
 }
 
+/// First import: channel fetch reports progress per page, and the channel list is announced
+/// (and committed) before the guide phase starts.
+#[tokio::test]
+async fn first_import_reports_channel_progress_and_shows_channels_before_the_guide() {
+    use downlink_core::service::Event;
+    let server = MockServer::start().await;
+    mount_server(&server).await;
+    let e = env().await;
+    let mut rx = e.svc.subscribe();
+    e.svc.add_source(input(&server)).await.unwrap();
+    let mut events = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        events.push(ev);
+    }
+    let pos = |pred: &dyn Fn(&Event) -> bool| events.iter().position(pred);
+    let channel_pages: Vec<usize> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::TaskProgress(p) if p.phase == "channels" && p.done > 0 => Some(p.done),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        channel_pages.len() >= 2,
+        "one report per page: {channel_pages:?}"
+    );
+    assert!(
+        channel_pages.windows(2).all(|w| w[0] < w[1]),
+        "{channel_pages:?}"
+    );
+    let first_catalog = pos(&|e| matches!(e, Event::CatalogUpdated(_))).unwrap();
+    let guide_start = pos(&|e| matches!(e, Event::TaskProgress(p) if p.phase == "guide")).unwrap();
+    assert!(
+        first_catalog < guide_start,
+        "channels are announced before the guide phase begins"
+    );
+}
+
 #[tokio::test]
 async fn add_source_persists_reference_not_secret_and_emits_events() {
     let server = MockServer::start().await;
@@ -403,6 +441,226 @@ async fn play_channel_proxy_redirect_and_recents() {
         .filter(|r| r.url.path().starts_with("/proxy/"))
         .count();
     assert_eq!(n, 1);
+}
+
+fn hls_redirect(token: &str) -> ResponseTemplate {
+    ResponseTemplate::new(302)
+        .insert_header(
+            "Location",
+            format!("/proxy/hls/{token}/index.m3u8").as_str(),
+        )
+        .insert_header("X-Dispatcharr-Session-Token", token)
+}
+
+#[tokio::test]
+async fn hls_transport_is_opt_in_minted_at_play_tracked_and_released() {
+    use downlink_core::service::SetSourceOptionsArgs;
+    let (server, e, sid) = added().await;
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    let dto = &e.svc.list_sources().await.unwrap()[0];
+    assert!(dto.supports_hls_transport && !dto.hls_transport);
+
+    // Off by default: the plain proxy plan, no mint request.
+    let plan = e.svc.play_channel(chans[0].id).await.unwrap();
+    assert!(plan.url.ends_with(&format!("/proxy/ts/stream/{UUID1}")));
+    assert!(
+        !server.received_requests().await.unwrap().iter().any(|r| r
+            .url
+            .query()
+            .unwrap_or("")
+            .contains("output_format")),
+        "nothing is minted unless the user opted in"
+    );
+
+    let dto = e
+        .svc
+        .set_source_options(SetSourceOptionsArgs {
+            source_id: sid,
+            hls_transport: true,
+        })
+        .await
+        .unwrap();
+    assert!(dto.hls_transport);
+
+    Mock::given(method("GET"))
+        .and(path(format!("/proxy/ts/stream/{UUID1}")))
+        .and(query_param("output_format", "hls"))
+        .and(header("X-API-Key", KEY))
+        .respond_with(hls_redirect("TokenOne_abcdefghijklmnopqrstu"))
+        .up_to_n_times(1)
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/proxy/ts/stream/{UUID1}")))
+        .and(query_param("output_format", "hls"))
+        .respond_with(hls_redirect("TokenTwo_abcdefghijklmnopqrstu"))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(
+            "/api/proxy/hls/sessions/TokenOne_abcdefghijklmnopqrstu/",
+        ))
+        .and(header("X-API-Key", KEY))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(
+            "/api/proxy/hls/sessions/TokenTwo_abcdefghijklmnopqrstu/",
+        ))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let plan = e.svc.play_channel(chans[0].id).await.unwrap();
+    assert_eq!(
+        plan.url,
+        format!(
+            "{}/proxy/hls/TokenOne_abcdefghijklmnopqrstu/index.m3u8",
+            server.uri()
+        )
+    );
+    assert!(
+        plan.headers.is_empty(),
+        "the token in the path is the credential"
+    );
+    assert_eq!(plan.surface, downlink_core::source::Surface::Hls);
+    assert_eq!(plan.profile, downlink_core::source::PlayProfile::Live);
+    let open = e.svc.store().list_open_sessions().await.unwrap();
+    assert_eq!(
+        (open.len(), open[0].kind.as_str()),
+        (1, "hls"),
+        "persisted before playback (crash cleanup)"
+    );
+    let shown = serde_json::to_string(&plan.redacted()).unwrap();
+    assert!(!shown.contains("TokenOne"), "{shown}");
+
+    // 410 on playback: re-mint once; the ended session is released; a second time is refused.
+    let plan2 = e.svc.remint_hls(chans[0].id).await.unwrap();
+    assert!(plan2.url.contains("TokenTwo_"));
+    assert_eq!(e.svc.store().list_open_sessions().await.unwrap().len(), 1);
+    assert!(e.svc.remint_hls(chans[0].id).await.is_err());
+
+    // Navigate away: the session is deleted and forgotten.
+    e.svc.stop_live_hls().await;
+    assert!(e.svc.store().list_open_sessions().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn hls_session_is_released_on_zap_and_on_quit_and_by_crash_cleanup() {
+    use downlink_core::service::SetSourceOptionsArgs;
+    let (server, e, sid) = added().await;
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    e.svc
+        .set_source_options(SetSourceOptionsArgs {
+            source_id: sid,
+            hls_transport: true,
+        })
+        .await
+        .unwrap();
+    Mock::given(method("GET"))
+        .and(path(format!("/proxy/ts/stream/{UUID1}")))
+        .and(query_param("output_format", "hls"))
+        .respond_with(hls_redirect("ZapToken_abcdefghijklmnopqrstu"))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(
+            "/api/proxy/hls/sessions/ZapToken_abcdefghijklmnopqrstu/",
+        ))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(2)
+        .mount(&server)
+        .await;
+    // A Redirect-profile channel keeps its normal path even with the option on.
+    Mock::given(method("GET"))
+        .and(path(format!("/proxy/ts/stream/{UUID2}")))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("Location", "http://provider.test/live/u/p/2.ts"),
+        )
+        .mount(&server)
+        .await;
+
+    e.svc.play_channel(chans[0].id).await.unwrap();
+    assert_eq!(e.svc.store().list_open_sessions().await.unwrap().len(), 1);
+    // Zap to the redirect channel: first DELETE.
+    let plan = e.svc.play_channel(chans[1].id).await.unwrap();
+    assert_eq!(plan.url, "http://provider.test/live/u/p/2.ts");
+    assert!(e.svc.store().list_open_sessions().await.unwrap().is_empty());
+
+    // Quit (sleep): second DELETE.
+    e.svc.play_channel(chans[0].id).await.unwrap();
+    let r = e.svc.stop_all_sessions().await.unwrap();
+    assert_eq!(r.stopped, 1);
+    assert!(e.svc.store().list_open_sessions().await.unwrap().is_empty());
+
+    // A crashed run left a token behind: startup cleanup deletes it (404 = already gone is fine).
+    e.svc
+        .store()
+        .add_open_session(sid, "hls", "Crashed_abcdefghijklmnopqrstu")
+        .await
+        .unwrap();
+    Mock::given(method("DELETE"))
+        .and(path(
+            "/api/proxy/hls/sessions/Crashed_abcdefghijklmnopqrstu/",
+        ))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let r = e.svc.startup_cleanup().await.unwrap();
+    assert_eq!(r.stopped, 1);
+}
+
+#[tokio::test]
+async fn only_dispatcharr_sources_accept_the_hls_option() {
+    use downlink_core::service::SetSourceOptionsArgs;
+    let (_s, e, _) = added().await;
+    let row = e
+        .svc
+        .store()
+        .insert_source(&downlink_core::store::NewSource {
+            kind: "m3u".into(),
+            name: "P".into(),
+            base_url: Some("file:///x.m3u".into()),
+            secret_ref: None,
+            username: None,
+            tls_insecure: false,
+            created_at: 1,
+        })
+        .await
+        .unwrap();
+    let err = e
+        .svc
+        .set_source_options(SetSourceOptionsArgs {
+            source_id: row.id,
+            hls_transport: true,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.code, downlink_core::ErrorCode::Local);
+    let m3u_dto = e
+        .svc
+        .list_sources()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|s| s.id == row.id)
+        .unwrap();
+    assert!(!m3u_dto.supports_hls_transport);
 }
 
 #[tokio::test]

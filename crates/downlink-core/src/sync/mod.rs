@@ -4,7 +4,7 @@
 use crate::catalog::{self, DropReason};
 use crate::error::Result;
 use crate::normalise;
-use crate::source::{AccountInfo, Source, StreamMode, UserLevel, all_channels};
+use crate::source::{AccountInfo, Source, StreamMode, UserLevel};
 use crate::store::{SourceUpdate, Store};
 
 pub fn now_utc() -> i64 {
@@ -52,7 +52,18 @@ pub async fn sync_channels(
     source_id: i64,
     account_level: Option<UserLevel>,
 ) -> Result<SyncCounts> {
-    match run(src, store, source_id, account_level).await {
+    sync_channels_with(src, store, source_id, account_level, &|_, _| {}).await
+}
+
+/// [`sync_channels`] reporting `(channels fetched, total if known)` after each page.
+pub async fn sync_channels_with(
+    src: &dyn Source,
+    store: &Store,
+    source_id: i64,
+    account_level: Option<UserLevel>,
+    on_page: &(dyn Fn(usize, Option<u64>) + Sync),
+) -> Result<SyncCounts> {
+    match run(src, store, source_id, account_level, on_page).await {
         Ok(c) => {
             let now = now_utc();
             store.set_sync_ok(source_id, "channels", now).await?;
@@ -73,9 +84,10 @@ async fn run(
     store: &Store,
     source_id: i64,
     account_level: Option<UserLevel>,
+    on_page: &(dyn Fn(usize, Option<u64>) + Sync),
 ) -> Result<SyncCounts> {
     let groups = src.groups().await?;
-    let (channels, _count) = all_channels(src, 500).await?;
+    let (channels, _count) = crate::source::all_channels_with(src, 500, on_page).await?;
     // Effective stream profile (PLAN §3.5): metadata only. If unavailable (e.g. a low-privilege
     // key), keep the last stored flag rather than guessing.
     // Stream profiles are a Dispatcharr concept; other sources never redirect-resolve.

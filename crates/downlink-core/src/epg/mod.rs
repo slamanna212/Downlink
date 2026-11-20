@@ -67,26 +67,35 @@ pub async fn now_next_many(
     Ok(out)
 }
 
-/// Programmes overlapping `[start, end)` for the given channels, ordered.
+/// Programmes overlapping `[start, end)` for the given channels: one range query on the
+/// `(channel_id, start_utc)` key for the whole set, returned in the order the channels were given,
+/// then by start time.
 pub async fn window(
     store: &Store,
     channel_ids: &[i64],
     w: TimeWindow,
 ) -> Result<Vec<ProgrammeRow>> {
-    let mut out = Vec::new();
-    for &id in channel_ids {
-        let mut rows: Vec<ProgrammeRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {PCOLS} FROM programme WHERE channel_id = ? AND start_utc < ? AND end_utc > ?
-             ORDER BY start_utc"
-        )))
-        .bind(id)
-        .bind(w.end_utc)
-        .bind(w.start_utc)
-        .fetch_all(store.pool())
-        .await?;
-        out.append(&mut rows);
+    if channel_ids.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(out)
+    let ids_json = serde_json::to_string(channel_ids)?;
+    let mut rows: Vec<ProgrammeRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT {PCOLS} FROM programme
+         WHERE channel_id IN (SELECT value FROM json_each(?1)) AND start_utc < ?2 AND end_utc > ?3
+         ORDER BY channel_id, start_utc"
+    )))
+    .bind(ids_json)
+    .bind(w.end_utc)
+    .bind(w.start_utc)
+    .fetch_all(store.pool())
+    .await?;
+    // Caller order (e.g. channel number), not id order. Stable, so start order is kept per channel.
+    let mut pos: std::collections::HashMap<i64, usize> = std::collections::HashMap::new();
+    for (i, id) in channel_ids.iter().enumerate() {
+        pos.entry(*id).or_insert(i);
+    }
+    rows.sort_by_key(|r| pos.get(&r.channel_id).copied().unwrap_or(usize::MAX));
+    Ok(rows)
 }
 
 fn to_row(channel_id: i64, p: &Programme) -> ProgrammeRow {
