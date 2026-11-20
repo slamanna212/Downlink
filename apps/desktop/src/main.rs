@@ -1,6 +1,7 @@
 //! Downlink desktop shell: Tauri 2 commands over the core `Service`, the libmpv `Player`, the
 //! native video surface under the transparent webview, logging, updates and the `dlimg://` protocol.
 
+mod bundle;
 mod commands;
 mod dto;
 #[cfg(feature = "e2e")]
@@ -232,6 +233,7 @@ macro_rules! handlers {
             commands::settings::set_settings,
             commands::diagnostics::get_diagnostics,
             commands::diagnostics::set_debug_logging,
+            commands::diagnostics::export_diagnostics,
             commands::updates::get_update_status,
             commands::updates::set_update_channel,
             commands::updates::check_for_updates,

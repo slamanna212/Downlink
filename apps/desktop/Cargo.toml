@@ -24,6 +24,7 @@ downlink-core = { path = "../../crates/downlink-core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-updater = "2"
 url = "2"
+zip = { version = "9", default-features = false, features = ["deflate"] }
 tokio = { version = "1", features = ["time", "sync", "rt"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
