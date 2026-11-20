@@ -167,9 +167,8 @@ pub async fn probe_redirect(
     headers: &[(String, SecretString)],
     insecure_tls: bool,
 ) -> Result<RedirectOutcome> {
-    let client = reqwest::Client::builder()
+    let client = crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
         .redirect(reqwest::redirect::Policy::none())
-        .danger_accept_invalid_certs(insecure_tls)
         .timeout(Duration::from_secs(15))
         .build()?;
     let mut map = HeaderMap::new();

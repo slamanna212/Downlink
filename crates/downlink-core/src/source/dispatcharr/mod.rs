@@ -206,9 +206,8 @@ impl DispatcharrClient {
         opts: ClientOptions,
     ) -> Result<Self> {
         let base = normalise_base_url(base_url)?;
-        let http = reqwest::Client::builder()
+        let http = crate::tls::apply(reqwest::Client::builder(), opts.insecure_tls)?
             .timeout(opts.timeout)
-            .danger_accept_invalid_certs(opts.insecure_tls)
             .user_agent(concat!("Downlink/", env!("CARGO_PKG_VERSION")))
             .build()?;
         let mut secrets = RedactionSet::new();

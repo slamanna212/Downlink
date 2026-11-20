@@ -435,6 +435,54 @@ async fn catchup_through_the_service_tracks_and_cleans_up() {
     assert!(e.svc.play_catchup("garbage").await.is_err());
 }
 
+/// PLAN M4: resume lands within 2 s of the saved position (catch-up, from the position reports).
+#[tokio::test]
+async fn catchup_resume_position_is_within_two_seconds_of_the_last_report() {
+    let (server, e, sid) = added().await;
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    let one = chans[0].id;
+    Mock::given(method("POST"))
+        .and(path("/api/catchup/sessions/"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(
+            json!({"session_id": "rs", "playback_url": "/proxy/catchup/x?session_id=rs"}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/catchup/sessions/rs/position/"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    let play = e.svc.play_catchup(&format!("{one}:{START}")).await.unwrap();
+    let mut rep = downlink_core::catchup::PositionReporter::new(play.session.clone());
+    let saved_secs = 1_234u64;
+    e.svc
+        .report_catchup_position(&play, &mut rep, 0, saved_secs, true)
+        .await
+        .unwrap();
+    let ch = e.svc.store().channel(one).await.unwrap().unwrap();
+    let row = e
+        .svc
+        .store()
+        .resume(
+            sid,
+            "catchup",
+            &downlink_core::catchup::resume_key(&ch.ext_id, play.start_utc),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        (row.position_ms - (saved_secs as i64) * 1000).abs() <= 2_000,
+        "saved {} ms",
+        row.position_ms
+    );
+}
+
 #[tokio::test]
 async fn settings_roundtrip_and_clamp() {
     let e = env().await;

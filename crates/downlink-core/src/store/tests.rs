@@ -85,6 +85,46 @@ async fn newer_database_is_refused() {
     let err = Store::open(&path).await.unwrap_err();
     assert!(err.blocking, "{err}");
     assert_eq!(err.code, crate::ErrorCode::Local);
+    assert_eq!(
+        err.message,
+        "This library was created by a newer version of Downlink."
+    );
+    // Nothing was backed up or migrated on the way.
+    assert!(!dir.path().join("d.sqlite.bak1").exists());
+}
+
+#[tokio::test]
+async fn archiving_a_newer_database_lets_a_fresh_one_be_created() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("downlink.sqlite");
+    let s = Store::open(&path).await.unwrap();
+    sqlx::query(
+        "INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+         VALUES (9999, 'future', 1, x'00', 0)",
+    )
+    .execute(s.pool())
+    .await
+    .unwrap();
+    s.close().await;
+    assert!(Store::open(&path).await.is_err());
+    std::fs::write(dir.path().join("downlink.sqlite-wal"), b"w").unwrap();
+    let moved = crate::service::Service::archive_newer_database(dir.path()).unwrap();
+    let name = moved.file_name().unwrap().to_str().unwrap().to_owned();
+    assert!(
+        name.starts_with("downlink.sqlite.newer-") && name.ends_with(".bak"),
+        "{name}"
+    );
+    assert!(moved.exists());
+    assert!(!path.exists());
+    assert!(dir.path().read_dir().unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_str()
+            .unwrap()
+            .ends_with(".bak-wal")
+    }));
+    // A fresh library opens.
+    Store::open(&path).await.unwrap().close().await;
 }
 
 #[tokio::test]

@@ -133,8 +133,7 @@ impl XtreamClient {
     ) -> Result<Self> {
         Ok(Self {
             id,
-            http: reqwest::Client::builder()
-                .danger_accept_invalid_certs(insecure_tls)
+            http: crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
                 .timeout(Duration::from_secs(60))
                 .connect_timeout(Duration::from_secs(20))
                 .user_agent(concat!("Downlink/", env!("CARGO_PKG_VERSION")))

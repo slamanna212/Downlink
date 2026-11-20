@@ -29,6 +29,8 @@ pub struct SourceRow {
     pub server_tz: Option<String>,
     pub caps: i64,
     pub tls_insecure: bool,
+    /// SHA-256 of the pinned leaf certificate (hex), for sources that allow self-signed.
+    pub tls_pin: Option<String>,
     pub last_sync_at: Option<i64>,
     pub created_at: i64,
 }
@@ -86,6 +88,15 @@ impl Store {
         .bind(id)
         .execute(self.pool())
         .await?;
+        Ok(())
+    }
+
+    pub async fn set_source_tls_pin(&self, id: i64, pin: Option<&str>) -> Result<()> {
+        sqlx::query("UPDATE source SET tls_pin = ? WHERE id = ?")
+            .bind(pin)
+            .bind(id)
+            .execute(self.pool())
+            .await?;
         Ok(())
     }
 

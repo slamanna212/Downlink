@@ -106,6 +106,13 @@ impl Service {
         ))
     }
 
+    /// After `new` failed with "created by a newer version": move that library aside (kept as
+    /// `downlink.sqlite.newer-<epoch>.bak`, with its WAL files) so the next `new` starts fresh.
+    /// Static because there is no open Service in that state. Returns the archived file's path.
+    pub fn archive_newer_database(data_dir: &std::path::Path) -> Result<PathBuf> {
+        crate::store::archive_database(&data_dir.join("downlink.sqlite"), now_utc())
+    }
+
     /// For tests and the CLI: an already-open store.
     pub fn with_store(
         store: Store,
@@ -211,6 +218,7 @@ impl Service {
             return Ok(c.clone());
         }
         let row = self.store.source(source_id).await?;
+        self.ensure_pin(&row).await?;
         let kind =
             SourceKind::parse(&row.kind).ok_or_else(|| AppError::local("Unknown source type."))?;
         let c: Arc<dyn SourceClient> = match kind {
@@ -353,6 +361,75 @@ impl Service {
         M3uSource::new(SourceId(id), location, xmltv, input.allow_self_signed)
     }
 
+    /// PLAN §2.6: with "allow self-signed" on an https address, learn the certificate the server
+    /// presents *now* (at add/test time), register it as the pin for the host and return its
+    /// fingerprint. Plain-http and toggle-off inputs have nothing to pin.
+    async fn pin_for_input(input: &AddSourceInput) -> Result<Option<String>> {
+        if !input.allow_self_signed {
+            return Ok(None);
+        }
+        let Some(host) = crate::tls::https_host(&input.url) else {
+            return Ok(None);
+        };
+        let fp = crate::tls::fetch_fingerprint(&input.url).await?;
+        crate::tls::set_pin(&host, &fp);
+        Ok(Some(fp))
+    }
+
+    /// The address whose certificate a stored source is pinned to.
+    fn pin_url(&self, row: &SourceRow) -> Option<String> {
+        if row.kind == "m3u" && row.secret_ref.is_some() {
+            return self.optional_secret(row, SecretKind::PlaylistUrl);
+        }
+        row.base_url.clone()
+    }
+
+    /// Register a stored source's pin before it is used. A row that allows self-signed but was
+    /// never pinned (older data) is pinned to what the server presents now, once.
+    async fn ensure_pin(&self, row: &SourceRow) -> Result<()> {
+        if !row.tls_insecure {
+            return Ok(());
+        }
+        let Some(url) = self.pin_url(row) else {
+            return Ok(());
+        };
+        let Some(host) = crate::tls::https_host(&url) else {
+            return Ok(());
+        };
+        match &row.tls_pin {
+            Some(p) => crate::tls::set_pin(&host, p),
+            None => {
+                let fp = crate::tls::fetch_fingerprint(&url).await?;
+                self.store.set_source_tls_pin(row.id, Some(&fp)).await?;
+                crate::tls::set_pin(&host, &fp);
+            }
+        }
+        Ok(())
+    }
+
+    /// The user confirmed that the server's new certificate is fine (after "The server's
+    /// certificate changed."): learn it, store it, and drop the cached connection so the next call
+    /// uses it. Never called implicitly.
+    pub async fn trust_new_certificate(&self, source_id: i64) -> Result<()> {
+        let row = self.store.source(source_id).await?;
+        if !row.tls_insecure {
+            return Err(AppError::local(
+                "This source does not allow a self-signed certificate.",
+            ));
+        }
+        let url = self
+            .pin_url(&row)
+            .ok_or_else(|| AppError::local("This source has no address."))?;
+        let host = crate::tls::https_host(&url)
+            .ok_or_else(|| AppError::local("This source does not use https."))?;
+        let fp = crate::tls::fetch_fingerprint(&url).await?;
+        self.store.set_source_tls_pin(source_id, Some(&fp)).await?;
+        crate::tls::set_pin(&host, &fp);
+        self.clients.write().await.remove(&source_id);
+        self.dispatcharr.write().await.remove(&source_id);
+        Ok(())
+    }
+
     fn check_kind(input: &AddSourceInput) -> Result<()> {
         SourceKind::parse(&input.kind)
             .map(|_| ())
@@ -373,6 +450,7 @@ impl Service {
     /// Connect and count what is there, without saving anything.
     pub async fn test_source(&self, input: AddSourceInput) -> Result<TestSourceResult> {
         Self::check_kind(&input)?;
+        Self::pin_for_input(&input).await?;
         let c = Self::probe_client(&input, 0)?;
         let info = c.connect().await?;
         let groups = c.groups().await?;
@@ -397,7 +475,7 @@ impl Service {
             Err(_) => 0,
         };
         Ok(TestSourceResult {
-            channels: channels.iter().filter(|c| !c.hidden).count() as i64,
+            channels: crate::catalog::visible_count(&channels),
             groups: groups.len() as i64,
             programmes: programmes as i64,
             server_version: info.server_version,
@@ -413,6 +491,7 @@ impl Service {
             return Err(AppError::local("Give the source a name."));
         }
         let kind = SourceKind::parse(&input.kind).unwrap_or(SourceKind::Dispatcharr);
+        let pin = Self::pin_for_input(&input).await?;
         // Fail fast: nothing is persisted if the server, file or credentials are wrong.
         let m3u_probe = if kind == SourceKind::M3u {
             Some(Arc::new(Self::m3u_from_input(&input, 0)?))
@@ -492,6 +571,9 @@ impl Service {
                 created_at: now_utc(),
             })
             .await?;
+        if let Some(fp) = &pin {
+            self.store.set_source_tls_pin(row.id, Some(fp)).await?;
+        }
         let saved = async {
             let mut primary_ref = None;
             for (i, (k, v)) in secrets.iter().enumerate() {

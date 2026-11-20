@@ -71,8 +71,7 @@ pub struct HttpFetcher {
 impl HttpFetcher {
     pub fn new(insecure_tls: bool) -> Result<Self> {
         Ok(Self {
-            client: reqwest::Client::builder()
-                .danger_accept_invalid_certs(insecure_tls)
+            client: crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
                 .timeout(Duration::from_secs(300))
                 .connect_timeout(Duration::from_secs(20))
                 .user_agent(concat!("Downlink/", env!("CARGO_PKG_VERSION")))

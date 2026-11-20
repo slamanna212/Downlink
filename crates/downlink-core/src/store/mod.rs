@@ -44,6 +44,10 @@ impl Store {
             .max_connections(4)
             .connect_with(opts)
             .await?;
+        if let Err(e) = refuse_newer(&pool).await {
+            pool.close().await;
+            return Err(e);
+        }
         backup_before_migrate(&pool, path.as_ref()).await?;
         Self::from_pool(pool).await
     }
@@ -117,6 +121,53 @@ impl Store {
         .await?;
         Ok(row)
     }
+}
+
+/// PLAN §7.6: a database whose applied migrations include one this build does not know was written
+/// by a newer app. Checked before anything is migrated or backed up.
+async fn refuse_newer(pool: &SqlitePool) -> Result<()> {
+    let has_table: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_sqlx_migrations'",
+    )
+    .fetch_optional(pool)
+    .await?;
+    if has_table.is_none() {
+        return Ok(());
+    }
+    let applied: Vec<i64> = sqlx::query_scalar("SELECT version FROM _sqlx_migrations")
+        .fetch_all(pool)
+        .await?;
+    let known: std::collections::HashSet<i64> = sqlx::migrate!("./migrations")
+        .iter()
+        .map(|m| m.version)
+        .collect();
+    if applied.iter().any(|v| !known.contains(v)) {
+        let mut e = crate::AppError::local(crate::error::NEWER_LIBRARY);
+        e.blocking = true;
+        return Err(e);
+    }
+    Ok(())
+}
+
+/// Move a database (and its `-wal` / `-shm` files) aside as `<name>.newer-<epoch>.bak` so a fresh
+/// one can be created. Returns the new path of the main file. Nothing is deleted.
+pub fn archive_database(db: &Path, epoch: i64) -> Result<std::path::PathBuf> {
+    let with = |suffix: &str| {
+        let mut n = db.as_os_str().to_owned();
+        n.push(suffix);
+        std::path::PathBuf::from(n)
+    };
+    let dest = with(&format!(".newer-{epoch}.bak"));
+    if db.exists() {
+        std::fs::rename(db, &dest)?;
+    }
+    for ext in ["-wal", "-shm"] {
+        let from = with(ext);
+        if from.exists() {
+            std::fs::rename(&from, with(&format!(".newer-{epoch}.bak{ext}")))?;
+        }
+    }
+    Ok(dest)
 }
 
 /// Number of backups kept next to the database (`<db>.bak1` newest, `<db>.bak2` older).

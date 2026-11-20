@@ -42,6 +42,14 @@ pub fn sync_filter(c: &SourceChannel, account_level: Option<UserLevel>) -> Optio
     None
 }
 
+/// How many of a source's channels are shown (those not hidden by the server).
+pub fn visible_count(channels: &[SourceChannel]) -> i64 {
+    channels
+        .iter()
+        .filter(|c| sync_filter(c, None).is_none())
+        .count() as i64
+}
+
 /// Heuristic classification for sources that do not flag adult/radio themselves (M3U, Xtream
 /// categories). Classification lives here with the filtering; sync calls it. Only sets flags,
 /// never clears ones the source provided.

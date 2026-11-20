@@ -1128,3 +1128,134 @@ async fn recording_rows_link_to_their_rules_and_play_via_the_captured_urls() {
     assert!(play.plan.url.ends_with("/api/channels/recordings/29/file/"));
     assert_eq!(play.plan.headers[0].0, "X-API-Key");
 }
+
+/// PLAN M4: "resume lands within 2 s of the saved position" for movies, episodes and recordings.
+/// The plan carries whole seconds; a saved position of any millisecond value comes back within 2 s.
+#[tokio::test]
+async fn vod_and_recording_resume_is_within_two_seconds_of_the_saved_position() {
+    let (server, svc, _id, _d) = dispatcharr().await;
+    let movies = svc.list_movies(VodListArgs::default()).await.unwrap();
+    let m = movies[0].id;
+    for saved in [61_i64, 1_349, 3_601] {
+        svc.report_vod_position(m, saved, Some(5_400))
+            .await
+            .unwrap();
+        let got = svc
+            .play_vod(PlayVodArgs {
+                kind: "movie".into(),
+                id: m,
+                resume: true,
+            })
+            .await
+            .unwrap()
+            .resume_secs
+            .unwrap();
+        assert!(
+            (got - saved).abs() <= 2,
+            "movie: saved {saved}, resume {got}"
+        );
+    }
+    let series = svc.list_series(VodListArgs::default()).await.unwrap();
+    let e = svc.get_series(series[0].id).await.unwrap().seasons[1].episodes[0].id;
+    svc.report_vod_position(e, 777, Some(2_700)).await.unwrap();
+    let got = svc
+        .play_vod(PlayVodArgs {
+            kind: "episode".into(),
+            id: e,
+            resume: true,
+        })
+        .await
+        .unwrap()
+        .resume_secs
+        .unwrap();
+    assert!((got - 777).abs() <= 2, "episode resume {got}");
+
+    // A completed recording.
+    let chans = svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    let c = svc
+        .store()
+        .channel(chans[0].id)
+        .await
+        .unwrap()
+        .unwrap()
+        .ext_id
+        .parse::<i64>()
+        .unwrap();
+    server.reset().await;
+    let now = downlink_core::sync::now_utc();
+    let iso = |t: i64| {
+        chrono::DateTime::from_timestamp(t, 0)
+            .unwrap()
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    };
+    get(&server, "/api/channels/recordings/", json!([
+        {"id": 71, "start_time": iso(now - 9000), "end_time": iso(now - 5400), "channel": c, "custom_properties": {"status": "completed", "program": {"title": "Done"}}},
+    ])).await;
+    get(&server, "/api/channels/recurring-rules/", json!([])).await;
+    get(&server, "/api/channels/series-rules/", json!({"rules": []})).await;
+    let r = svc.list_recordings().await.unwrap();
+    let rid = r.completed[0].id;
+    svc.report_recording_position(rid, 1_501, None)
+        .await
+        .unwrap();
+    let got = svc.play_recording(rid).await.unwrap().resume_secs.unwrap();
+    assert!((got - 1_501).abs() <= 2, "recording resume {got}");
+}
+
+/// CLAUDE.md rule 4 for the M4 surfaces: browsing movies, series, recordings and rules (and the lazy
+/// `provider-info` control call) never touches a stream endpoint.
+#[tokio::test]
+async fn browsing_vod_and_dvr_makes_no_stream_requests() {
+    let (server, svc, _id, _d) = dispatcharr().await;
+    // Details are lazy: `provider-info` is a control endpoint and allowed.
+    get(
+        &server,
+        "/api/vod/movies/11/provider-info/",
+        json!({"description": "Plot", "genre": "Drama", "duration_secs": 5400}),
+    )
+    .await;
+    get(
+        &server,
+        "/api/vod/series/21/provider-info/",
+        json!({"description": "Plot"}),
+    )
+    .await;
+    let before = server.received_requests().await.unwrap().len();
+
+    svc.list_vod_categories(VodKindArg::Movie).await.unwrap();
+    let movies = svc.list_movies(VodListArgs::default()).await.unwrap();
+    for m in &movies {
+        let _ = svc.get_movie(m.id).await;
+    }
+    let series = svc.list_series(VodListArgs::default()).await.unwrap();
+    for s in &series {
+        let _ = svc.get_series(s.id).await;
+    }
+    svc.list_recordings().await.unwrap();
+    svc.list_recording_rules().await.unwrap();
+    svc.get_home().await.unwrap();
+
+    let reqs = server.received_requests().await.unwrap();
+    let streamish = |p: &str| {
+        ["/proxy/", "/live/", "/movie/", "/series/", "/timeshift/"]
+            .iter()
+            .any(|s| p.starts_with(s))
+            || (p.starts_with("/api/channels/recordings/")
+                && (p.contains("/hls/") || p.ends_with("/file/")))
+    };
+    let bad: Vec<_> = reqs[before..]
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .filter(|p| streamish(p))
+        .collect();
+    assert!(bad.is_empty(), "stream endpoints requested: {bad:?}");
+    assert!(
+        reqs[before..]
+            .iter()
+            .any(|r| r.url.path().contains("/api/vod/")),
+        "the browse calls did reach the server"
+    );
+}

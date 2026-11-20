@@ -232,3 +232,33 @@ fn provider_account_json_blobs_are_masked() {
         "{out}"
     );
 }
+
+/// URL shapes introduced with VOD/DVR: provider direct sources carried in VOD payloads, recording
+/// playlist/segment URLs with a token, HLS session tokens, and a rewritten (proxied) playlist URI.
+#[test]
+fn vod_and_dvr_url_shapes_redact() {
+    let shapes = [
+        // `direct_source` of a movie / episode, as providers publish it
+        "http://p.test:8080/movie/alice/hunter22/2001.mkv",
+        "http://p.test:8080/series/alice/hunter22/3001.mp4",
+        "http://p.test/movie/alice/hunter22/2001.mkv?token=hunter22",
+        // recording HLS segment with an access token
+        "https://d.test/api/channels/recordings/31/hls/seg_00000.ts?token=hunter22",
+        "https://d.test/api/channels/recordings/31/hls/seg_00000.ts?api_key=hunter22",
+        // live HLS session token in the path
+        "https://d.test/proxy/hls/hunter22/index.m3u8",
+        // provider URL carried in a redirect Location
+        "http://alice:hunter22@p.test/live/alice/hunter22/1.ts",
+    ];
+    for u in shapes {
+        let out = redact(u);
+        assert!(
+            !out.contains("hunter22") && !out.contains("alice"),
+            "{u} -> {out}"
+        );
+    }
+    let line = redact(
+        "#EXTINF:4.0,\nhttps://d.test/api/channels/recordings/31/hls/seg_00001.ts?token=hunter22\nhttp://p.test/movie/alice/hunter22/9.mkv",
+    );
+    assert!(!line.contains("hunter22"), "{line}");
+}

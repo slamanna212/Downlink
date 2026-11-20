@@ -65,8 +65,7 @@ pub async fn fetch_public(url: &str, insecure_tls: bool) -> Result<RawImage> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err(AppError::local("That image address is not supported."));
     }
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(insecure_tls)
+    let client = crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
         .timeout(std::time::Duration::from_secs(20))
         .build()?;
     let r = client.get(url).send().await?;

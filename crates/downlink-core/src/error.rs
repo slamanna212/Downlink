@@ -157,6 +157,9 @@ impl From<reqwest::Error> for AppError {
     fn from(e: reqwest::Error) -> Self {
         // Drop the URL first: it may carry credentials, and redaction is a second line of defence.
         let e = e.without_url();
+        if crate::tls::is_cert_changed(&e) {
+            return crate::tls::cert_changed_error();
+        }
         if let Some(status) = e.status() {
             return Self::from_status(status.as_u16(), None, "that resource");
         }
@@ -186,14 +189,15 @@ impl From<sqlx::Error> for AppError {
     }
 }
 
+/// Shown when the database holds migrations this build does not know.
+pub const NEWER_LIBRARY: &str = "This library was created by a newer version of Downlink.";
+
 impl From<sqlx::migrate::MigrateError> for AppError {
     fn from(e: sqlx::migrate::MigrateError) -> Self {
         match e {
             sqlx::migrate::MigrateError::VersionMissing(_)
             | sqlx::migrate::MigrateError::VersionTooNew(..) => {
-                let mut err = Self::local(
-                    "The local database was written by a newer version of Downlink and cannot be opened.",
-                );
+                let mut err = Self::local(NEWER_LIBRARY);
                 err.blocking = true;
                 err
             }
