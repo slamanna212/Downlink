@@ -120,7 +120,12 @@ impl AppError {
     }
 
     /// Attach the §4.9 detail fields (all optional).
-    pub fn with_detail(mut self, reason: &str, codec: Option<String>, crash_id: Option<String>) -> Self {
+    pub fn with_detail(
+        mut self,
+        reason: &str,
+        codec: Option<String>,
+        crash_id: Option<String>,
+    ) -> Self {
         self.reason = Some(reason.to_owned());
         self.codec = codec;
         self.crash_id = crash_id;
