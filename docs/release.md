@@ -30,7 +30,7 @@ itself (no Windows/macOS test legs).
 ## Cutting a release
 
 ```bash
-tools/release/bump-version.sh 0.8.0      # edits only the root package.json
+tools/release/bump-version.sh 0.8.0      # root package.json, synced into Cargo.toml/Cargo.lock/tauri.conf.json/ui
 git commit -am "chore: release v0.8.0"
 # merge to main and push: release.yml builds the v0.8.0 draft (about 20-30 min)
 ```
@@ -40,8 +40,8 @@ put the user-visible "What's new" first) and press Publish. Publishing runs `rel
 final text into `latest.json`. Fixing a typo later works the same way: edit the release.
 
 **The root `package.json` `version` is the single source of truth.** `tauri.conf.json`, the workspace
-`Cargo.toml` and `apps/ui/package.json` are overwritten at build time by `tools/release/set-version.mjs`; their
-committed values don't matter.
+`Cargo.toml` and `apps/ui/package.json` are synced from it by `bump-version.sh` (so local builds report the right
+version in the User-Agent and About) and overwritten again at build time by `tools/release/set-version.mjs`.
 
 ## Dev builds
 
