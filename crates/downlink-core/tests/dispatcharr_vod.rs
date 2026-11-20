@@ -123,8 +123,8 @@ async fn endpoint_movies_list_paging_category_search_and_tolerant_fields() {
     assert_eq!(m.rating.as_deref(), Some("7.4"));
     assert_eq!(
         m.poster.as_deref(),
-        Some(format!("{}/api/vod/movies/11/image", server.uri()).as_str()),
-        "authenticated image endpoint"
+        Some(format!("{}/api/vod/vodlogos/5/cache/", server.uri()).as_str()),
+        "the logo cache URL (same server)"
     );
     assert_eq!(m.backdrop.as_deref(), Some("http://img.test/nt-bd.jpg"));
     assert_eq!(
@@ -641,4 +641,176 @@ async fn reference_server_empty_rule_lists() {
         "pre-roll padding has started even though the programme has not"
     );
     assert_eq!(r[0].start_utc, now + 200);
+}
+
+// ---- provider credentials in the episodes payload (reference-server shape) ----------------------
+
+const FAKE_PASS: &str = "FAKEPROVIDERPASS-7731";
+const FAKE_USER: &str = "fakeprovideruser";
+
+#[tokio::test]
+async fn episodes_with_provider_account_blobs_never_expose_the_credentials() {
+    let server = MockServer::start().await;
+    get(
+        &server,
+        "/api/vod/series/21/episodes/",
+        fx("vod_episodes_reference_shape.json"),
+    )
+    .await;
+    let raw = serde_json::to_string(&fx("vod_episodes_reference_shape.json")).unwrap();
+    assert!(
+        raw.contains(FAKE_PASS),
+        "the fixture really carries the fake provider password"
+    );
+
+    // Capture everything logged while fetching (the core logs counts only).
+    let sink = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    #[derive(Clone)]
+    struct W(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for W {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let w = W(sink.clone());
+    let sub = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .with_writer(move || w.clone())
+        .finish();
+    let _g = tracing::subscriber::set_default(sub);
+
+    let eps = client(&server).series_episodes("21").await.unwrap();
+    assert_eq!(eps.len(), 3);
+    assert_eq!(eps[0].title, "Pilot");
+    assert_eq!(
+        (eps[0].season, eps[0].episode, eps[0].duration_secs),
+        (Some(1), Some(1), Some(2700))
+    );
+    assert_eq!(
+        eps[0].uuid.as_deref(),
+        Some("33333333-0000-4000-8000-000000000301")
+    );
+    assert_eq!(eps[0].rating.as_deref(), Some("7.5"));
+    assert_eq!(eps[0].parent_ext.as_deref(), Some("21"));
+    // Nothing from the provider blob survives into our types, not even through Debug.
+    let shown = format!("{eps:?}");
+    for secret in [FAKE_PASS, FAKE_USER, "provider.example.test"] {
+        assert!(
+            !shown.contains(secret),
+            "{secret} leaked into the parsed items: {shown}"
+        );
+    }
+    assert!(
+        eps.iter().all(|e| e.container.is_none()),
+        "provider container/direct_source are not read"
+    );
+    let logs = String::from_utf8(sink.lock().unwrap().clone()).unwrap();
+    assert!(
+        !logs.contains(FAKE_PASS) && !logs.contains(FAKE_USER),
+        "{logs}"
+    );
+}
+
+#[tokio::test]
+async fn a_broken_episodes_body_yields_an_error_without_any_body_text() {
+    let server = MockServer::start().await;
+    let full = serde_json::to_string(&fx("vod_episodes_reference_shape.json")).unwrap();
+    // Truncated mid-way inside a provider blob, and a body that is valid JSON of the wrong shape.
+    let cut = &full[..full.find("FAKEPROVIDERPASS").unwrap() + 8];
+    for body in [
+        cut.to_owned(),
+        format!("{{\"results\": \"{FAKE_PASS}\"}}"),
+        format!("[{{\"id\": {{\"password\": \"{FAKE_PASS}\"}}, \"providers\": [}}"),
+    ] {
+        server.reset().await;
+        Mock::given(method("GET"))
+            .and(path("/api/vod/series/21/episodes/"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+        let r = client(&server).series_episodes("21").await;
+        if let Err(e) = r {
+            let shown = format!("{e:?} {e}");
+            assert!(
+                !shown.contains(FAKE_PASS) && !shown.contains(FAKE_USER),
+                "{shown}"
+            );
+            assert_eq!(e.code, ErrorCode::Server);
+        }
+    }
+    // A 500 whose body quotes credentials: the error never includes the body.
+    server.reset().await;
+    Mock::given(method("GET"))
+        .respond_with(
+            ResponseTemplate::new(500).set_body_string(format!("boom {FAKE_USER}:{FAKE_PASS}")),
+        )
+        .mount(&server)
+        .await;
+    let e = client(&server).series_episodes("21").await.unwrap_err();
+    assert!(!format!("{e:?}").contains(FAKE_PASS));
+}
+
+#[tokio::test]
+async fn series_list_art_prefers_the_cache_url_then_the_external_url() {
+    let server = MockServer::start().await;
+    get(
+        &server,
+        "/api/vod/series/",
+        fx("vod_series_reference_shape.json"),
+    )
+    .await;
+    let page = client(&server)
+        .vod_list(
+            VodKind::Series,
+            &VodListQuery {
+                offset: 0,
+                limit: 50,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let a = &page.items[0];
+    assert_eq!(
+        a.poster.as_deref(),
+        Some(format!("{}/api/vod/vodlogos/6/cache/", server.uri()).as_str())
+    );
+    assert_eq!(
+        a.year,
+        Some(2022),
+        "year from custom_properties.releaseDate when `year` is null"
+    );
+    assert_eq!(
+        a.backdrop.as_deref(),
+        Some("http://img.example.test/fw-bd.jpg")
+    );
+    assert_eq!(
+        page.items[1].poster.as_deref(),
+        Some("http://img.example.test/ext.jpg"),
+        "empty cache_url falls back to the external logo URL"
+    );
+}
+
+#[tokio::test]
+async fn categories_are_a_bare_array_even_with_page_params() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/vod/categories/"))
+        .and(query_param("category_type", "series"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {"id": 2, "name": "Drama", "category_type": "series", "category_type_display": "Series",
+             "m3u_accounts": [{"category": 2, "m3u_account": 1, "enabled": true}]}
+        ])))
+        .mount(&server)
+        .await;
+    let cats = client(&server)
+        .vod_category_list(VodKind::Series)
+        .await
+        .unwrap();
+    assert_eq!(cats[0].name, "Drama");
 }

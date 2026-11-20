@@ -1,0 +1,50 @@
+{
+ "count": 2,
+ "next": null,
+ "previous": null,
+ "results": [
+  {
+   "id": 21,
+   "uuid": "22222222-0000-4000-8000-000000000021",
+   "name": "Fieldwork",
+   "description": "Synthetic.",
+   "year": null,
+   "rating": "8.1",
+   "genre": "Drama",
+   "episode_count": 3,
+   "logo": {
+    "id": 6,
+    "name": "Fieldwork",
+    "url": "http://img.example.test/fw.jpg",
+    "cache_url": "/api/vod/vodlogos/6/cache/"
+   },
+   "custom_properties": {
+    "cast": "A, B",
+    "releaseDate": "2022-03-04",
+    "backdrop_path": [
+     "http://img.example.test/fw-bd.jpg"
+    ],
+    "episode_run_time": "45",
+    "youtube_trailer": ""
+   },
+   "tmdb_id": null,
+   "imdb_id": null
+  },
+  {
+   "id": 22,
+   "uuid": "22222222-0000-4000-8000-000000000022",
+   "name": "External Art Only",
+   "year": 2020,
+   "rating": "6.0",
+   "genre": "Comedy",
+   "episode_count": 1,
+   "logo": {
+    "id": 7,
+    "name": "x",
+    "url": "http://img.example.test/ext.jpg",
+    "cache_url": ""
+   },
+   "custom_properties": {}
+  }
+ ]
+}

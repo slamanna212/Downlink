@@ -804,3 +804,128 @@ async fn xtream_vod_through_the_service() {
     // recordings are not an Xtream thing
     assert!(svc.list_recordings().await.unwrap().upcoming.is_empty());
 }
+
+// ---- the provider-credential blob never reaches SQLite -----------------------------------------
+
+#[tokio::test]
+async fn provider_credentials_in_the_episodes_payload_never_reach_sqlite() {
+    let (server, _svc, _id, _d) = dispatcharr().await;
+    server.reset().await;
+    // A file-backed Service so the raw database files can be scanned.
+    get(&server, "/api/core/version/", fx("version.json")).await;
+    get(&server, "/api/accounts/users/me/", fx("me.json")).await;
+    get(&server, "/api/core/settings/", fx("settings.json")).await;
+    get(
+        &server,
+        "/api/core/streamprofiles/",
+        fx("stream_profiles.json"),
+    )
+    .await;
+    get(&server, "/api/channels/groups/", fx("groups.json")).await;
+    get(&server, "/api/epg/grid/", json!({"data": []})).await;
+    Mock::given(method("GET"))
+        .and(path("/api/channels/channels/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+    get(
+        &server,
+        "/api/vod/categories/",
+        fx("vod_categories_full.json"),
+    )
+    .await;
+    get(
+        &server,
+        "/api/vod/movies/",
+        json!({"count": 0, "next": null, "results": []}),
+    )
+    .await;
+    get(
+        &server,
+        "/api/vod/series/",
+        fx("vod_series_reference_shape.json"),
+    )
+    .await;
+    get(
+        &server,
+        "/api/vod/series/21/",
+        fx("vod_series_reference_shape.json")["results"][0].clone(),
+    )
+    .await;
+    get(
+        &server,
+        "/api/vod/series/21/episodes/",
+        fx("vod_episodes_reference_shape.json"),
+    )
+    .await;
+    get(&server, "/api/channels/recordings/", json!([])).await;
+    get(&server, "/api/channels/recurring-rules/", json!([])).await;
+    get(&server, "/api/channels/series-rules/", json!({"rules": []})).await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/accounts/users/me/app-data/com.downlink.state.v1/",
+        ))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    Mock::given(method("PUT"))
+        .and(path(
+            "/api/accounts/users/me/app-data/com.downlink.state.v1/",
+        ))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let svc = Service::new(downlink_core::service::ServiceConfig {
+        data_dir: dir.path().to_path_buf(),
+        secrets: Arc::new(MemorySecretStore::new()),
+        app_version: "t".into(),
+    })
+    .await
+    .unwrap();
+    let input: AddSourceInput = serde_json::from_value(json!({"kind": "dispatcharr", "name": "S", "url": server.uri(), "apiKey": KEY, "allowSelfSigned": false})).unwrap();
+    svc.add_source(input).await.unwrap();
+    let series = svc.list_series(VodListArgs::default()).await.unwrap();
+    assert_eq!(series[0].title, "Fieldwork");
+    let d = svc.get_series(series[0].id).await.unwrap();
+    assert_eq!(d.seasons.iter().map(|s| s.episodes.len()).sum::<usize>(), 3);
+    let first = d.seasons[0].episodes[0].id;
+    let p = svc
+        .play_vod(PlayVodArgs {
+            kind: "episode".into(),
+            id: first,
+            resume: false,
+        })
+        .await
+        .unwrap();
+    assert!(
+        p.plan.url.contains("/proxy/vod/episode/33333333-"),
+        "played via the uuid, not the provider's direct source"
+    );
+    assert!(
+        !serde_json::to_string(&d)
+            .unwrap()
+            .contains("FAKEPROVIDERPASS")
+    );
+
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(svc.store().pool())
+        .await
+        .unwrap();
+    for e in std::fs::read_dir(dir.path()).unwrap() {
+        let p = e.unwrap().path();
+        if let Ok(bytes) = std::fs::read(&p) {
+            for secret in [
+                "FAKEPROVIDERPASS-7731",
+                "fakeprovideruser",
+                "provider.example.test",
+            ] {
+                assert!(
+                    !bytes.windows(secret.len()).any(|w| w == secret.as_bytes()),
+                    "{secret} found in {p:?}"
+                );
+            }
+        }
+    }
+}

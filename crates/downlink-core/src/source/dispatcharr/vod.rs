@@ -14,6 +14,54 @@ use crate::redact::RedactionSet;
 use crate::source::vod::*;
 use crate::source::{PlayPlan, PlayProfile, Surface};
 
+/// The only fields we read from an episode. Anything else (notably `providers[]`) is skipped by
+/// serde without being stored.
+#[derive(serde::Deserialize, Default)]
+struct EpisodeRow {
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    id: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    uuid: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    name: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    description: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    rating: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_i64")]
+    duration_secs: Option<i64>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_i64")]
+    season_number: Option<i64>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_i64")]
+    episode_number: Option<i64>,
+}
+
+#[derive(serde::Deserialize)]
+struct EpisodeEnvelope {
+    #[serde(default)]
+    results: Vec<EpisodeRow>,
+    #[serde(default)]
+    next: Option<String>,
+}
+
+impl EpisodeRow {
+    fn into_item(self, series_ext_id: &str) -> Option<VodItem> {
+        Some(VodItem {
+            kind: Some(VodKind::Episode),
+            ext_id: self.id?,
+            uuid: self.uuid,
+            parent_ext: Some(series_ext_id.to_owned()),
+            title: self.name.unwrap_or_default(),
+            rating: self.rating,
+            plot: self.description,
+            season: self.season_number,
+            episode: self.episode_number,
+            duration_secs: self.duration_secs.filter(|d| *d > 0),
+            ..Default::default()
+        })
+    }
+}
+
 fn s(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(flex_string)
 }
@@ -87,19 +135,19 @@ impl DispatcharrClient {
 
     fn vod_item_from(&self, kind: VodKind, v: &Value) -> Option<VodItem> {
         let id = s(v, "id")?;
-        let img_kind = match kind {
-            VodKind::Movie => "movies",
-            VodKind::Series => "series",
-            VodKind::Episode => "episodes",
-        };
-        let has_logo = v.get("logo").is_some_and(|l| !l.is_null());
-        let poster = has_logo
-            .then(|| {
-                self.url(&format!("api/vod/{img_kind}/{id}/image"))
-                    .ok()
-                    .map(|u| u.to_string())
-            })
-            .flatten();
+        // Art: the logo's own cache URL (same server, authenticated) is preferred; otherwise its
+        // external URL (fetched anonymously).
+        let poster = v.get("logo").filter(|l| l.is_object()).and_then(|l| {
+            l.get("cache_url")
+                .and_then(flex_string)
+                .filter(|c| !c.is_empty())
+                .and_then(|c| {
+                    self.url(c.trim_start_matches('/'))
+                        .ok()
+                        .map(|u| u.to_string())
+                })
+                .or_else(|| first_http(l.get("url")))
+        });
         let cp = v.get("custom_properties");
         Some(VodItem {
             kind: Some(kind),
@@ -112,7 +160,11 @@ impl DispatcharrClient {
                 }
             }),
             title: s(v, "name").unwrap_or_default(),
-            year: v.get("year").and_then(flex_i64),
+            year: v.get("year").and_then(flex_i64).or_else(|| {
+                cp.and_then(|c| c.get("releaseDate"))
+                    .and_then(flex_string)
+                    .and_then(|d| d.get(..4)?.parse().ok())
+            }),
             rating: s(v, "rating"),
             genre: s(v, "genre"),
             plot: s(v, "description"),
@@ -185,20 +237,43 @@ impl DispatcharrClient {
             .ok_or_else(|| AppError::server("The server sent a title Downlink could not read."))
     }
 
+    /// Episodes of a series. The reference server answers with a bare array in which every
+    /// episode carries `providers[]` holding the *whole* M3U account object (provider username and
+    /// password, server URL, hundreds of channel groups), repeated per episode: megabytes. So this
+    /// parses the body straight into a typed struct that names only the fields we use (serde skips
+    /// the rest without materialising it), never builds a `Value` of the body, never logs it and
+    /// never puts any of it in an error.
     pub async fn series_episode_list(&self, series_ext_id: &str) -> Result<Vec<VodItem>> {
-        let items = self
-            .fetch_all(
-                &format!("api/vod/series/{series_ext_id}/episodes/"),
-                &[],
-                "that series",
-            )
-            .await?;
-        let mut eps: Vec<VodItem> = items
-            .iter()
-            .filter_map(|v| self.vod_item_from(VodKind::Episode, v))
-            .collect();
-        for e in &mut eps {
-            e.parent_ext = Some(series_ext_id.to_owned());
+        let path = format!("api/vod/series/{series_ext_id}/episodes/");
+        let mut eps: Vec<VodItem> = Vec::new();
+        for page in 1..=200u32 {
+            let q = [("page", page.to_string()), ("page_size", "500".to_owned())];
+            let reply = self
+                .call(Method::GET, &path, &q, None)
+                .await?
+                .ok("that series")?;
+            let first = reply
+                .body
+                .iter()
+                .copied()
+                .find(|b| !b.is_ascii_whitespace());
+            let (rows, has_next) = match first {
+                Some(b'[') => (
+                    serde_json::from_slice::<Vec<EpisodeRow>>(&reply.body)?,
+                    false,
+                ),
+                Some(b'{') => {
+                    let env = serde_json::from_slice::<EpisodeEnvelope>(&reply.body)?;
+                    (env.results, env.next.is_some_and(|n| !n.is_empty()))
+                }
+                _ => (Vec::new(), false),
+            };
+            drop(reply);
+            let empty = rows.is_empty();
+            eps.extend(rows.into_iter().filter_map(|r| r.into_item(series_ext_id)));
+            if !has_next || empty {
+                break;
+            }
         }
         eps.sort_by_key(|e| (e.season.unwrap_or(0), e.episode.unwrap_or(0)));
         Ok(eps)

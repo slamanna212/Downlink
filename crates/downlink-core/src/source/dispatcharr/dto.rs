@@ -40,21 +40,21 @@ fn flex_bool(v: &Value) -> bool {
     }
 }
 
-fn de_opt_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+pub(crate) fn de_opt_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     Ok(Option::<Value>::deserialize(d)?
         .as_ref()
         .and_then(flex_string))
 }
-fn de_string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+pub(crate) fn de_string<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     Ok(Option::<Value>::deserialize(d)?
         .as_ref()
         .and_then(flex_string)
         .unwrap_or_default())
 }
-fn de_opt_i64<'de, D: Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
+pub(crate) fn de_opt_i64<'de, D: Deserializer<'de>>(d: D) -> Result<Option<i64>, D::Error> {
     Ok(Option::<Value>::deserialize(d)?.as_ref().and_then(flex_i64))
 }
-fn de_i64<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+pub(crate) fn de_i64<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
     Ok(Option::<Value>::deserialize(d)?
         .as_ref()
         .and_then(flex_i64)

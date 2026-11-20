@@ -204,8 +204,12 @@ impl From<sqlx::migrate::MigrateError> for AppError {
 
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
+        // Never echo the parser's message: type-mismatch errors quote the offending value, and the
+        // body may hold credentials (e.g. provider account blobs). Position only.
         Self::server(format!(
-            "The server sent data Downlink could not understand: {e}"
+            "The server sent data Downlink could not understand (line {}, column {}).",
+            e.line(),
+            e.column()
         ))
     }
 }

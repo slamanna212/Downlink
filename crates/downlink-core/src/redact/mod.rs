@@ -54,7 +54,7 @@ static HEADER: LazyLock<Regex> = LazyLock::new(|| {
 /// JSON-ish `"password":"…"` and debug-ish `password: "…"`.
 static JSON_SECRET: LazyLock<Regex> = LazyLock::new(|| {
     rx(
-        r#"(?i)(["']?(?:password|passwd|secret|api_key|apikey|access|refresh|access_token|refresh_token|token)["']?\s*[:=]\s*)"([^"]*)""#,
+        r#"(?i)(["']?(?:username|password|passwd|secret|api_key|apikey|access|refresh|access_token|refresh_token|token)["']?\s*[:=]\s*)"([^"]*)""#,
     )
 });
 

@@ -111,8 +111,8 @@ fn json_secrets() {
         "{out}"
     );
     assert!(
-        out.contains("alice"),
-        "username alone in JSON is not touched: {out}"
+        !out.contains("alice"),
+        "JSON username fields are masked too: {out}"
     );
 }
 
@@ -221,4 +221,14 @@ fn every_xtream_url_shape_redacts() {
         let msg = redact(&format!("request to {u} failed: connection reset"));
         assert!(!msg.contains("hunter22"), "{msg}");
     }
+}
+
+#[test]
+fn provider_account_json_blobs_are_masked() {
+    let blob = r#"{"m3u_account":{"server_url":"http://p.test","profiles":[{"custom_properties":{"user_info":{"username":"fakeprovideruser","password":"FAKEPROVIDERPASS-7731"}}}]}}"#;
+    let out = redact(blob);
+    assert!(
+        !out.contains("FAKEPROVIDERPASS-7731") && !out.contains("fakeprovideruser"),
+        "{out}"
+    );
 }
