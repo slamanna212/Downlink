@@ -402,12 +402,14 @@ jobs:
           fi
           if [[ "$SIGNED" == true ]]; then gh release upload "$TAG" latest.json --clobber; fi
 
-      - name: Publish release
+      - name: Publish release (dev channel only)
         run: |
-          if [[ "$CHANNEL" == stable && "$PRERELEASE" != true ]]; then
-            gh release edit "$TAG" --draft=false --prerelease=false --latest
-          else
+          if [[ "$CHANNEL" == dev ]]; then
             gh release edit "$TAG" --draft=false --prerelease --latest=false
+            echo "Published dev prerelease $TAG"
+          else
+            # Like Apogee: releases from main stay drafts (pre-release suffix or not) for a manual publish.
+            echo "All builds succeeded. $TAG is a draft release; publish it from GitHub when ready."
           fi
 
       # Rolling `dev` release: always holds the newest dev latest.json (endpoint .../releases/download/dev/latest.json).
@@ -438,7 +440,26 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: ${{ inputs.tag }}
+      RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
     steps:
+      - name: Download this platform's installers (works for draft releases)
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux) re='_amd64\.(AppImage|deb)$' ;;
+            Windows) re='_x64-setup\.exe$' ;;
+            macOS) re='_universal\.dmg$' ;;
+          esac
+          mkdir dl
+          gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate \
+            --jq '.[] | [.id, .name] | @tsv' |
+          while IFS=$'\t' read -r id name; do
+            if [[ "$name" =~ $re ]]; then
+              gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "dl/$name"
+            fi
+          done
+          ls -l dl
+
       - name: Self-test output path
         shell: bash
         run: echo "DOWNLINK_SELF_TEST_OUT=$RUNNER_TEMP/self-test.json" >> "$GITHUB_ENV"
@@ -449,7 +470,6 @@ jobs:
           if command -v mpv; then echo "::error::mpv present on clean machine"; exit 1; fi
           if ldconfig -p | grep -q libmpv; then echo "::error::libmpv present on clean machine"; exit 1; fi
           sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb
-          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --pattern '*_amd64.AppImage' --pattern '*_amd64.deb' --dir dl
           chmod +x dl/*.AppImage
           # AppImage: bundled libmpv only
           env -u LD_LIBRARY_PATH -u DOWNLINK_MPV_PATH \
@@ -468,7 +488,6 @@ jobs:
         shell: pwsh
         run: |
           if (Get-Command mpv -ErrorAction SilentlyContinue) { throw 'mpv present on clean machine' }
-          gh release download $env:TAG -R $env:GITHUB_REPOSITORY --pattern '*_x64-setup.exe' --dir dl
           $installer = (Get-ChildItem dl -Filter *_x64-setup.exe)[0].FullName
           Start-Process $installer -ArgumentList '/S' -Wait
           $exe = Get-ChildItem "$env:LOCALAPPDATA\Downlink" -Filter *.exe |
@@ -482,7 +501,6 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           if command -v mpv; then echo "::error::mpv present on clean machine"; exit 1; fi
-          gh release download "$TAG" -R "$GITHUB_REPOSITORY" --pattern '*_universal.dmg' --dir dl
           hdiutil attach dl/*_universal.dmg -mountpoint /Volumes/Downlink -nobrowse -quiet
           cp -R /Volumes/Downlink/Downlink.app /Applications/
           hdiutil detach /Volumes/Downlink -quiet

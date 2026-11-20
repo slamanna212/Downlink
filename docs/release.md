@@ -2,7 +2,7 @@
 
 > ## Before the first release: TODO for Sam
 >
-> **Heads up: pushing to `main` now publishes a release** (the version in the root `package.json`, currently
+> **Heads up: pushing to `main` now builds a draft release** (the version in the root `package.json`, currently
 > `0.1.0`) if that release does not exist yet. Use `[skip release]` in the commit message to avoid it.
 >
 > - [ ] Generate the updater keypair (back it up offline; never commit it):
@@ -15,7 +15,7 @@
 > - [ ] (Optional) repo variables: `LINUX_RUNNER` (Linux runner label, default `ubuntu-22.04`), `CI_RUNNER` (runner
 >   for trusted PR actors), `LIBMPV_SRC` (Linux libmpv.so.2 path). The Windows libmpv pin lives in
 >   `tools/mpv/pins.env`; no `MPV_*` variables are needed.
-> - [ ] Apply the config in "tauri.conf.json requirements" below and implement the `--self-test` flag.
+> - [ ] Apply the config in "tauri.conf.json requirements" below (the `--self-test` flag exists: `apps/desktop/src/selftest.rs`).
 > - [ ] macOS is OFF by default (releases start as Windows + Linux). See "macOS" below to turn it on.
 
 Implements PLAN §10. Modelled on the Apogee repo's workflows.
@@ -24,7 +24,7 @@ Implements PLAN §10. Modelled on the Apogee repo's workflows.
 
 | Workflow | Trigger | Builds | Version | Result |
 |---|---|---|---|---|
-| `release.yml` | push to `main` (not README.md / `docs/**`, not `[skip release]`) or manual | `main` | root `package.json` `version` | `vX.Y.Z` release; pre-release if the version has a `-suffix`, else stable and "latest"; skipped if the release already exists |
+| `release.yml` | push to `main` (not README.md / `docs/**`, not `[skip release]`) or manual | `main` | root `package.json` `version` | `vX.Y.Z` **draft** release (marked pre-release if the version has a `-suffix`) for you to publish by hand; skipped if the release already exists |
 | `dev-prerelease.yml` | manual only ("Run workflow") | `dev` branch | `<package.json base>-dev.<shortsha>` | pre-release `vX.Y.Z-dev.<sha>` published immediately, rolling `dev` release gets the new `latest.json` |
 | `pr-ci.yml` | pull requests to `dev` | PR head | none | quality gates only (`ci.yml`) |
 | `ci.yml` | called by the above; manual | any | none | fmt, clippy, deny, nextest, UI lint/typecheck/test/build |
@@ -58,13 +58,13 @@ output is the starting point; user-visible "What's new" first).
      `SHA256SUMS-linux-x86_64.txt`.
    - **publish**: builds `latest.json` with `tools/release/make-latest-json.py` (fails if an asset or `.sig`
      is missing; no darwin keys without macOS), makes unversioned copies (stable non-pre-release only), attests
-     provenance, publishes the draft (and refreshes the rolling `dev` release on the dev channel).
+     provenance. Dev channel: publishes the pre-release and refreshes the rolling `dev` release. Main: leaves the
+     release as a draft (as Apogee does) for you to publish from GitHub; `latest.json` is already attached.
    - **smoke**: installs the published artefacts on a clean runner and runs `--self-test` (see below).
    - **cleanup**: if a build or publish failed, a still-draft release and its tag are deleted (as in Apogee).
 
 Differences from Apogee: one reusable `build.yml` instead of duplicated jobs; our own `latest.json`
-(parallel `tauri-action` jobs race on one manifest and cannot emit deb/rpm keys); stable releases are published
-automatically rather than left as drafts.
+(parallel `tauri-action` jobs race on one manifest and cannot emit deb/rpm keys).
 
 Linux runner: `build.yml`/`ci.yml` use `vars.LINUX_RUNNER` (default `ubuntu-22.04`). A non-GitHub-hosted runner
 skips the apt dependency install, so provision it yourself. The glibc baseline is 22.04.

@@ -1237,8 +1237,9 @@ Developer ID exists.
   → the universal `.app.tar.gz`), `linux-x86_64` (AppImage), `linux-x86_64-deb`, `linux-x86_64-rpm`.
 - **Channels**:
   - **stable**: endpoint `https://github.com/slamanna212/Downlink/releases/latest/download/latest.json`
-    (GitHub's `latest` excludes pre-releases). Every push to `main` publishes `vX.Y.Z` from the root
-    `package.json` version unless that release already exists (a `-suffix` version publishes as a pre-release).
+    (GitHub's `latest` excludes pre-releases). Every push to `main` builds `vX.Y.Z` from the root
+    `package.json` version unless that release already exists, and leaves it as a draft to publish by hand
+    (a `-suffix` version is marked pre-release).
   - **dev**: pre-releases tagged `vX.Y.Z-dev.<shortsha>` (Apogee's scheme), built from the `dev` branch only
     when triggered by hand (`dev-prerelease.yml`). A rolling `dev` release always holds the newest dev
     `latest.json`; endpoint `…/releases/download/dev/latest.json`.
