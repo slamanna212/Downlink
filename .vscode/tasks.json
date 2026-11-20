@@ -7,10 +7,13 @@
       "command": "bash",
       "args": [
         "-c",
-        "mkdir -p ../../target; pidfile=../../target/vscode-dev.pid; if [[ -f $pidfile ]] && kill -0 -- -$(cat \"$pidfile\") 2>/dev/null; then echo 'Downlink dev is already running.'; exit 0; fi; setsid bash -c 'echo $$ > ../../target/vscode-dev.pid; exec cargo tauri dev' & child=$!; cleanup() { trap '' TERM; if [[ -f $pidfile ]]; then kill -TERM -- -$(cat \"$pidfile\") 2>/dev/null || true; rm -f \"$pidfile\"; fi; }; trap cleanup EXIT; trap 'exit 0' INT TERM; wait \"$child\""
+        "if ! command -v node >/dev/null 2>&1 && [[ -s ${NVM_DIR:-$HOME/.nvm}/nvm.sh ]]; then source \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\"; fi; mkdir -p ../../target; pidfile=../../target/vscode-dev.pid; if [[ -f $pidfile ]] && kill -0 -- -$(cat \"$pidfile\") 2>/dev/null; then echo 'Downlink dev is already running.'; exit 0; fi; setsid bash -c 'echo $$ > ../../target/vscode-dev.pid; exec cargo tauri dev --config \"$DOWNLINK_DEV_CONFIG\"' & child=$!; cleanup() { trap '' TERM; if [[ -f $pidfile ]]; then kill -TERM -- -$(cat \"$pidfile\") 2>/dev/null || true; rm -f \"$pidfile\"; fi; }; trap cleanup EXIT; trap 'exit 0' INT TERM; wait \"$child\""
       ],
       "options": {
-        "cwd": "${workspaceFolder}/apps/desktop"
+        "cwd": "${workspaceFolder}/apps/desktop",
+        "env": {
+          "DOWNLINK_DEV_CONFIG": "{\"build\":{\"beforeDevCommand\":{\"script\":\"pnpm dev\",\"cwd\":\"${workspaceFolder}/apps/ui\"}}}"
+        }
       },
       "problemMatcher": [],
       "runOptions": {
