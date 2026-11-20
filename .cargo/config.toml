@@ -1,0 +1,3 @@
+[build]
+# Disk is tight on the dev VM; incremental caches grew to 11 GB. Re-enable locally if you have room.
+incremental = false
