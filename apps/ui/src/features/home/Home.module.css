@@ -81,3 +81,4 @@
 .chipNum { color: var(--dl-text-dim); }
 .muted { color: var(--dl-text-dim); font-size: var(--mantine-font-size-md); }
 .searchLabel { text-align: left; }
+:global([data-density='tv']) .searchBtn { width: 28rem; }
