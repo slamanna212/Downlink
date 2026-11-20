@@ -294,6 +294,8 @@
 
 .resume {
   position: absolute;
+  /* Above the control bar: its scrim padding overlaps this box and would eat the clicks. */
+  z-index: 2;
   left: 50%;
   bottom: 14rem;
   transform: translateX(-50%);

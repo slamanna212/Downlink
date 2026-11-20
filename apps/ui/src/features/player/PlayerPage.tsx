@@ -433,7 +433,10 @@ export function PlayerPage() {
   const shownProg = catchup ? player.programme : prog;
   const position = player.position ?? 0;
   const duration = player.duration ?? 0;
-  const showResume = timeshift && resumeUseful(player.resumeAt, player.duration) && resumeDismissed !== player.programme?.id;
+  // Playback has already started at `resumeAt`; the prompt only offers to go back to the start. Recordings and
+  // VOD have no programme, so the dismiss key covers mode + title + position, not just the programme id.
+  const resumeKey = `${player.mode}|${player.programme?.id ?? player.title ?? ''}|${player.resumeAt ?? ''}`;
+  const showResume = timeshift && player.mode !== 'vod' && resumeUseful(player.resumeAt, player.duration) && resumeDismissed !== resumeKey;
 
   return (
     <div
@@ -488,16 +491,16 @@ export function PlayerPage() {
             <div className={`${classes.resume} ${classes.glass}`} role="dialog" aria-label={t('player.resumeTitle', { time: formatDuration(player.resumeAt) })}>
               <span className={classes.resumeTitle}>{t('player.resumeTitle', { time: formatDuration(player.resumeAt) })}</span>
               <div className={classes.errorActions}>
-                <DLButton
-                  variant="filled"
-                  onClick={() => {
-                    cmd({ kind: 'seek', seconds: player.resumeAt ?? 0 });
-                    setResumeDismissed(player.programme?.id ?? null);
-                  }}
-                >
+                <DLButton variant="filled" onClick={() => setResumeDismissed(resumeKey)}>
                   {t('player.resume')}
                 </DLButton>
-                <DLButton variant="default" onClick={() => setResumeDismissed(player.programme?.id ?? null)}>
+                <DLButton
+                  variant="default"
+                  onClick={() => {
+                    cmd({ kind: 'seek', seconds: 0 });
+                    setResumeDismissed(resumeKey);
+                  }}
+                >
                   {t('player.startOver')}
                 </DLButton>
               </div>

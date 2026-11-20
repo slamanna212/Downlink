@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Menu, SegmentedControl } from '@mantine/core';
+import { Menu } from '@mantine/core';
 import { IconChevronDown, IconRepeat } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
 import { useCaps, useOffline } from '../../api/queries';
@@ -100,12 +100,22 @@ function RuleRow({ r, run, busy }: { r: RecordingRule; run: (fn: () => Promise<u
   );
 }
 
+type ListSection = Exclude<Tab, 'rules'>;
+
+function SectionHead({ id, title, count }: { id: string; title: string; count: number }) {
+  return (
+    <h2 className={classes.h2} id={id}>
+      {title}
+      <span className={classes.count}>{count}</span>
+    </h2>
+  );
+}
+
 export function RecordingsPage() {
   const qc = useQueryClient();
   const { loaded, hasSource } = useCaps();
   const offline = useOffline();
   const now = useNowEpoch(30_000);
-  const [tab, setTab] = useState<Tab>('upcoming');
   const [failure, setFailure] = useState<string | null>(null);
   const recs = useQuery({ queryKey: ['catalog', 'recordings'], queryFn: () => invoke('list_recordings', {}), refetchInterval: 30_000 });
   const rules = useQuery({ queryKey: ['catalog', 'recordingRules'], queryFn: () => invoke('list_recording_rules', {}) });
@@ -118,44 +128,56 @@ export function RecordingsPage() {
     onError: (e) => setFailure(e instanceof Error ? e.message : (e as { message?: string }).message || t('rec.actionFailed')),
   });
   const run = (fn: () => Promise<unknown>) => act.mutate(fn);
+  const busy = act.isPending || offline;
 
   if (loaded && !hasSource) return <EmptySource />;
   const d = recs.data;
-  const counts: Record<Tab, number> = { upcoming: d?.upcoming.length ?? 0, inProgress: d?.inProgress.length ?? 0, completed: d?.completed.length ?? 0, rules: rules.data?.length ?? 0 };
-  const tabs: Tab[] = ['upcoming', 'inProgress', 'completed', 'rules'];
-  const list = tab === 'rules' ? rules.data : d?.[tab];
-  const loading = tab === 'rules' ? rules.isLoading : recs.isLoading;
-  const errored = tab === 'rules' ? rules.isError : recs.isError;
+  // Everything on one page, most time-sensitive first.
+  const sections: ListSection[] = ['inProgress', 'upcoming', 'completed'];
 
   return (
     <div className={classes.page}>
       <header className={classes.head}>
         <h1 className={classes.h1}>{t('rec.title')}</h1>
-        <SegmentedControl
-          value={tab}
-          onChange={(v) => setTab(v as Tab)}
-          aria-label={t('rec.title')}
-          data={tabs.map((k) => ({
-            value: k,
-            label: <span>{t(`rec.tab.${k}`)}<span className={classes.count}>{counts[k]}</span></span>,
-          }))}
-        />
       </header>
       {offline && <div className={classes.toast} role="status">{t('offline.recording')}</div>}
       {failure && <div className={classes.toast} role="alert">{failure}</div>}
-      {loading ? (
-        <SkeletonList rows={5} label={t('loading.generic')} />
-      ) : errored ? (
-        <ErrorState message={t('rec.error')} onRetry={() => void (tab === 'rules' ? rules.refetch() : recs.refetch())} />
-      ) : !list || list.length === 0 ? (
-        <p className={classes.msg} style={{ paddingInline: '2.5rem' }}>{t(`rec.empty.${tab}`)}</p>
-      ) : (
-        <div className={classes.list} role="list" aria-label={t(`rec.tab.${tab}`)}>
-          {tab === 'rules'
-            ? (list as RecordingRule[]).map((r) => <RuleRow key={r.id} r={r} run={run} busy={act.isPending || offline} />)
-            : (list as Recording[]).map((r) => <RecordingRow key={r.id} r={r} now={now} tab={tab} run={run} busy={act.isPending || offline} />)}
-        </div>
-      )}
+      <div className={classes.list}>
+        {recs.isLoading ? (
+          <SkeletonList rows={5} label={t('loading.generic')} />
+        ) : recs.isError || !d ? (
+          <ErrorState message={t('rec.error')} onRetry={() => void recs.refetch()} />
+        ) : (
+          sections.map((k) => (
+            <section key={k} className={classes.section} aria-labelledby={`rec-${k}`}>
+              <SectionHead id={`rec-${k}`} title={t(`rec.tab.${k}`)} count={d[k].length} />
+              {d[k].length === 0 ? (
+                <p className={classes.msg}>{t(`rec.empty.${k}`)}</p>
+              ) : (
+                <div role="list" aria-labelledby={`rec-${k}`}>
+                  {d[k].map((r) => <RecordingRow key={r.id} r={r} now={now} tab={k} run={run} busy={busy} />)}
+                </div>
+              )}
+            </section>
+          ))
+        )}
+        {!recs.isLoading && (
+          <section className={classes.section} aria-labelledby="rec-rules">
+            <SectionHead id="rec-rules" title={t('rec.tab.rules')} count={rules.data?.length ?? 0} />
+            {rules.isLoading ? (
+              <SkeletonList rows={2} label={t('loading.generic')} />
+            ) : rules.isError ? (
+              <ErrorState message={t('rec.error')} onRetry={() => void rules.refetch()} />
+            ) : !rules.data || rules.data.length === 0 ? (
+              <p className={classes.msg}>{t('rec.empty.rules')}</p>
+            ) : (
+              <div role="list" aria-labelledby="rec-rules">
+                {rules.data.map((r) => <RuleRow key={r.id} r={r} run={run} busy={busy} />)}
+              </div>
+            )}
+          </section>
+        )}
+      </div>
     </div>
   );
 }

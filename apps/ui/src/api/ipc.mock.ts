@@ -247,7 +247,7 @@ export function createMockBackend(): Backend {
       if (!p) throw appError('stream', 'That programme is not available to play.');
       const dur = p.endUtc - p.startUtc;
       const saved = p.channelId % 2 === 0 ? Math.floor(dur / 3) : null;
-      setPlayer({ state: 'Resolving', mode: 'catchup', channelId: p.channelId, programme: p, position: resume && saved ? saved : 0, duration: dur, buffered: 0, seekable: true, resumeAt: resume ? null : saved, error: null });
+      setPlayer({ state: 'Resolving', mode: 'catchup', channelId: p.channelId, programme: p, position: resume && saved ? saved : 0, duration: dur, buffered: 0, seekable: true, resumeAt: resume && saved ? saved : null, error: null });
       seekableTicker('catchup');
       return null;
     },
