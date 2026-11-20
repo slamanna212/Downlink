@@ -361,6 +361,8 @@ export const en = {
   'settings.export.help': 'Saves a redacted bundle you can attach to a bug report.',
   'settings.export.reveal': 'Show in folder',
   'settings.export.failed': 'Could not save the file. Check free disk space and try again.',
+  'offline.recording': 'Recording needs a connection to your server.',
+  'offline.action': 'This needs a connection to your server.',
   'common.close': 'Close',
   'common.back': 'Back',
   'common.cancel': 'Cancel',

@@ -6,7 +6,7 @@ import { Menu, SegmentedControl, Select } from '@mantine/core';
 import { IconCalendar } from '@tabler/icons-react';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { invoke } from '../../api/ipc';
-import { useCaps, useCounts, useGroups, useSources } from '../../api/queries';
+import { useCaps, useCounts, useGroups, useOffline, useSources } from '../../api/queries';
 import type { Channel, Programme } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
@@ -198,6 +198,7 @@ export function GuidePage() {
   const pendingFocus = useRef(false);
 
   const sources = useSources();
+  const offline = useOffline();
   useInteractive(!!counts.data);
   const backDays = Math.max(1, sources.data?.[0]?.archiveDays ?? 1);
   const rowH = dl.density[density].guideRow;
@@ -511,6 +512,7 @@ export function GuidePage() {
         channel={focusChannel}
         state={focusState}
         canRecord={caps.dvr}
+        offline={offline}
         canCatchup={caps.catchup}
         recordOpen={recordOpen}
         onRecordOpen={setRecordOpen}

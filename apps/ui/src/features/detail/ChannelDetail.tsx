@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Drawer, Menu, UnstyledButton } from '@mantine/core';
 import { IconStar } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
-import { useCaps, useChannels } from '../../api/queries';
+import { useCaps, useChannels, useOffline } from '../../api/queries';
 import type { Programme } from '../../api/types';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
@@ -28,6 +28,7 @@ export function ChannelDetail() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { caps } = useCaps();
+  const offline = useOffline();
   const now = useNowEpoch(30_000);
   const channels = useChannels({});
   const channel = useMemo(() => channels.data?.find((c) => c.id === open?.channelId), [channels.data, open?.channelId]);
@@ -138,8 +139,9 @@ export function ChannelDetail() {
                       <DLButton variant="subtle" size="xs">{t('detail.recordOnce')}</DLButton>
                     </Menu.Target>
                     <Menu.Dropdown>
-                      <Menu.Item onClick={() => record.mutate({ programmeId: p.id, kind: 'once' })}>{t('guide.recordOnce')}</Menu.Item>
-                      <Menu.Item onClick={() => record.mutate({ programmeId: p.id, kind: 'series' })}>{t('guide.recordSeries')}</Menu.Item>
+                      {offline && <Menu.Label>{t('offline.recording')}</Menu.Label>}
+                      <Menu.Item disabled={offline} onClick={() => record.mutate({ programmeId: p.id, kind: 'once' })}>{t('guide.recordOnce')}</Menu.Item>
+                      <Menu.Item disabled={offline} onClick={() => record.mutate({ programmeId: p.id, kind: 'series' })}>{t('guide.recordSeries')}</Menu.Item>
                     </Menu.Dropdown>
                   </Menu>
                 )}

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Menu, SegmentedControl } from '@mantine/core';
 import { IconChevronDown, IconRepeat } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
-import { useCaps } from '../../api/queries';
+import { useCaps, useOffline } from '../../api/queries';
 import type { Recording, RecordingRule } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
@@ -52,7 +52,7 @@ export function RecordingRow({ r, now, tab, run, busy, demo }: { r: Recording; n
             <DLButton variant="filled" size="sm" onClick={watch}>{t('rec.watch')}</DLButton>
             <Menu position="bottom-end">
               <Menu.Target>
-                <DLButton variant="default" size="sm">{t('rec.extend')} <IconChevronDown size={14} /></DLButton>
+                <DLButton variant="default" size="sm" disabled={busy}>{t('rec.extend')} <IconChevronDown size={14} /></DLButton>
               </Menu.Target>
               <Menu.Dropdown>
                 {[15, 30, 60].map((m) => (
@@ -76,7 +76,7 @@ export function RecordingRow({ r, now, tab, run, busy, demo }: { r: Recording; n
             <>
               {r.status === 'failed' && <StatusBadge kind="drm" />}
               <DLButton variant="filled" size="sm" onClick={watch}>{t('rec.play')}</DLButton>
-              <DLButton variant="default" size="sm" onClick={() => setConfirming(true)}>{t('rec.delete')}</DLButton>
+              <DLButton variant="default" size="sm" disabled={busy} onClick={() => setConfirming(true)}>{t('rec.delete')}</DLButton>
             </>
           ))}
       </span>
@@ -103,6 +103,7 @@ function RuleRow({ r, run, busy }: { r: RecordingRule; run: (fn: () => Promise<u
 export function RecordingsPage() {
   const qc = useQueryClient();
   const { loaded, hasSource } = useCaps();
+  const offline = useOffline();
   const now = useNowEpoch(30_000);
   const [tab, setTab] = useState<Tab>('upcoming');
   const [failure, setFailure] = useState<string | null>(null);
@@ -140,6 +141,7 @@ export function RecordingsPage() {
           }))}
         />
       </header>
+      {offline && <div className={classes.toast} role="status">{t('offline.recording')}</div>}
       {failure && <div className={classes.toast} role="alert">{failure}</div>}
       {loading ? (
         <SkeletonList rows={5} label={t('loading.generic')} />
@@ -150,8 +152,8 @@ export function RecordingsPage() {
       ) : (
         <div className={classes.list} role="list" aria-label={t(`rec.tab.${tab}`)}>
           {tab === 'rules'
-            ? (list as RecordingRule[]).map((r) => <RuleRow key={r.id} r={r} run={run} busy={act.isPending} />)
-            : (list as Recording[]).map((r) => <RecordingRow key={r.id} r={r} now={now} tab={tab} run={run} busy={act.isPending} />)}
+            ? (list as RecordingRule[]).map((r) => <RuleRow key={r.id} r={r} run={run} busy={act.isPending || offline} />)
+            : (list as Recording[]).map((r) => <RecordingRow key={r.id} r={r} now={now} tab={tab} run={run} busy={act.isPending || offline} />)}
         </div>
       )}
     </div>

@@ -148,3 +148,18 @@ test('player: F toggles favourite with a confirmation, F11 and double-click togg
   await page.locator('[data-video-rect]').dblclick({ position: { x: 300, y: 300 } });
   await expect.poll(async () => (await calls(page)).filter((c) => c === 'set_fullscreen').length).toBe(calls0 + 2);
 });
+
+test('offline: record actions are disabled with the reason (guide menu, recordings page)', async ({ page }) => {
+  await page.goto('/recordings?mock=offline');
+  await settle(page);
+  await expect(page.getByText('Recording needs a connection to your server.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Cancel' }).first()).toBeDisabled();
+  await page.goto('/guide?mock=offline');
+  await settle(page);
+  await expect(page.getByRole('gridcell').first()).toBeVisible();
+  await page.getByRole('grid').first().focus();
+  await page.keyboard.press('ArrowRight'); // a now/future block
+  await page.keyboard.press('r');
+  await expect(page.getByText('Recording needs a connection to your server.')).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'Record this programme' })).toBeDisabled();
+});

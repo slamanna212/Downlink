@@ -64,3 +64,9 @@ export const useCounts = () =>
 
 export const useHome = () =>
   useQuery({ queryKey: ['catalog', 'home'], queryFn: () => invoke('get_home', {}), refetchInterval: 60_000 });
+
+/** True while the (first) source is offline: actions that must reach the server are disabled (PLAN §7.7). */
+export function useOffline(): boolean {
+  const { data } = useSources();
+  return data?.[0]?.status === 'offline';
+}

@@ -16,6 +16,8 @@ export interface PreviewProps {
   channel: Channel | undefined;
   state: BlockState | null;
   canRecord: boolean;
+  /** Source offline: record items stay visible but disabled, with the reason shown. */
+  offline?: boolean;
   canCatchup: boolean;
   recordOpen: boolean;
   onRecordOpen: (open: boolean) => void;
@@ -30,7 +32,7 @@ export interface PreviewProps {
  * Preview pane. It follows focus after a 300 ms dwell. Everything shown is already in memory:
  * dwelling never calls a play command or touches a stream endpoint (CLAUDE rule 4).
  */
-export const GuidePreview = memo(function GuidePreview({ programme, channel, state, canRecord, canCatchup, recordOpen, onRecordOpen, onRecord, onPrimary, onFromStart, onDetails, onFavourite }: PreviewProps) {
+export const GuidePreview = memo(function GuidePreview({ programme, channel, state, canRecord, offline, canCatchup, recordOpen, onRecordOpen, onRecord, onPrimary, onFromStart, onDetails, onFavourite }: PreviewProps) {
   const [shown, setShown] = useState<{ p: Programme | null; ch: Channel | undefined; state: BlockState | null }>({ p: programme, ch: channel, state });
   useEffect(() => {
     const id = setTimeout(() => setShown({ p: programme, ch: channel, state }), dl.previewDwellMs);
@@ -74,8 +76,9 @@ export const GuidePreview = memo(function GuidePreview({ programme, channel, sta
                   </Menu.Target>
                   <Menu.Dropdown>
                     {st === 'now' && canCatchup && <Menu.Item onClick={onFromStart}>{t('guide.fromStart')}</Menu.Item>}
-                    {canRecord && <Menu.Item onClick={() => onRecord('once')}>{t('guide.recordOnce')}</Menu.Item>}
-                    {canRecord && <Menu.Item onClick={() => onRecord('series')}>{t('guide.recordSeries')}</Menu.Item>}
+                    {canRecord && offline && <Menu.Label>{t('offline.recording')}</Menu.Label>}
+                    {canRecord && <Menu.Item disabled={offline} onClick={() => onRecord('once')}>{t('guide.recordOnce')}</Menu.Item>}
+                    {canRecord && <Menu.Item disabled={offline} onClick={() => onRecord('series')}>{t('guide.recordSeries')}</Menu.Item>}
                   </Menu.Dropdown>
                 </Menu>
               )}
