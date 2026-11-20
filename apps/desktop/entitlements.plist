@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Hardened runtime: load the bundled libmpv/ffmpeg dylibs. They are signed with our own
+       identity, not Apple's, so library validation would otherwise reject them. -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+  <!-- No allow-jit / allow-unsigned-executable-memory: libmpv and ffmpeg are ahead-of-time compiled
+       (no JIT; no Lua JIT, scripting is off), and WKWebView's JIT runs in Apple's own process. -->
+</dict>
+</plist>

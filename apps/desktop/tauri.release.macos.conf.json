@@ -1,1 +1,9 @@
-{ "bundle": { "macOS": { "files": { "Frameworks": "../../tools/mpv/out/macos/Frameworks" } } } }
+{
+  "bundle": {
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "entitlements": "entitlements.plist",
+      "files": { "Frameworks": "../../tools/mpv/out/macos/Frameworks" }
+    }
+  }
+}
