@@ -11,10 +11,12 @@ use downlink_core::catchup::{CatchupPlay, PositionReporter};
 use downlink_core::service::{ProgrammeDto, Service};
 use downlink_core::source::{Caps, PlayPlan, PlayProfile};
 use downlink_core::{AppError, ErrorCode};
+use downlink_platform::{MediaSession, MediaState, PlaybackInhibitor};
 use downlink_player::{
     PlayMode, PlayRequest, Player, PlayerCommand, PlayerEvent, PlayerSnapshot, Profile,
     SessionState,
 };
+use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 
 use crate::dto::{SessionInfo, player_state};
@@ -49,6 +51,13 @@ fn lock(a: &Mutex<Active>) -> MutexGuard<'_, Active> {
     }
 }
 
+fn lock_plain<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    match m.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    }
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -61,10 +70,19 @@ fn player_err(e: downlink_player::PlayerError) -> AppError {
 }
 
 /// What `Player::new` needs for its sink; created before the `Player` exists.
+/// OS integrations driven by player state: screen-awake inhibitor and the media session.
+#[derive(Default)]
+pub struct Extras {
+    pub inhibitor: PlaybackInhibitor,
+    pub media: OnceLock<MediaSession>,
+    last_title: Mutex<String>,
+}
+
 #[derive(Clone)]
 pub struct SinkContext {
     active: Arc<Mutex<Active>>,
     app: AppHandle,
+    pub extras: Arc<Extras>,
 }
 
 impl SinkContext {
@@ -72,6 +90,7 @@ impl SinkContext {
         Self {
             active: Arc::new(Mutex::new(Active::default())),
             app,
+            extras: Arc::new(Extras::default()),
         }
     }
 
@@ -80,14 +99,41 @@ impl SinkContext {
         let ctx = self.clone();
         Arc::new(move |e| match e {
             PlayerEvent::State(snap) => {
-                let dto = {
+                let (dto, title) = {
                     let mut a = lock(&ctx.active);
                     if snap.state != a.last_phase {
                         a.last_phase = snap.state;
                         a.info.transitioned_at = now_ms();
                     }
-                    player_state(&snap, &a.info)
+                    let title = a
+                        .info
+                        .programme
+                        .as_ref()
+                        .and_then(|p| p.title.clone())
+                        .unwrap_or_else(|| "Live TV".to_owned());
+                    (player_state(&snap, &a.info), title)
                 };
+                let phase = snap.state.unwrap_or(SessionState::Idle);
+                ctx.extras
+                    .inhibitor
+                    .set_active(phase == SessionState::Playing);
+                if let Some(m) = ctx.extras.media.get() {
+                    let mut last = lock_plain(&ctx.extras.last_title);
+                    if *last != title && phase != SessionState::Idle {
+                        m.set_now_playing(&title, None, None);
+                        last.clone_from(&title);
+                    }
+                    m.set_state(
+                        match phase {
+                            SessionState::Playing | SessionState::Buffering => MediaState::Playing,
+                            SessionState::Paused => MediaState::Paused,
+                            _ => MediaState::Stopped,
+                        },
+                        snap.position_secs
+                            .filter(|p| *p >= 0.0)
+                            .map(Duration::from_secs_f64),
+                    );
+                }
                 let _ = ctx.app.emit("player://state", dto);
             }
             PlayerEvent::Stats(s) => {

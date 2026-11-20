@@ -3,6 +3,7 @@
 
 mod bundle;
 mod commands;
+mod deeplink;
 mod dto;
 #[cfg(feature = "e2e")]
 mod e2e;
@@ -14,6 +15,7 @@ mod selftest;
 mod spike;
 mod state;
 mod surface;
+mod tray;
 mod updates;
 
 use std::path::PathBuf;
@@ -119,6 +121,73 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
 
     // Engine, surface, playback glue.
     let sink_ctx = SinkContext::new(handle.clone());
+
+    // OS media controls / media keys (MPRIS, SMTC, Now Playing).
+    {
+        #[cfg(target_os = "windows")]
+        let hwnd = app
+            .get_webview_window("main")
+            .and_then(|w| w.hwnd().ok())
+            .map(|h| h.0 as *mut std::ffi::c_void);
+        #[cfg(not(target_os = "windows"))]
+        let hwnd: Option<*mut std::ffi::c_void> = None;
+        let h = handle.clone();
+        let handler: downlink_platform::MediaHandler = Arc::new(move |c| {
+            use downlink_platform::MediaCommand as M;
+            let Some(st) = h.try_state::<AppState>() else {
+                return;
+            };
+            let Some(pb) = st.playback.clone() else {
+                return;
+            };
+            match c {
+                M::Play => drop(pb.command(downlink_player::PlayerCommand::Resume)),
+                M::Pause => drop(pb.command(downlink_player::PlayerCommand::Pause)),
+                M::Toggle => drop(pb.command(downlink_player::PlayerCommand::TogglePause)),
+                M::Stop => {
+                    tauri::async_runtime::spawn(async move {
+                        let _ = pb.stop().await;
+                    });
+                }
+                M::Raise => {
+                    if let Some(w) = h.get_webview_window("main") {
+                        let _ = w.show();
+                        let _ = w.set_focus();
+                    }
+                }
+                M::Quit => h.exit(0),
+                M::Next | M::Previous => {}
+            }
+        });
+        match downlink_platform::MediaSession::new(hwnd, handler) {
+            Ok(m) => {
+                let _ = sink_ctx.extras.media.set(m);
+            }
+            Err(e) => tracing::warn!("media controls unavailable: {e}"),
+        }
+    }
+
+    if let Err(e) = tray::build(app) {
+        tracing::warn!("system tray unavailable: {e}");
+    }
+    {
+        use tauri_plugin_deep_link::DeepLinkExt;
+        let dl = handle.deep_link();
+        // Registers the scheme for dev and portable runs; installers register it themselves.
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        if let Err(e) = dl.register_all() {
+            tracing::debug!("deep link registration skipped: {e}");
+        }
+        let h = handle.clone();
+        dl.on_open_url(move |e| {
+            let urls: Vec<String> = e.urls().iter().map(ToString::to_string).collect();
+            deeplink::forward(&h, urls.iter().map(String::as_str));
+        });
+        if let Ok(Some(urls)) = dl.get_current() {
+            let urls: Vec<String> = urls.iter().map(ToString::to_string).collect();
+            deeplink::forward(&handle, urls.iter().map(String::as_str));
+        }
+    }
     let mut player = None;
     let mut playback = None;
     let mut surf = None;
@@ -246,7 +315,28 @@ fn main() {
     if std::env::args().any(|a| a == "--self-test") {
         std::process::exit(selftest::run());
     }
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Single instance must be registered first. Dev drivers (spike, e2e) and DOWNLINK_NO_SINGLE_INSTANCE skip it.
+    #[cfg(not(any(feature = "spike", feature = "e2e")))]
+    let builder = if std::env::var_os("DOWNLINK_NO_SINGLE_INSTANCE").is_some() {
+        builder
+    } else {
+        builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+            deeplink::forward(
+                app,
+                argv.iter()
+                    .map(String::as_str)
+                    .filter(|a| a.starts_with("downlink://")),
+            );
+        }))
+    };
+    let builder = builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .on_page_load(|webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {

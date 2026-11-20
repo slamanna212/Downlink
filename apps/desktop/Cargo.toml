@@ -21,7 +21,9 @@ e2e = []
 downlink-player = { path = "../../crates/downlink-player" }
 downlink-platform = { path = "../../crates/downlink-platform" }
 downlink-core = { path = "../../crates/downlink-core" }
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 url = "2"
 zip = { version = "9", default-features = false, features = ["deflate"] }
