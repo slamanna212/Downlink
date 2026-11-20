@@ -301,6 +301,7 @@ export const en = {
   'guide.now': 'Now',
   'guide.jumpDay': 'Jump to day',
   'guide.noData': 'No guide data for this channel',
+  'guide.tune': 'Watch channel',
   'guide.grid': 'Programme guide',
   'guide.watchLive': 'Watch live',
   'guide.fromStart': 'From start',
