@@ -3,7 +3,9 @@
 > Desktop IPTV client for Dispatcharr, M3U/XMLTV and Xtream. Windows · macOS · Linux.
 > Revised 2026-11-19. This file is the source of truth; ADRs live in `docs/adr/`.
 > Reference server: Sam's Dispatcharr at `10.1.20.202:9191` (0.32.0 at time of writing; upstream 0.34.1).
-> No code exists yet.
+> Implementation: M0–M5 built (2026-11); Linux verified, Windows/macOS pending testers. Observed server
+> behaviour lives in `docs/dispatcharr-endpoints.md`; performance numbers in `docs/perf.md`; M0 record in
+> `docs/M0-go-no-go.md`.
 
 ## Contents
 
@@ -336,8 +338,8 @@ Dispatcharr's API is unversioned. Policy:
 | Logos | `GET /api/channels/logos/{id}/cache` |
 | Live play | `GET /proxy/ts/stream/{channel_uuid}` (HLS fallback: `/proxy/hls/<token>/index.m3u8`, stop with `DELETE /api/proxy/hls/sessions/<token>/`) |
 | Catch-up | `POST /api/catchup/sessions/`, `POST /api/catchup/sessions/{id}/position/`, `DELETE /api/catchup/sessions/{id}/` |
-| VOD | `GET /api/vod/movies/`, `/series/`, `/series/{id}/episodes/`, `/categories/`; images `…/{id}/image`; play `GET /proxy/vod/{content_type}/{content_id}` |
-| DVR | `GET/POST /api/channels/recordings/`, `…/{id}/stop`, `…/{id}/extend`, `…/{id}/file`, in-progress `/hls/{seg_path}`; `recurring-rules/`, `series-rules/` (list, create, delete) |
+| VOD | `GET /api/vod/movies/`, `/series/`, `/series/{id}/episodes/`, `/categories/`; images `…/{id}/image`; play `GET /proxy/vod/{content_type}/{content_id}`. Details/episodes are lazy until `…/{id}/provider-info/` is called; episode payloads embed the provider account incl. credentials — parse typed fields only (see endpoints doc) |
+| DVR | `GET/POST /api/channels/recordings/` (bare array), `…/{id}/stop`, `…/{id}/extend` (`{"extra_minutes": n}`), `…/{id}/file`, in-progress `…/{id}/hls/index.m3u8`; `recurring-rules/` (list, delete), `series-rules/` (`{"rules": […]}`; create then `series-rules/evaluate/`; delete by `?tvg_id=&title=`) |
 | My session | `GET /proxy/ts/status/{channel_id}` (shape verified in M1) |
 | App data | `GET/PUT /api/accounts/users/me/app-data/{key}/` |
 
@@ -444,6 +446,10 @@ cache=yes   demuxer-readahead-secs=20   demuxer-max-bytes=128MiB   demuxer-max-b
 
 M0 checks whether `gpu-next` is available through the render API in the pinned build; if not, the
 render-API platforms use the default libmpv renderer and HDR tone mapping is verified separately.
+
+**M0 result (Linux, mpv 0.40.0):** `vo=gpu-next` is not available through the render API, so render-API
+platforms use `vo=libmpv`; HDR tone mapping is verified separately per platform. mpv also needs `ytdl=no`,
+`load-scripts=no` and `LC_NUMERIC=C` (see ADR-0001/0002).
 
 ### 4.4 Session state machine
 
