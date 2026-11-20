@@ -37,6 +37,7 @@ import { useNowEpoch } from '../../lib/useNow';
 import { usePlayerStore } from '../../store/player';
 import { useUiStore } from '../../store/ui';
 import { copyDiagnostics } from '../diagnostics/copyDiagnostics';
+import { resumeUseful } from '../vod/vod';
 import { playChannel, restartProgramme } from './actions';
 import classes from './Player.module.css';
 
@@ -318,7 +319,7 @@ export function PlayerPage() {
   const shownProg = catchup ? player.programme : prog;
   const position = player.position ?? 0;
   const duration = player.duration ?? 0;
-  const showResume = timeshift && player.resumeAt != null && player.resumeAt > 0 && resumeDismissed !== player.programme?.id;
+  const showResume = timeshift && resumeUseful(player.resumeAt, player.duration) && resumeDismissed !== player.programme?.id;
 
   return (
     <div ref={rootRef} className={classes.root} data-video-rect data-idle={barHidden || undefined}>

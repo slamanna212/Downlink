@@ -64,7 +64,7 @@ export interface Commands {
   set_fullscreen: { args: { enabled: boolean }; result: null };
   get_guide: { args: GuideArgs; result: GuideResult };
   get_programmes: { args: { channelId: number; start: number; end: number }; result: Programme[] };
-  play_catchup: { args: { programmeId: string }; result: null };
+  play_catchup: { args: { programmeId: string; resume?: boolean }; result: null };
   restart_programme: { args: { channelId: number }; result: null };
   schedule_recording: { args: { programmeId: string; kind: RecordKind }; result: null };
   get_home: { args: Record<string, never>; result: HomeData };

@@ -34,8 +34,12 @@ function useActions() {
     live: (ch: Channel) => go(playChannel(ch.id)),
     open: (it: ContinueItem) => {
       if (it.kind === 'live' && it.channel) go(playChannel(it.channel.id));
-      else if (it.kind === 'catchup' && it.programme) go(playCatchup(it.programme.id));
-      else if (it.kind === 'catchup' && it.channel) go(restartProgramme(it.channel.id));
+      else if (it.kind === 'catchup') {
+        // id is `catchup:<channelId>:<startUtc>`; the programme id is `<channelId>:<startUtc>`. Resume at the saved position.
+        const pid = it.programme?.id ?? it.id.split(':').slice(1).join(':');
+        if (pid.includes(':')) go(playCatchup(pid, true));
+        else if (it.channel) go(restartProgramme(it.channel.id));
+      }
       else if (it.kind === 'movie' || it.kind === 'episode') go(playVod(it.kind, Number(it.id.split(':')[1]), true));
       else if (it.kind === 'recording') go(playRecording(Number(it.id.split(':')[1])));
     },

@@ -202,12 +202,13 @@ export function createMockBackend(): Backend {
       return { channels: list, programmes: list.flatMap((c) => genProgrammes(c.id, start, end, scheduled)) };
     },
     get_programmes: ({ channelId, start, end }) => genProgrammes(channelId, start, end, scheduled),
-    play_catchup: ({ programmeId }) => {
+    play_catchup: ({ programmeId, resume }) => {
       const [cid, st] = programmeId.split(':').map(Number);
       const p = genProgrammes(cid ?? 0, st ?? 0, (st ?? 0) + 1, scheduled).find((x) => x.id === programmeId);
       if (!p) throw appError('stream', 'That programme is not available to play.');
       const dur = p.endUtc - p.startUtc;
-      setPlayer({ state: 'Resolving', mode: 'catchup', channelId: p.channelId, programme: p, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: p.channelId % 2 === 0 ? Math.floor(dur / 3) : null, error: null });
+      const saved = p.channelId % 2 === 0 ? Math.floor(dur / 3) : null;
+      setPlayer({ state: 'Resolving', mode: 'catchup', channelId: p.channelId, programme: p, position: resume && saved ? saved : 0, duration: dur, buffered: 0, seekable: true, resumeAt: resume ? null : saved, error: null });
       seekableTicker('catchup');
       return null;
     },
@@ -234,7 +235,7 @@ export function createMockBackend(): Backend {
         continueWatching: [
           ...(live ? [{ kind: 'live' as const, id: `live:${live.id}`, channel: live, programme: nnOf(live).now, title: nnOf(live).now?.title ?? live.name, subtitle: live.name, art: null, progress: null, remainingSecs: null }] : []),
           { kind: 'movie' as const, id: 'movie:1', channel: null, programme: null, title: 'Night Train', subtitle: 'Movie · 1 h 12 min left', art: null, progress: 0.35, remainingSecs: 4320 },
-          ...(cu ? [{ kind: 'catchup' as const, id: `catchup:${cu.id}`, channel: cu, programme: null, title: 'Fieldwork S2 E3', subtitle: `${cu.name} · Yesterday 21:00`, art: null, progress: 0.5, remainingSecs: 1800 }] : []),
+          ...(cu ? [{ kind: 'catchup' as const, id: `catchup:${nnOf(cu).now?.id ?? `${cu.id}:${nowSec() - 3600}`}`, channel: cu, programme: null, title: 'Fieldwork S2 E3', subtitle: `${cu.name} · Yesterday 21:00`, art: null, progress: 0.5, remainingSecs: 1800 }] : []),
         ],
         favourites: favs,
         onNow: favs.map((c) => ({ channel: c, now: nnOf(c).now })),

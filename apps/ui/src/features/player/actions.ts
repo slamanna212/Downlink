@@ -15,9 +15,9 @@ export async function playChannel(channelId: number): Promise<AppError | null> {
   }
 }
 
-export async function playCatchup(programmeId: string): Promise<AppError | null> {
+export async function playCatchup(programmeId: string, resume = false): Promise<AppError | null> {
   try {
-    await invoke('play_catchup', { programmeId });
+    await invoke('play_catchup', { programmeId, resume });
     return null;
   } catch (e) {
     const err = toAppError(e);
