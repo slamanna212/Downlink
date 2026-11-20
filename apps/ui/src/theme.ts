@@ -125,6 +125,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-accent-banner': 'rgb(157 140 255 / 0.10)', // banners, progress fill in blocks
     '--dl-accent-tint': 'rgb(157 140 255 / 0.14)',   // accent badges, toggled icon buttons
     '--dl-accent-glow': 'rgb(157 140 255 / 0.24)',   // focus ring halo only
+    '--dl-accent-bar': 'rgb(157 140 255 / 0.55)',    // info panel buffer graph bars only
     // status
     '--dl-live': '#F2495C',
     '--dl-live-text': '#FF8B97',

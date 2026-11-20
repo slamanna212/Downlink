@@ -64,13 +64,22 @@ function ZapPill({ channel, title, until }: { channel: Channel; title: string | 
   );
 }
 
-function useSessionStats(enabled: boolean): SessionStats | null {
+const BUFFER_SLOTS = 30;
+
+/** Live stats (1 Hz) plus the last `BUFFER_SLOTS` buffer samples for the graph. */
+function useSessionStats(enabled: boolean): { stats: SessionStats | null; bufferHistory: number[] } {
   const [stats, setStats] = useState<SessionStats | null>(null);
+  const [bufferHistory, setBufferHistory] = useState<number[]>([]);
   useEffect(() => {
     if (!enabled) return;
     let off: (() => void) | null = null;
     let cancelled = false;
-    void listen('session://stats', setStats).then((u) => (cancelled ? u() : (off = u)));
+    const onStats = (s: SessionStats) => {
+      setStats(s);
+      const secs = s.bufferSecs;
+      if (secs != null) setBufferHistory((h) => [...h, secs].slice(-BUFFER_SLOTS));
+    };
+    void listen('session://stats', onStats).then((u) => (cancelled ? u() : (off = u)));
     void invoke('set_stats_enabled', { enabled: true }).catch(() => undefined);
     return () => {
       cancelled = true;
@@ -78,12 +87,32 @@ function useSessionStats(enabled: boolean): SessionStats | null {
       void invoke('set_stats_enabled', { enabled: false }).catch(() => undefined);
     };
   }, [enabled]);
-  return enabled ? stats : null;
+  return enabled ? { stats, bufferHistory } : { stats: null, bufferHistory: [] };
+}
+
+function BufferGraph({ history }: { history: number[] }) {
+  const now = history.at(-1);
+  const secs = now != null ? now.toFixed(1) : '–';
+  const scale = Math.max(1, ...history);
+  const pad = BUFFER_SLOTS - history.length;
+  return (
+    <div>
+      <div className={classes.infoLabel}>{t('player.info.buffer', { secs })}</div>
+      <div className={classes.bufferGraph} role="img" aria-label={t('player.info.bufferGraph', { secs })}>
+        {Array.from({ length: pad }, (_, i) => (
+          <div key={`pad-${i}`} className={classes.bufferSlot} aria-hidden />
+        ))}
+        {history.map((v, i) => (
+          <div key={i} className={classes.bufferBar} style={{ height: `${Math.max(4, (v / scale) * 100)}%` }} aria-hidden />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerState; sourceName: string; channel: Channel | undefined; onClose: () => void }) {
   const diag = useQuery({ queryKey: ['diagnostics', 'session'], queryFn: () => invoke('get_diagnostics', {}), refetchInterval: 1000 });
-  const stats = useSessionStats(true);
+  const { stats, bufferHistory } = useSessionStats(true);
   const dash = '–';
   const rows: [string, string][] = [
     [t('player.info.source'), sourceName],
@@ -95,7 +124,6 @@ function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerSta
     [t('player.info.bitrate'), stats?.bitrateKbps != null ? `${(stats.bitrateKbps / 1000).toFixed(1)} Mb/s` : dash],
     [t('player.info.dropped'), stats?.droppedFrames != null ? String(stats.droppedFrames) : dash],
     [t('player.info.decoder'), stats?.hwdecCurrent ?? player.hwdecCurrent ?? dash],
-    [t('player.info.buffer'), stats?.bufferSecs != null ? `${stats.bufferSecs.toFixed(1)} s` : dash],
     [t('player.info.state'), player.state],
   ];
   const trans = (diag.data?.transitions ?? []).slice(-3);
@@ -111,7 +139,8 @@ function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerSta
           <span className={classes.infoValue}>{v}</span>
         </div>
       ))}
-      <div className={classes.infoLabel}>{t('player.info.session')}</div>
+      <BufferGraph history={bufferHistory} />
+      <div className={`${classes.infoLabel} ${classes.infoLabelPlain}`}>{t('player.info.session')}</div>
       <div className={classes.session}>
         {trans.map((x) => (
           <div key={x.at}>

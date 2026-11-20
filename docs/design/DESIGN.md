@@ -42,7 +42,8 @@ The reference uses synthetic channel names. Where this file and the reference di
 ### Accent: Iris (`colors.iris`, primary)
 `--dl-accent #9D8CFF` (focus ring, progress, selected indicator, primary fill) ·
 `--dl-accent-hover #B5A8FF` · `--dl-accent-pressed #8571F5` · `--dl-accent-text #BDB2FF` (accent text/icons:
-catch-up, playing row, links) · `--dl-on-accent #120A33` (text on accent fill, never elsewhere).
+catch-up, playing row, links) · `--dl-on-accent #120A33` (text on accent fill, never elsewhere) ·
+`--dl-accent-bar` (accent at 55%: info panel buffer graph bars only; a data mark, not a tint).
 
 ### Status
 - Live `#F2495C`: dot, now line, REC dot. Text `#FF8B97` on 18% tint. Never solid red with white text.
@@ -142,7 +143,8 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   `--dl-guide-future` · scheduled red dot · focused ring.
 - **Player**: full-bleed video, bottom `--dl-scrim` with badge row, 30/650 title, timeline, 44 px controls.
   Live timeline = programme start→end. Catch-up = position (accent), buffered (white 32%), thumb + time
-  tooltip, Go live (live variant, `End`). Info panel 380 px right, mono values. Zap pill top-left 1.2 s.
+  tooltip, Go live (live variant, `End`). Info panel 380 px right, mono values, then
+  a BUFFER · n s graph (last 30 samples at 1 Hz, 36 px bars, `--dl-accent-bar`). Zap pill top-left 1.2 s.
   Number entry pill top-right with accent caret.
 
 ## 9. Multiview

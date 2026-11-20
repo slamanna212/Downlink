@@ -199,6 +199,27 @@
   text-transform: uppercase;
   color: var(--dl-text-faint);
 }
+.infoLabelPlain {
+  margin-top: var(--mantine-spacing-md);
+  padding-top: 0;
+  border-top: 0;
+}
+/* buffer graph: last 30 samples, newest on the right */
+.bufferGraph {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--mantine-spacing-xs);
+  height: 36px;
+}
+.bufferSlot,
+.bufferBar {
+  flex: 1;
+  min-width: 0;
+}
+.bufferBar {
+  border-radius: var(--mantine-radius-xs);
+  background: var(--dl-accent-bar);
+}
 .session {
   font-family: var(--mantine-font-family-monospace);
   font-size: var(--mantine-font-size-xs);
