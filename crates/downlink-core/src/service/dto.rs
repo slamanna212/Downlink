@@ -365,6 +365,38 @@ pub struct AltStreamDto {
     pub index: usize,
     pub stream_id: String,
     pub name: String,
+    /// Provider (M3U/XC account) name, when the server shares it.
+    pub provider: Option<String>,
+    /// `WIDTHxHEIGHT` as probed by the server.
+    pub resolution: Option<String>,
+    pub fps: Option<f64>,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub audio_channels: Option<String>,
+    /// kbit/s.
+    pub bitrate_kbps: Option<f64>,
+    pub viewers: Option<i64>,
+    pub stale: bool,
+}
+
+impl AltStreamDto {
+    /// A stream known only by id and display name (no server metadata).
+    pub fn bare(index: usize, stream_id: String, name: String) -> Self {
+        Self {
+            index,
+            stream_id,
+            name,
+            provider: None,
+            resolution: None,
+            fps: None,
+            video_codec: None,
+            audio_codec: None,
+            audio_channels: None,
+            bitrate_kbps: None,
+            viewers: None,
+            stale: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

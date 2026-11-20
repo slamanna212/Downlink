@@ -166,6 +166,19 @@ export interface AltStream {
   index: number;
   streamId: string;
   name: string;
+  /** Provider (M3U/XC account) name, when the server shares it. */
+  provider: string | null;
+  /** `WIDTHxHEIGHT` as probed by the server. */
+  resolution: string | null;
+  fps: number | null;
+  videoCodec: string | null;
+  audioCodec: string | null;
+  audioChannels: string | null;
+  /** kbit/s. */
+  bitrateKbps: number | null;
+  viewers: number | null;
+  /** The provider stopped listing this stream. */
+  stale: boolean;
 }
 
 /** One multiview tile. Slot 0 is the main player (its playback state is `PlayerState`). */

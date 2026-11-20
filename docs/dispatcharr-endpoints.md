@@ -68,7 +68,10 @@ effective_stream_profile_id, effective_is_radio`. Prefer the `effective_*` field
 
 `Stream` adds `url` (provider URL, **do not log**), `m3u_account`, `stream_stats{resolution, source_fps, video_codec,
 audio_codec, audio_channels, pixel_format, …}`, `stream_id` (XC id, null for plain M3U), `stream_chno`,
-`is_catchup`, `catchup_days`, `is_stale`, `current_viewers`.
+`is_catchup`, `catchup_days`, `is_stale`, `current_viewers`. The stream picker shows `stream_stats`, `current_viewers`,
+`is_stale` and the provider name, looked up from `m3u_account` (an id) via `GET /api/m3u/accounts/`. That reply carries
+the provider's `server_url`, `username` and `password`: decode only `{id, name}` and never log it. Non-admin accounts may
+be refused; the picker then shows no provider names (the refusal is cached for 10 minutes).
 
 ## Guide and programmes
 

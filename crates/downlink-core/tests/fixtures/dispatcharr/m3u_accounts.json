@@ -1,0 +1,6 @@
+[
+  {"id": 1, "name": "Provider Alpha", "account_type": "XC", "server_url": "http://provider.test",
+   "username": "someuser", "password": "somepass", "is_active": true},
+  {"id": 2, "name": "Provider Beta", "account_type": "STD", "server_url": "http://provider.test/list.m3u",
+   "username": null, "password": null, "is_active": true}
+]

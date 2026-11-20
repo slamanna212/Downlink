@@ -1,4 +1,8 @@
 [
-  {"id": 12, "name": "Source B", "url": "http://provider.test/live/someuser/somepass/12.ts", "m3u_account": 1},
-  {"id": 11, "name": "Source A", "url": "http://provider.test/live/someuser/somepass/11.ts", "m3u_account": 1}
+  {"id": 12, "name": "Source B", "url": "http://provider.test/live/someuser/somepass/12.ts", "m3u_account": 1,
+   "current_viewers": 2, "is_stale": false,
+   "stream_stats": {"resolution": "1920x1080", "source_fps": 29.97, "video_codec": "h264", "audio_codec": "aac",
+                    "audio_channels": "stereo", "ffmpeg_output_bitrate": 6468.2}},
+  {"id": 11, "name": "Source A", "url": "http://provider.test/live/someuser/somepass/11.ts", "m3u_account": 2,
+   "stream_stats": null}
 ]

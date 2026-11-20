@@ -212,6 +212,54 @@ async fn endpoint_channel_streams_keeps_order_and_drops_provider_urls() {
 }
 
 #[tokio::test]
+async fn endpoint_channel_stream_info_names_providers_and_drops_their_credentials() {
+    let server = MockServer::start().await;
+    get_mock(
+        &server,
+        "/api/channels/channels/1/streams/",
+        fixture!("channel_streams.json"),
+    )
+    .await;
+    get_mock(&server, "/api/m3u/accounts/", fixture!("m3u_accounts.json")).await;
+    let s = client(&server).channel_stream_info(1).await.unwrap();
+    assert_eq!(s.len(), 2);
+    assert_eq!(s[0].id, "12");
+    assert_eq!(s[0].provider.as_deref(), Some("Provider Alpha"));
+    assert_eq!(s[0].resolution.as_deref(), Some("1920x1080"));
+    assert_eq!(s[0].video_codec.as_deref(), Some("h264"));
+    assert_eq!(s[0].audio_channels.as_deref(), Some("stereo"));
+    assert_eq!(s[0].viewers, Some(2));
+    assert!(s[0].bitrate_kbps.is_some_and(|b| b > 6000.0));
+    assert_eq!(s[1].provider.as_deref(), Some("Provider Beta"));
+    assert_eq!(s[1].resolution, None, "missing stats stay empty");
+    let dump = format!("{s:?}");
+    assert!(!dump.contains("provider.test") && !dump.contains("somepass"));
+}
+
+#[tokio::test]
+async fn channel_stream_info_without_account_access_still_lists_streams() {
+    let server = MockServer::start().await;
+    get_mock(
+        &server,
+        "/api/channels/channels/1/streams/",
+        fixture!("channel_streams.json"),
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path("/api/m3u/accounts/"))
+        .respond_with(ResponseTemplate::new(403))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = client(&server);
+    let s = c.channel_stream_info(1).await.unwrap();
+    assert_eq!(s.len(), 2);
+    assert!(s.iter().all(|x| x.provider.is_none()));
+    // The refusal is cached: a second open does not ask again.
+    c.channel_stream_info(1).await.unwrap();
+}
+
+#[tokio::test]
 async fn endpoint_stream_profiles_and_redirect_detection() {
     let server = MockServer::start().await;
     get_mock(

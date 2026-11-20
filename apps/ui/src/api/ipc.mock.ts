@@ -508,7 +508,11 @@ export function createMockBackend(): Backend {
       channelId,
       sourceIndex: (streamInUse.get(channelId) ?? 0) + 1,
       sourceCount: 3,
-      streams: ['Primary', 'Backup A', 'Backup B'].map((name, index) => ({ index, streamId: `s${channelId}-${index}`, name: `${name} · 1080p` })),
+      streams: [
+        { name: 'Primary', provider: 'Demo provider A', resolution: '1920x1080', fps: 29.97, videoCodec: 'h264', audioCodec: 'aac', audioChannels: 'stereo', bitrateKbps: 6468.2, viewers: 1, stale: false },
+        { name: 'Backup A', provider: 'Demo provider B', resolution: '1280x720', fps: 59.94, videoCodec: 'hevc', audioCodec: 'ac3', audioChannels: '5.1', bitrateKbps: 3120, viewers: 0, stale: false },
+        { name: 'Backup B', provider: null, resolution: null, fps: null, videoCodec: null, audioCodec: null, audioChannels: null, bitrateKbps: null, viewers: null, stale: true },
+      ].map((s, index) => ({ index, streamId: `s${channelId}-${index}`, ...s })),
     }),
     switch_stream: ({ channelId, index }) => {
       if (player.channelId !== channelId || player.mode !== 'live') throw appError('local', 'Switch streams while the channel is playing live.');

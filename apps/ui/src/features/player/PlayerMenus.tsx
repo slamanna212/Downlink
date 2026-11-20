@@ -2,7 +2,7 @@ import { Menu } from '@mantine/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { IconArrowsShuffle, IconBadgeCc, IconCheck, IconLanguage } from '@tabler/icons-react';
 import { invoke, toAppError } from '../../api/ipc';
-import type { Track } from '../../api/types';
+import type { AltStream, Track } from '../../api/types';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { Icon } from '../../components/Icon/Icon';
 import { notifyError } from '../../components/Notify/notify';
@@ -15,6 +15,33 @@ export function trackLabel(track: Track): string {
     (p): p is string => !!p,
   );
   return parts.length ? parts.join(' · ') : t('player.track', { n: track.id });
+}
+
+const VIDEO_CODECS: Record<string, string> = { h264: 'H.264', avc: 'H.264', hevc: 'HEVC', h265: 'HEVC', mpeg2video: 'MPEG-2', av1: 'AV1', vp9: 'VP9' };
+
+/** Trim to at most two decimals without trailing zeros: 30 → "30", 29.97 → "29.97". */
+const num = (n: number) => String(Number(n.toFixed(2)));
+
+/** Second line of a stream picker row: "1080p · 29.97 fps · H.264 · AAC stereo · 6.5 Mbps · 1 watching". */
+export function streamDetails(s: AltStream): string {
+  const height = s.resolution?.match(/^\s*\d+\s*x\s*(\d+)\s*$/i)?.[1];
+  const audio = [s.audioCodec?.toUpperCase(), s.audioChannels].filter(Boolean).join(' ');
+  const bitrate =
+    s.bitrateKbps == null
+      ? null
+      : s.bitrateKbps >= 1000
+        ? t('player.streamMbps', { n: String(Number((s.bitrateKbps / 1000).toFixed(1))) })
+        : t('player.streamKbps', { n: Math.round(s.bitrateKbps) });
+  const parts = [
+    s.stale ? t('player.streamStale') : null,
+    height ? `${height}p` : s.resolution,
+    s.fps != null ? t('player.streamFps', { n: num(s.fps) }) : null,
+    s.videoCodec ? (VIDEO_CODECS[s.videoCodec.toLowerCase()] ?? s.videoCodec.toUpperCase()) : null,
+    audio || null,
+    bitrate,
+    s.viewers ? t('player.streamViewers', { n: s.viewers }) : null,
+  ].filter((p): p is string => !!p);
+  return parts.length ? parts.join(' · ') : t('player.streamNoInfo');
 }
 
 interface MenuProps {
@@ -109,7 +136,11 @@ export function StreamMenu({ channelId, opened, onChange, onDenied }: MenuProps 
             leftSection={<Check on={s.index === current} />} aria-current={s.index === current || undefined}
             onClick={() => pick(s.index)}
           >
-            {s.name}
+            <span className={classes.streamName}>
+              {s.name}
+              {s.provider && <span className={classes.streamProvider}> · {s.provider}</span>}
+            </span>
+            <span className={classes.streamMeta}>{streamDetails(s)}</span>
           </Menu.Item>
         ))}
         <Menu.Divider />

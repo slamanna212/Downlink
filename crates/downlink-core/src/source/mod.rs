@@ -303,6 +303,27 @@ pub enum StreamMode {
     Unknown = 2,
 }
 
+/// One provider stream of a channel as the stream picker shows it. Names and probe stats only;
+/// provider URLs are never carried.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StreamInfo {
+    pub id: String,
+    pub name: String,
+    /// Name of the provider (M3U/XC account) the stream comes from, when the server shares it.
+    pub provider: Option<String>,
+    /// `WIDTHxHEIGHT` as probed by the server.
+    pub resolution: Option<String>,
+    pub fps: Option<f64>,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub audio_channels: Option<String>,
+    /// Measured bitrate, kbit/s.
+    pub bitrate_kbps: Option<f64>,
+    pub viewers: Option<i64>,
+    /// The provider stopped listing this stream at its last refresh.
+    pub stale: bool,
+}
+
 /// Stream profiles relevant to redirect detection.
 #[derive(Debug, Clone, Default)]
 pub struct ProfileInfo {
@@ -367,9 +388,9 @@ pub trait Source: Send + Sync {
     async fn change_stream(&self, _ch: &ChannelKey, _stream_id: &str) -> Result<bool> {
         Ok(false)
     }
-    /// `(stream id, name)` of a channel's provider streams in failover order (names only; provider
-    /// URLs are never returned).
-    async fn channel_stream_names(&self, _ch_ext_id: &str) -> Result<Vec<(String, String)>> {
+    /// A channel's provider streams in failover order (names and stats only; provider URLs are
+    /// never returned).
+    async fn channel_stream_info(&self, _ch_ext_id: &str) -> Result<Vec<StreamInfo>> {
         Ok(Vec::new())
     }
     // ---- VOD (PLAN M4) --------------------------------------------------------------------

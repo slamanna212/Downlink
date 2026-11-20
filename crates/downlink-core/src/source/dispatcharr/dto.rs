@@ -279,12 +279,49 @@ impl StreamProfileDto {
 }
 
 /// A stream attached to a channel. The provider `url` is intentionally not captured.
-#[derive(Debug, Deserialize, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Deserialize, Default, Clone, PartialEq)]
 pub struct StreamDto {
     #[serde(default, deserialize_with = "de_string")]
     pub id: String,
     #[serde(default, deserialize_with = "de_string")]
     pub name: String,
+    /// Id of the M3U/XC account the stream belongs to.
+    #[serde(default, deserialize_with = "de_opt_i64")]
+    pub m3u_account: Option<i64>,
+    #[serde(default)]
+    pub stream_stats: Option<StreamStatsDto>,
+    #[serde(default, deserialize_with = "de_opt_i64")]
+    pub current_viewers: Option<i64>,
+    #[serde(default, deserialize_with = "de_bool")]
+    pub is_stale: bool,
+}
+
+/// The server's ffprobe summary of a stream (`stream_stats`). Every field is optional.
+#[derive(Debug, Deserialize, Default, Clone, PartialEq)]
+pub struct StreamStatsDto {
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub resolution: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_f64")]
+    pub source_fps: Option<f64>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub video_codec: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub audio_codec: Option<String>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub audio_channels: Option<String>,
+    /// kbit/s.
+    #[serde(default, deserialize_with = "de_opt_f64")]
+    pub ffmpeg_output_bitrate: Option<f64>,
+}
+
+/// `id` and `name` of an M3U/XC account. The reply also carries the provider's credentials;
+/// they are deliberately not modelled so they are dropped at decode.
+#[derive(Debug, Deserialize, Default, Clone, PartialEq, Eq)]
+pub struct M3uAccountNameDto {
+    #[serde(default, deserialize_with = "de_opt_i64")]
+    pub id: Option<i64>,
+    #[serde(default, deserialize_with = "de_opt_string")]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]

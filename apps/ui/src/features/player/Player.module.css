@@ -315,7 +315,22 @@
   width: 16px;
   color: var(--dl-accent-text);
 }
-.streamMenu { max-width: 340px; }
+.streamMenu { max-width: 380px; }
+.streamName {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.streamProvider { color: var(--dl-text-dim); }
+.streamMeta {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--dl-text-dim);
+}
 .menuNote {
   padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
   font-size: var(--mantine-font-size-xs);

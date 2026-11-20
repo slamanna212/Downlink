@@ -25,7 +25,7 @@ use self::dto::*;
 use super::{
     AccountInfo, Caps, ChannelKey, ChannelPage, Page, PlayPlan, PlayProfile, ProfileInfo,
     ProgramSearch, Programme, RecordRequest, RecordingInfo, RuleInfo, SessionId, Source,
-    SourceChannel, SourceGroup, SourceId, SourceKind, StreamMode, Surface, TimeWindow,
+    SourceChannel, SourceGroup, SourceId, SourceKind, StreamInfo, StreamMode, Surface, TimeWindow,
     VodCategoryInfo, VodItem, VodKind, VodListPage, VodListQuery,
 };
 use crate::auth::SecretString;
@@ -174,7 +174,16 @@ pub struct DispatcharrClient {
     can_switch: std::sync::atomic::AtomicBool,
     /// `epg data id -> tvg_id`, reused across the channel pages of one sync (see [`EPG_MAP_TTL`]).
     epg_map: tokio::sync::Mutex<Option<(std::time::Instant, EpgMap)>>,
+    /// `m3u account id -> name` for the stream picker (see [`ACCOUNT_NAMES_TTL`]).
+    account_names: tokio::sync::Mutex<Option<(std::time::Instant, AccountNames)>>,
 }
+
+/// `m3u account id -> name`.
+type AccountNames = std::sync::Arc<HashMap<i64, String>>;
+
+/// How long the provider account names serve the stream picker before they are fetched again.
+/// A refused fetch (non-admin accounts) is cached for as long, so it is not retried on every open.
+const ACCOUNT_NAMES_TTL: Duration = Duration::from_secs(600);
 
 /// `epg data id -> tvg_id`.
 type EpgMap = std::sync::Arc<HashMap<i64, String>>;
@@ -266,6 +275,7 @@ impl DispatcharrClient {
             has_dvr: std::sync::atomic::AtomicBool::new(false),
             can_switch: std::sync::atomic::AtomicBool::new(false),
             epg_map: tokio::sync::Mutex::new(None),
+            account_names: tokio::sync::Mutex::new(None),
         })
     }
 
@@ -748,6 +758,62 @@ impl DispatcharrClient {
             _ => Vec::new(),
         };
         Ok(Self::parse_items(items, "streams"))
+    }
+
+    /// Provider account names by id. Only `id` and `name` are decoded; the reply's provider
+    /// credentials are dropped at decode and never stored. Empty when the server refuses.
+    async fn account_name_map(&self) -> AccountNames {
+        let mut cache = self.account_names.lock().await;
+        if let Some((at, m)) = cache.as_ref()
+            && at.elapsed() < ACCOUNT_NAMES_TTL
+        {
+            return m.clone();
+        }
+        let m: HashMap<i64, String> = match self
+            .fetch_all("api/m3u/accounts/", &[], "its provider accounts")
+            .await
+        {
+            Ok(items) => Self::parse_items::<M3uAccountNameDto>(items, "provider accounts")
+                .into_iter()
+                .filter_map(|a| Some((a.id?, a.name?)))
+                .collect(),
+            Err(e) => {
+                tracing::debug!(error = %e, "provider account names unavailable");
+                HashMap::new()
+            }
+        };
+        let m = std::sync::Arc::new(m);
+        *cache = Some((std::time::Instant::now(), m.clone()));
+        m
+    }
+
+    /// A channel's streams with their provider names filled in where the server shares them.
+    pub async fn channel_stream_info(&self, channel_id: i64) -> Result<Vec<StreamInfo>> {
+        let streams = self.channel_streams(channel_id).await?;
+        let names = if streams.iter().any(|s| s.m3u_account.is_some()) {
+            self.account_name_map().await
+        } else {
+            AccountNames::default()
+        };
+        Ok(streams
+            .into_iter()
+            .map(|s| {
+                let st = s.stream_stats.unwrap_or_default();
+                StreamInfo {
+                    provider: s.m3u_account.and_then(|a| names.get(&a).cloned()),
+                    id: s.id,
+                    name: s.name,
+                    resolution: st.resolution,
+                    fps: st.source_fps.filter(|f| *f > 0.0),
+                    video_codec: st.video_codec,
+                    audio_codec: st.audio_codec,
+                    audio_channels: st.audio_channels,
+                    bitrate_kbps: st.ffmpeg_output_bitrate.filter(|b| *b > 0.0),
+                    viewers: s.current_viewers,
+                    stale: s.is_stale,
+                }
+            })
+            .collect())
     }
 
     pub async fn stream_profiles(&self) -> Result<Vec<StreamProfileDto>> {
@@ -1399,16 +1465,11 @@ impl Source for DispatcharrClient {
         }
     }
 
-    async fn channel_stream_names(&self, ch_ext_id: &str) -> Result<Vec<(String, String)>> {
+    async fn channel_stream_info(&self, ch_ext_id: &str) -> Result<Vec<StreamInfo>> {
         let id: i64 = ch_ext_id
             .parse()
             .map_err(|_| AppError::local("Not a channel id."))?;
-        Ok(self
-            .channel_streams(id)
-            .await?
-            .into_iter()
-            .map(|s| (s.id, s.name))
-            .collect())
+        DispatcharrClient::channel_stream_info(self, id).await
     }
 
     async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {

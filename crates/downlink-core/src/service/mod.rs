@@ -1585,33 +1585,36 @@ impl Service {
             .ok_or_else(|| AppError::local("That channel is no longer in the list."))?;
         let client = self.client(ch.source_id).await?;
         let mut streams: Vec<AltStreamDto> = client
-            .channel_stream_names(&ch.ext_id)
+            .channel_stream_info(&ch.ext_id)
             .await
             .unwrap_or_default()
             .into_iter()
             .enumerate()
-            .map(|(index, (stream_id, name))| AltStreamDto {
+            .map(|(index, s)| AltStreamDto {
                 index,
-                stream_id,
-                name,
+                stream_id: s.id,
+                name: s.name,
+                provider: s.provider,
+                resolution: s.resolution,
+                fps: s.fps,
+                video_codec: s.video_codec,
+                audio_codec: s.audio_codec,
+                audio_channels: s.audio_channels,
+                bitrate_kbps: s.bitrate_kbps,
+                viewers: s.viewers,
+                stale: s.stale,
             })
             .collect();
         if streams.is_empty() {
             // Fall back to the failover ids stored at sync (names unknown), or a single entry.
             let ids = self.store.channel_stream_ids(channel_id).await?;
             streams = if ids.is_empty() {
-                vec![AltStreamDto {
-                    index: 0,
-                    stream_id: ch.ext_id.clone(),
-                    name: ch.name.clone(),
-                }]
+                vec![AltStreamDto::bare(0, ch.ext_id.clone(), ch.name.clone())]
             } else {
                 ids.into_iter()
                     .enumerate()
-                    .map(|(index, stream_id)| AltStreamDto {
-                        index,
-                        name: format!("Stream {}", index + 1),
-                        stream_id,
+                    .map(|(index, stream_id)| {
+                        AltStreamDto::bare(index, stream_id, format!("Stream {}", index + 1))
                     })
                     .collect()
             };
