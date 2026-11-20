@@ -38,6 +38,9 @@ pub fn spawn(app: AppHandle, mode: String) {
             "zap" => zap(&st).await,
             "failover" => failover(&st).await,
             "smoke" => smoke(&st).await,
+            "perf-setup" => perf_setup(&st).await,
+            "perf" => perf(&st).await,
+            "launch" => launch(&st).await,
             _ => full(&st, &db).await,
         };
         if let Err(e) = r {
@@ -373,5 +376,280 @@ async fn smoke(st: &AppState) -> Result<(), String> {
             json!({ "step": "recording_state", "error": dto.error.as_ref().map(|e| e.message.clone()), "mode": dto.mode, "title": dto.title, "seekable": dto.seekable, "position": dto.position }),
         );
     }
+    Ok(())
+}
+
+// ---- perf harness (PLAN §8.8) -------------------------------------------------------------------
+
+pub static UI_METRICS: std::sync::Mutex<Option<serde_json::Value>> = std::sync::Mutex::new(None);
+
+/// Called by the injected script in the webview with first-render timings.
+#[tauri::command]
+pub fn perf_report(metrics: serde_json::Value) {
+    if let Ok(mut m) = UI_METRICS.lock() {
+        *m = Some(metrics);
+    }
+}
+
+/// Init script (runs before the page): records when `#root` first gets children and reports.
+pub fn perf_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    let js = r#"(function () {
+  const rec = { timeOrigin: performance.timeOrigin };
+  const check = () => {
+    const root = document.getElementById('root');
+    if (root && root.children.length && rec.rootAt === undefined) rec.rootAt = performance.now();
+    if (root && root.innerText && root.innerText.length > 40 && rec.contentAt === undefined) rec.contentAt = performance.now();
+  };
+  new MutationObserver(check).observe(document, { childList: true, subtree: true, characterData: true });
+  setTimeout(() => {
+    check();
+    const fcp = performance.getEntriesByName('first-contentful-paint')[0];
+    rec.fcp = fcp ? fcp.startTime : null;
+    rec.visibility = document.visibilityState;
+    rec.domContentLoaded = performance.timing.domContentLoadedEventEnd - performance.timing.navigationStart;
+    window.__TAURI__.core.invoke('perf_report', { metrics: rec });
+  }, 3500);
+})();"#;
+    tauri::plugin::Builder::new("dl-perf")
+        .js_init_script(js.to_owned())
+        .build()
+}
+
+fn rss_kb(pid: u32) -> u64 {
+    std::fs::read_to_string(format!("/proc/{pid}/status"))
+        .ok()
+        .and_then(|t| {
+            t.lines()
+                .find(|l| l.starts_with("VmRSS:"))
+                .and_then(|l| l.split_whitespace().nth(1)?.parse().ok())
+        })
+        .unwrap_or(0)
+}
+
+/// RSS of this process and of the whole process tree (WebKit helper processes), in MiB.
+fn memory_mib() -> (u64, u64) {
+    let me = std::process::id();
+    let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    if let Ok(rd) = std::fs::read_dir("/proc") {
+        for e in rd.flatten() {
+            let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else {
+                continue;
+            };
+            let ppid = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .ok()
+                .and_then(|t| {
+                    t.rsplit_once(')')
+                        .and_then(|(_, r)| r.split_whitespace().nth(1)?.parse::<u32>().ok())
+                });
+            if let Some(pp) = ppid {
+                children.entry(pp).or_default().push(pid);
+            }
+        }
+    }
+    let mut total = 0;
+    let mut stack = vec![me];
+    while let Some(p) = stack.pop() {
+        total += rss_kb(p);
+        if let Some(c) = children.get(&p) {
+            stack.extend(c);
+        }
+    }
+    (rss_kb(me) / 1024, total / 1024)
+}
+
+fn stats(mut v: Vec<f64>) -> serde_json::Value {
+    v.sort_by(f64::total_cmp);
+    let at = |p: f64| {
+        v.get(((v.len() as f64 - 1.0) * p).round() as usize)
+            .copied()
+            .map(|x| (x * 100.0).round() / 100.0)
+    };
+    json!({ "n": v.len(), "p50": at(0.5), "p95": at(0.95), "max": v.last().map(|x| (x * 100.0).round() / 100.0) })
+}
+
+async fn timed<T, E>(f: impl std::future::Future<Output = Result<T, E>>) -> (f64, Option<T>) {
+    let t = Instant::now();
+    let r = f.await.ok();
+    (t.elapsed().as_secs_f64() * 1000.0, r)
+}
+
+/// `DOWNLINK_E2E=perf-setup`: import the generated 20k-channel playlist and 7-day guide as an M3U
+/// source (file paths from DOWNLINK_PERF_M3U / DOWNLINK_PERF_XMLTV).
+async fn perf_setup(st: &AppState) -> Result<(), String> {
+    let m3u = std::env::var("DOWNLINK_PERF_M3U").map_err(|_| "DOWNLINK_PERF_M3U missing")?;
+    let xml = std::env::var("DOWNLINK_PERF_XMLTV").map_err(|_| "DOWNLINK_PERF_XMLTV missing")?;
+    let t0 = Instant::now();
+    let src = st
+        .service
+        .add_source(AddSourceInput {
+            kind: "m3u".into(),
+            name: "perf".into(),
+            url: m3u,
+            api_key: None,
+            username: None,
+            password: None,
+            xmltv_url: Some(xml),
+            allow_self_signed: false,
+        })
+        .await
+        .map_err(|e| e.message)?;
+    let (rss, tree) = memory_mib();
+    say(
+        json!({ "step": "perf_setup", "sourceId": src.id, "importSecs": t0.elapsed().as_secs_f64(), "rssMiB": rss, "treeMiB": tree }),
+    );
+    Ok(())
+}
+
+/// `DOWNLINK_E2E=perf`: budgets on a warm cache (run `perf-setup` first, in a fresh process).
+async fn perf(st: &AppState) -> Result<(), String> {
+    use downlink_core::service::GuideArgs;
+    let svc = &st.service;
+    let setup_done = crate::resume::SETUP_DONE.get().map(Duration::as_secs_f64);
+    let t_ready = Instant::now();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let hour = now / 3600 * 3600;
+
+    // Start -> interactive (Rust side): the commands the first screen needs, in order.
+    let mut first = serde_json::Map::new();
+    let (ms, _) = timed(svc.list_sources()).await;
+    first.insert("list_sources".into(), json!(ms));
+    let (ms, counts) = timed(svc.get_counts()).await;
+    first.insert("get_counts".into(), json!(ms));
+    let (ms, _) = timed(svc.list_groups(None)).await;
+    first.insert("list_groups".into(), json!(ms));
+    let (ms, chans) = timed(svc.list_channels(ListChannelsArgs {
+        limit: Some(100),
+        ..Default::default()
+    }))
+    .await;
+    first.insert("list_channels_first_100".into(), json!(ms));
+    let (ms, _) = timed(svc.get_home()).await;
+    first.insert("get_home".into(), json!(ms));
+    let guide = |off: i64, h: i64| GuideArgs {
+        start: h - 2 * 3600,
+        end: h + 6 * 3600,
+        channel_offset: off,
+        channel_limit: Some(30),
+        group_id: None,
+    };
+    let (ms_guide_cold, g) = timed(svc.get_guide(guide(0, hour))).await;
+    first.insert("get_guide_first_chunk_cold".into(), json!(ms_guide_cold));
+    let interactive_ms = t_ready.elapsed().as_secs_f64() * 1000.0;
+    say(json!({
+        "step": "interactive",
+        "processStartToSetupDoneSecs": setup_done,
+        "firstScreenCommandsMs": first,
+        "firstScreenTotalMs": interactive_ms,
+        "channels": counts.map(|c| c.all),
+        "firstChunkChannels": g.as_ref().map(|g| g.channels.len()),
+        "firstChunkProgrammes": g.as_ref().map(|g| g.programmes.len()),
+        "list100": chans.map(|c| c.len()),
+    }));
+
+    // Guide open (warm) and scrolling: first chunk, then chunks across all channels and days.
+    let mut warm = Vec::new();
+    for _ in 0..30 {
+        warm.push(timed(svc.get_guide(guide(0, hour))).await.0);
+    }
+    let mut scroll = Vec::new();
+    for (i, off) in (0..20_000).step_by(30).enumerate() {
+        let h = hour + ((i as i64 % 6) - 1) * 24 * 3600; // jump across days too
+        scroll.push(timed(svc.get_guide(guide(off, h))).await.0);
+    }
+    say(
+        json!({ "step": "guide", "firstChunkWarmMs": stats(warm), "scrollChunksMs": stats(scroll) }),
+    );
+
+    // Section switch: the commands each screen issues.
+    let mut switch = Vec::new();
+    for i in 0..60 {
+        let t = Instant::now();
+        match i % 4 {
+            0 => drop(svc.list_groups(None).await),
+            1 => drop(svc.get_home().await),
+            2 => drop(
+                svc.list_channels(ListChannelsArgs {
+                    limit: Some(60),
+                    offset: Some((i * 60) as i64),
+                    ..Default::default()
+                })
+                .await,
+            ),
+            _ => drop(svc.get_counts().await),
+        }
+        switch.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+    say(json!({ "step": "section_switch", "ms": stats(switch) }));
+
+    // Search keystrokes: every prefix of two queries, channel search and the unified search.
+    let (mut chan_ms, mut uni_ms) = (Vec::new(), Vec::new());
+    for q in ["Generated Channel 12345", "Weekend Showcase"] {
+        for n in 1..=q.len() {
+            let p = &q[..n];
+            chan_ms.push(
+                timed(svc.list_channels(ListChannelsArgs {
+                    query: Some(p.to_owned()),
+                    limit: Some(50),
+                    ..Default::default()
+                }))
+                .await
+                .0,
+            );
+            uni_ms.push(timed(svc.search(p, 30)).await.0);
+        }
+    }
+    say(
+        json!({ "step": "search_keystroke", "channelListMs": stats(chan_ms), "unifiedSearchMs": stats(uni_ms) }),
+    );
+
+    // Memory after all that browsing.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let (rss, tree) = memory_mib();
+    say(
+        json!({ "step": "memory", "rssMiB": rss, "processTreeMiB": tree, "note": "no video playing" }),
+    );
+
+    // UI first-render metrics reported by the injected script (needs the embedded UI).
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let ui = UI_METRICS.lock().ok().and_then(|m| m.clone());
+    let wall = crate::START.get().map(|(_, w)| *w);
+    let origin_offset = ui
+        .as_ref()
+        .and_then(|u| u.get("timeOrigin")?.as_f64())
+        .and_then(|o| {
+            let start_ms = wall?
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs_f64()
+                * 1000.0;
+            Some((o - start_ms) / 1000.0)
+        });
+    say(
+        json!({ "step": "ui_metrics", "navigationStartAfterProcessStartSecs": origin_offset, "metrics": ui }),
+    );
+    Ok(())
+}
+
+/// `DOWNLINK_E2E=launch`: with `resumeLastChannel` on, report process start -> first frame.
+async fn launch(st: &AppState) -> Result<(), String> {
+    let pb = st.playback().map_err(|e| e.message)?;
+    let snap = pb.snapshot_wait(
+        |s| matches!(s, SessionState::Playing | SessionState::Failed),
+        Duration::from_secs(30),
+    );
+    let issued = crate::resume::RESUME_ISSUED
+        .get()
+        .map(Duration::as_secs_f64);
+    say(json!({
+        "step": "launch",
+        "state": snap.state,
+        "setupDoneSecs": crate::resume::SETUP_DONE.get().map(Duration::as_secs_f64),
+        "resumeIssuedSecs": issued,
+        "loadfileToFirstFrameMs": snap.first_frame_ms,
+        "startToFirstFrameSecs": issued.zip(snap.first_frame_ms).map(|(i, f)| i + f as f64 / 1000.0),
+    }));
     Ok(())
 }

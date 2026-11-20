@@ -10,6 +10,7 @@ mod e2e;
 mod logging;
 mod player_glue;
 mod protocol;
+mod resume;
 mod selftest;
 #[cfg(feature = "spike")]
 mod spike;
@@ -271,6 +272,10 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         e2e::spawn(handle.clone(), mode);
     }
 
+    let resume_enabled = settings
+        .get("resumeLastChannel")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
     app.manage(AppState {
         service,
         player,
@@ -280,6 +285,10 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         updater,
         engine_error,
     });
+    resume::mark_setup_done();
+    if resume_enabled {
+        resume::spawn(handle.clone());
+    }
     Ok(())
 }
 
@@ -350,7 +359,21 @@ fn tv_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     b.build()
 }
 
+/// Process start, for the startup budgets (PLAN §8.8) and the perf harness.
+pub static START: std::sync::OnceLock<(std::time::Instant, std::time::SystemTime)> =
+    std::sync::OnceLock::new();
+
+#[cfg(feature = "e2e")]
+fn perf_plugin_if_enabled() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    e2e::perf_plugin()
+}
+#[cfg(not(feature = "e2e"))]
+fn perf_plugin_if_enabled() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::new("dl-noop").build()
+}
+
 fn main() {
+    let _ = START.set((std::time::Instant::now(), std::time::SystemTime::now()));
     if std::env::args().any(|a| a == "--self-test") {
         std::process::exit(selftest::run());
     }
@@ -376,6 +399,7 @@ fn main() {
     };
     let builder = builder
         .plugin(tv_plugin())
+        .plugin(perf_plugin_if_enabled())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -392,8 +416,10 @@ fn main() {
         spike::player_diagnostics,
         spike::zap_bench
     ));
-    #[cfg(not(feature = "spike"))]
+    #[cfg(all(not(feature = "spike"), not(feature = "e2e")))]
     let builder = builder.invoke_handler(handlers!());
+    #[cfg(all(not(feature = "spike"), feature = "e2e"))]
+    let builder = builder.invoke_handler(handlers!(e2e::perf_report));
     // The service is created in `setup`, so the protocol handler looks it up lazily.
     let builder = protocol::register(builder);
     match builder.build(tauri::generate_context!()) {
