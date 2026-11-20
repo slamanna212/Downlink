@@ -515,6 +515,34 @@ impl DispatcharrClient {
         Ok(())
     }
 
+    /// The EPG source of the guide data a channel is assigned to (`channel.epg_data_id` ->
+    /// `epgdata.epg_source`). Best effort: `None` when the channel has no guide data or the server
+    /// does not say.
+    async fn channel_epg_source(&self, channel_ext_id: &str) -> Option<i64> {
+        let ch = self
+            .get_json(
+                &format!("api/channels/channels/{channel_ext_id}/"),
+                &[],
+                "that channel",
+            )
+            .await
+            .ok()?;
+        let data_id = ["effective_epg_data_id", "epg_data_id"]
+            .iter()
+            .find_map(|k| ch.get(k).and_then(flex_i64))?;
+        let d = self
+            .get_json(
+                &format!("api/epg/epgdata/{data_id}/"),
+                &[],
+                "that channel's guide data",
+            )
+            .await
+            .ok()?;
+        ["epg_source", "epg_source_id"]
+            .iter()
+            .find_map(|k| d.get(k).and_then(flex_i64))
+    }
+
     pub async fn create_series_rule(&self, r: &RecordRequest) -> Result<()> {
         let tvg = r
             .tvg_id
@@ -527,6 +555,10 @@ impl DispatcharrClient {
             "tvg_id": tvg, "mode": "new", "title": r.title, "title_mode": "exact",
             "channel_id": r.channel_ext_id.parse::<i64>().ok(),
         });
+        // Scope the rule to the guide source the channel is assigned to, when it can be told.
+        if let Some(src) = self.channel_epg_source(&r.channel_ext_id).await {
+            body["epg_source_id"] = json!(src);
+        }
         if let Some(d) = r.description.as_deref().filter(|d| !d.is_empty()) {
             body["description"] = json!(d);
             body["description_mode"] = json!("contains");

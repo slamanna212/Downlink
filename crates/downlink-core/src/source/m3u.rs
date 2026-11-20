@@ -141,6 +141,7 @@ impl M3uSource {
             logo_key: e.logo().map(|l| self.vault.template_url(l)),
             is_radio: e.is_radio(),
             is_drm: e.aux.is_drm(),
+            epg_shift_secs: tvg_shift_secs(e, pl),
             is_catchup: tpl.is_some(),
             catchup_days: tpl.as_ref().map_or(0, |t| t.days),
             catchup_template: tpl.map(|t| t.to_json()),
@@ -367,5 +368,20 @@ impl crate::userstate::AppDataRemote for M3uSource {
     }
     async fn put(&self, _key: &str, _value: &Value) -> Result<()> {
         Ok(())
+    }
+}
+
+/// `tvg-shift` in hours (may be fractional or negative): the entry wins over the playlist header.
+/// Unparseable or absurd values (more than two days) mean no shift.
+fn tvg_shift_secs(e: &M3uEntry, pl: &Playlist) -> i64 {
+    let hours = e
+        .attrs
+        .get("tvg-shift")
+        .and_then(|s| s.trim().replace(',', ".").parse::<f64>().ok())
+        .filter(|h| h.is_finite())
+        .or(pl.header.tvg_shift);
+    match hours {
+        Some(h) if h.is_finite() && h.abs() <= 48.0 => (h * 3600.0).round() as i64,
+        _ => 0,
     }
 }

@@ -165,6 +165,8 @@ pub struct SourceChannel {
     pub catchup_days: i64,
     pub is_radio: bool,
     pub is_drm: bool,
+    /// M3U `tvg-shift`: seconds to add to this channel's guide times.
+    pub epg_shift_secs: i64,
     /// M3U only: stream URL (any `|headers` suffix removed) and per-file headers as a JSON object.
     pub play_url: Option<String>,
     pub play_headers: Option<String>,

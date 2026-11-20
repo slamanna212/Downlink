@@ -205,6 +205,7 @@ impl ChannelDto {
             catchup_days: self.catchup_days,
             is_radio: self.effective_is_radio.unwrap_or(self.is_radio),
             is_drm: false,
+            epg_shift_secs: 0,
             tvg_name: None,
             play_url: None,
             play_headers: None,

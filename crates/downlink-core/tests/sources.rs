@@ -875,3 +875,123 @@ async fn xtream_source_keeps_passwords_and_direct_source_credentials_out_of_sqli
             .any(|s| s.id == dto.id)
     );
 }
+
+/// PLAN §5.4: "restart this programme" from live starts at the airing programme's start for every
+/// template mode, whatever zone the template renders in. (Dispatcharr: `sync.rs`
+/// `restart_programme_starts_from_the_airing_programmes_row` pins the session API `start`.)
+#[tokio::test]
+async fn restart_programme_starts_at_the_programme_start_in_all_template_modes_and_zones() {
+    use chrono::TimeZone;
+    let playlist = "#EXTM3U\n\
+#EXTINF:-1 tvg-id=\"r1.test\" catchup=\"default\" catchup-days=\"3\" catchup-timezone=\"America/New_York\" catchup-source=\"http://iptv.test/ts/1?at={Y}{m}{d}-{H}{M}&utc={utc}\" group-title=\"R\",Default NY\n\
+http://iptv.test/live/r1.ts\n\
+#EXTINF:-1 tvg-id=\"r2.test\" catchup=\"append\" catchup-days=\"3\" catchup-timezone=\"Asia/Kolkata\" catchup-source=\"?begin={start:%H:%M}&len={duration:60}\" group-title=\"R\",Append Kolkata\n\
+http://iptv.test/live/r2.ts\n\
+#EXTINF:-1 tvg-id=\"r3.test\" catchup=\"shift\" catchup-days=\"3\" group-title=\"R\",Shift UTC\n\
+http://iptv.test/live/r3.ts\n\
+#EXTINF:-1 tvg-id=\"r4.test\" catchup=\"xc\" catchup-days=\"3\" catchup-timezone=\"Pacific/Auckland\" group-title=\"R\",Xc Auckland\n\
+http://iptv.test/live/testuser/testpass/4.ts\n";
+    let server = MockServer::start().await;
+    serve_text(&server, "/r.m3u", playlist.to_owned()).await;
+    let e = env().await;
+    e.svc
+        .add_source(m3u_input(&format!("{}/r.m3u", server.uri()), None))
+        .await
+        .unwrap();
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs {
+            limit: Some(50),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    // Airing now: started 25 minutes ago, one hour long.
+    let start = downlink_core::sync::now_utc() - 1500;
+    let local = |tz: chrono_tz::Tz, f: &str| {
+        tz.timestamp_opt(start, 0)
+            .single()
+            .unwrap()
+            .format(f)
+            .to_string()
+    };
+    for c in &chans {
+        e.svc
+            .store()
+            .upsert_programmes(&[ProgrammeRow {
+                channel_id: c.id,
+                start_utc: start,
+                end_utc: start + 3600,
+                ext_id: None,
+                title: Some("Airing".into()),
+                subtitle: None,
+                description: None,
+                season: None,
+                episode: None,
+                flags: 0,
+            }])
+            .await
+            .unwrap();
+    }
+    let url_for = |name: &str| {
+        let id = chans.iter().find(|c| c.name == name).unwrap().id;
+        let svc = e.svc.clone();
+        let name = name.to_owned();
+        async move {
+            let play = svc.restart_programme(id).await.unwrap();
+            assert_eq!(play.start_utc, start, "{name}: row start");
+            assert!(play.session.0.is_empty());
+            play.plan.url
+        }
+    };
+    let ny = local(chrono_tz::America::New_York, "%Y%m%d-%H%M");
+    assert_eq!(
+        url_for("Default NY").await,
+        format!("http://iptv.test/ts/1?at={ny}&utc={start}")
+    );
+    let kol = local(chrono_tz::Asia::Kolkata, "%H:%M");
+    assert_eq!(
+        url_for("Append Kolkata").await,
+        format!("http://iptv.test/live/r2.ts?begin={kol}&len=60")
+    );
+    let shift = url_for("Shift UTC").await;
+    assert!(
+        shift.starts_with(&format!("http://iptv.test/live/r3.ts?utc={start}&lutc=")),
+        "{shift}"
+    );
+    let akl = local(chrono_tz::Pacific::Auckland, "%Y-%m-%d:%H-%M");
+    assert_eq!(
+        url_for("Xc Auckland").await,
+        format!("http://iptv.test/timeshift/testuser/testpass/60/{akl}/4.ts")
+    );
+}
+
+#[tokio::test]
+async fn m3u_tvg_shift_header_and_entry_become_per_channel_seconds() {
+    let playlist = "#EXTM3U tvg-shift=\"1.5\"\n\
+#EXTINF:-1 tvg-id=\"a.test\",Header Shift\nhttp://iptv.test/a.ts\n\
+#EXTINF:-1 tvg-id=\"b.test\" tvg-shift=\"-0.5\",Entry Negative\nhttp://iptv.test/b.ts\n\
+#EXTINF:-1 tvg-id=\"c.test\" tvg-shift=\"0\",Entry Zero\nhttp://iptv.test/c.ts\n\
+#EXTINF:-1 tvg-id=\"d.test\" tvg-shift=\"junk\",Entry Junk\nhttp://iptv.test/d.ts\n";
+    let server = MockServer::start().await;
+    serve_text(&server, "/s.m3u", playlist.to_owned()).await;
+    let e = env().await;
+    e.svc
+        .add_source(m3u_input(&format!("{}/s.m3u", server.uri()), None))
+        .await
+        .unwrap();
+    let rows: Vec<(String, i64)> =
+        sqlx::query_as("SELECT name, epg_shift_secs FROM channel ORDER BY name")
+            .fetch_all(e.svc.store().pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        rows,
+        [
+            ("Entry Junk".to_owned(), 5400),
+            ("Entry Negative".to_owned(), -1800),
+            ("Entry Zero".to_owned(), 0),
+            ("Header Shift".to_owned(), 5400),
+        ]
+    );
+}

@@ -7,7 +7,7 @@ use downlink_core::ErrorCode;
 use downlink_core::auth::SecretString;
 use downlink_core::redact::redact;
 use downlink_core::source::xtream::XtreamClient;
-use downlink_core::source::{ChannelKey, Page, Programme, Source, SourceId};
+use downlink_core::source::{ChannelKey, Page, Programme, Source, SourceId, VodKind};
 use serde_json::Value;
 use wiremock::matchers::{method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -458,4 +458,86 @@ async fn base_url_forms() {
         "http://p.test/panel/"
     );
     assert!(normalise_base("ftp://p.test").is_err());
+}
+
+// ---- PLAN §6.8: two panels, one model --------------------------------------------------------
+
+fn fx_in(dir: &str, name: &str) -> Value {
+    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tools/fixtures/xtream")
+        .join(dir)
+        .join(name);
+    serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
+}
+
+/// Everything the client normalises, as comparable text.
+async fn normalised(dir: &str) -> Vec<String> {
+    let server = MockServer::start().await;
+    let f = |n: &str| fx_in(dir, n);
+    action(&server, None, f("player_api_login.json")).await;
+    for (a, file) in [
+        ("get_live_categories", "get_live_categories.json"),
+        ("get_live_streams", "get_live_streams.json"),
+        ("get_vod_streams", "get_vod_streams.json"),
+        ("get_series", "get_series.json"),
+        ("get_series_info", "get_series_info.json"),
+        ("get_short_epg", "get_short_epg.json"),
+        ("get_simple_data_table", "get_short_epg.json"),
+    ] {
+        action(&server, Some(a), f(file)).await;
+    }
+    action(&server, Some("get_vod_categories"), serde_json::json!([])).await;
+    action(
+        &server,
+        Some("get_series_categories"),
+        serde_json::json!([]),
+    )
+    .await;
+    let c = client(&server);
+    let acct = c.connect().await.unwrap();
+    let page = c.channels(Page::default()).await.unwrap();
+    let mut out = vec![
+        format!("{acct:?}"),
+        format!("{:?}", c.caps()),
+        format!("{:?}", c.groups().await.unwrap()),
+        format!("{:?}", page.channels),
+        format!("{:?}", c.live_categories().await.unwrap()),
+        format!("{:?}", c.short_epg("1001", 4).await.unwrap()),
+        format!("{:?}", c.full_epg("1001").await.unwrap()),
+    ];
+    let q = downlink_core::source::VodListQuery {
+        limit: 100,
+        ..Default::default()
+    };
+    out.push(format!(
+        "{:?}",
+        c.vod_list(VodKind::Movie, &q).await.unwrap()
+    ));
+    out.push(format!(
+        "{:?}",
+        c.vod_list(VodKind::Series, &q).await.unwrap()
+    ));
+    out.push(format!("{:?}", c.series_info("3001").await.unwrap()));
+    out
+}
+
+#[tokio::test]
+async fn panel_b_decodes_into_the_same_models_as_the_base_set() {
+    let base = normalised("").await;
+    let b = normalised("panel-b").await;
+    let names = [
+        "account",
+        "caps",
+        "groups",
+        "channels",
+        "live categories",
+        "short epg",
+        "full epg",
+        "vod",
+        "series",
+        "series info",
+    ];
+    for (i, n) in names.iter().enumerate() {
+        assert_eq!(base[i], b[i], "{n} differ between panels");
+    }
 }

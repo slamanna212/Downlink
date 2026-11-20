@@ -197,3 +197,153 @@ async fn gzip_feed_ingests() {
         .unwrap();
     assert!(r.parsed >= 1, "{r:?}");
 }
+
+fn write_feed(
+    dir: &std::path::Path,
+    name: &str,
+    progs: &[(&str, &str, &str)],
+    close: bool,
+) -> PathBuf {
+    let mut s = String::from(
+        "<?xml version=\"1.0\"?><tv><channel id=\"a.test\"><display-name>A</display-name></channel>",
+    );
+    for (start, stop, title) in progs {
+        s.push_str(&format!(
+            "<programme start=\"{start} +0000\" stop=\"{stop} +0000\" channel=\"a.test\"><title>{title}</title></programme>"
+        ));
+    }
+    if close {
+        s.push_str("</tv>");
+    } else {
+        s.push_str("<programme start=\"20300101130000 +0000\" stop=\"2030010114");
+    }
+    let p = dir.join(name);
+    std::fs::write(&p, s).unwrap();
+    p
+}
+
+async fn titles(store: &Store, ch: i64) -> Vec<String> {
+    downlink_core::epg::window(store, &[ch], ALL)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter_map(|p| p.title)
+        .collect()
+}
+
+#[tokio::test]
+async fn refresh_replaces_programmes_inside_the_fed_window() {
+    let (store, sid) = setup(&[("1", Some("a.test"), None, "A")]).await;
+    let c = store.channel_by_ext(sid, "1").await.unwrap().unwrap().id;
+    let dir = tempfile::tempdir().unwrap();
+    let day = "20300101";
+    let first = write_feed(
+        dir.path(),
+        "1.xml",
+        &[
+            (&format!("{day}080000"), &format!("{day}090000"), "Early"),
+            (&format!("{day}100000"), &format!("{day}110000"), "One"),
+            (&format!("{day}110000"), &format!("{day}120000"), "Two"),
+            (&format!("{day}120000"), &format!("{day}130000"), "Three"),
+            (&format!("{day}140000"), &format!("{day}150000"), "Late"),
+        ],
+        true,
+    );
+    ingest(&store, sid, first, Tz::UTC, ALL).await.unwrap();
+    assert_eq!(titles(&store, c).await.len(), 5);
+    // The refreshed feed covers 10:00-12:30 for the channel: "Two" moved and "Three" is gone.
+    let second = write_feed(
+        dir.path(),
+        "2.xml",
+        &[
+            (&format!("{day}100000"), &format!("{day}110000"), "One"),
+            (
+                &format!("{day}113000"),
+                &format!("{day}123000"),
+                "Two moved",
+            ),
+        ],
+        true,
+    );
+    ingest(&store, sid, second, Tz::UTC, ALL).await.unwrap();
+    assert_eq!(
+        titles(&store, c).await,
+        ["Early", "One", "Two moved", "Late"],
+        "inside the window replaced; before and after it untouched"
+    );
+}
+
+#[tokio::test]
+async fn truncated_refresh_never_replaces_anything() {
+    let (store, sid) = setup(&[("1", Some("a.test"), None, "A")]).await;
+    let c = store.channel_by_ext(sid, "1").await.unwrap().unwrap().id;
+    let dir = tempfile::tempdir().unwrap();
+    let day = "20300101";
+    let full = write_feed(
+        dir.path(),
+        "1.xml",
+        &[
+            (&format!("{day}100000"), &format!("{day}110000"), "One"),
+            (&format!("{day}110000"), &format!("{day}120000"), "Two"),
+            (&format!("{day}120000"), &format!("{day}130000"), "Three"),
+        ],
+        true,
+    );
+    ingest(&store, sid, full, Tz::UTC, ALL).await.unwrap();
+    let cut = write_feed(
+        dir.path(),
+        "2.xml",
+        &[(&format!("{day}100000"), &format!("{day}110000"), "One v2")],
+        false,
+    );
+    let r = ingest(&store, sid, cut, Tz::UTC, ALL).await.unwrap();
+    assert!(r.truncated);
+    assert_eq!(titles(&store, c).await.len(), 3, "nothing deleted");
+    // A feed that fails outright changes nothing either.
+    let bad = dir.path().join("bad.xml");
+    std::fs::write(&bad, "not xml at all").unwrap();
+    let _ = ingest(&store, sid, bad, Tz::UTC, ALL).await;
+    assert_eq!(titles(&store, c).await.len(), 3);
+}
+
+#[tokio::test]
+async fn channel_shift_moves_guide_times() {
+    let (store, sid) = setup(&[]).await;
+    let g = store.sync_groups(sid, &[]).await.unwrap();
+    let mk = |ext: &str, shift: i64| ChannelUpsert {
+        ext_id: ext.into(),
+        tvg_id: Some("a.test".into()),
+        name: ext.into(),
+        epg_shift_secs: shift,
+        ..Default::default()
+    };
+    store
+        .sync_channels(
+            sid,
+            &[mk("plain", 0), mk("late", 5400), mk("early", -1800)],
+            &g,
+        )
+        .await
+        .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let f = write_feed(
+        dir.path(),
+        "1.xml",
+        &[("20300101100000", "20300101110000", "Show")],
+        true,
+    );
+    ingest(&store, sid, f, Tz::UTC, ALL).await.unwrap();
+    let base = 1_893_492_000; // 2030-01-01 10:00:00Z
+    for (ext, shift) in [("plain", 0), ("late", 5400), ("early", -1800)] {
+        let id = store.channel_by_ext(sid, ext).await.unwrap().unwrap().id;
+        let rows = downlink_core::epg::window(&store, &[id], ALL)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1, "{ext}");
+        assert_eq!(
+            (rows[0].start_utc, rows[0].end_utc),
+            (base + shift, base + 3600 + shift),
+            "{ext}"
+        );
+    }
+}

@@ -112,6 +112,7 @@ pub fn channel_row(c: &SourceChannel, stream_redirect: StreamMode) -> ChannelUps
         is_adult: c.is_adult,
         is_radio: c.is_radio,
         is_drm: c.is_drm,
+        epg_shift_secs: c.epg_shift_secs,
         catchup_days: if c.is_catchup {
             c.catchup_days.max(0)
         } else {

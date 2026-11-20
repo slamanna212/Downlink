@@ -1,8 +1,9 @@
 //! XMLTV ingestion into SQLite: match channels, stream programmes in 5,000-row batched
-//! transactions. Upsert-only: a failed or truncated refresh never deletes existing (future)
-//! programmes.
+//! transactions. A refresh that read the whole feed replaces each channel's programmes inside the
+//! span the feed covers for it (so rescheduled programmes disappear); a failed or truncated
+//! refresh only upserts and never deletes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use chrono_tz::Tz;
@@ -135,6 +136,52 @@ pub async fn apply_matches(
     Ok((by_xmltv, summary))
 }
 
+/// What one channel's feed covers: the stored span and the programme starts seen in it.
+struct Coverage {
+    first_start: i64,
+    last_end: i64,
+    starts: HashSet<i64>,
+}
+
+async fn channel_shifts(store: &Store, source_id: i64) -> Result<HashMap<i64, i64>> {
+    let rows: Vec<(i64, i64)> = sqlx::query_as(
+        "SELECT id, epg_shift_secs FROM channel WHERE source_id = ? AND epg_shift_secs != 0",
+    )
+    .bind(source_id)
+    .fetch_all(store.pool())
+    .await?;
+    Ok(rows.into_iter().collect())
+}
+
+/// Remove stored programmes that sit inside a channel's fed span but were not in the feed.
+async fn replace_within_coverage(store: &Store, cov: &HashMap<i64, Coverage>) -> Result<u64> {
+    let mut removed = 0u64;
+    let mut tx = store.pool().begin().await?;
+    for (channel_id, c) in cov {
+        let have: Vec<(i64,)> = sqlx::query_as(
+            "SELECT start_utc FROM programme WHERE channel_id = ? AND start_utc >= ? AND start_utc < ?",
+        )
+        .bind(channel_id)
+        .bind(c.first_start)
+        .bind(c.last_end)
+        .fetch_all(&mut *tx)
+        .await?;
+        for (start,) in have {
+            if c.starts.contains(&start) {
+                continue;
+            }
+            sqlx::query("DELETE FROM programme WHERE channel_id = ? AND start_utc = ?")
+                .bind(channel_id)
+                .bind(start)
+                .execute(&mut *tx)
+                .await?;
+            removed += 1;
+        }
+    }
+    tx.commit().await?;
+    Ok(removed)
+}
+
 /// Ingest a downloaded XMLTV file. `keep` bounds which programmes are stored (retention window);
 /// `default_tz` is used for stamps without an offset.
 pub async fn ingest(
@@ -150,6 +197,7 @@ pub async fn ingest(
         .map_err(|_| AppError::local("Reading the guide was interrupted."))??;
     let (by_xmltv, summary) = apply_matches(store, source_id, &xmltv).await?;
     let by_xmltv = std::sync::Arc::new(by_xmltv);
+    let shifts = channel_shifts(store, source_id).await?;
 
     let (tx, mut rx) = mpsc::channel::<Vec<ProgrammeRow>>(4);
     let map = by_xmltv.clone();
@@ -159,24 +207,37 @@ pub async fn ingest(
         // feeds are near each other, so a per-batch set bounds memory.
         let mut seen: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
         let (mut unmatched, mut outside) = (0u64, 0u64);
+        let mut cov: HashMap<i64, Coverage> = HashMap::new();
         let stats = parse_programmes(&path, default_tz, |p| {
             let Some(ids) = map.get(&p.channel) else {
                 // XMLTV ids are matched case-insensitively against the channel list.
                 unmatched += 1;
                 return;
             };
-            if p.end_utc < keep.start_utc || p.start_utc > keep.end_utc {
-                outside += 1;
-                return;
-            }
+            let mut any_in = false;
             for id in ids {
-                if !seen.insert((*id, p.start_utc)) {
+                // `tvg-shift`: this channel's guide runs that many seconds off the feed's clock.
+                let shift = shifts.get(id).copied().unwrap_or(0);
+                let (start, end) = (p.start_utc + shift, p.end_utc + shift);
+                if end < keep.start_utc || start > keep.end_utc {
                     continue;
                 }
+                any_in = true;
+                if !seen.insert((*id, start)) {
+                    continue;
+                }
+                let c = cov.entry(*id).or_insert_with(|| Coverage {
+                    first_start: start,
+                    last_end: end,
+                    starts: HashSet::new(),
+                });
+                c.first_start = c.first_start.min(start);
+                c.last_end = c.last_end.max(end);
+                c.starts.insert(start);
                 batch.push(ProgrammeRow {
                     channel_id: *id,
-                    start_utc: p.start_utc,
-                    end_utc: p.end_utc,
+                    start_utc: start,
+                    end_utc: end,
                     ext_id: None,
                     title: p.title.clone(),
                     subtitle: p.subtitle.clone(),
@@ -186,6 +247,9 @@ pub async fn ingest(
                     flags: p.flags,
                 });
             }
+            if !any_in {
+                outside += 1;
+            }
             if batch.len() >= BATCH {
                 seen.clear();
                 let _ = tx.blocking_send(std::mem::replace(&mut batch, Vec::with_capacity(BATCH)));
@@ -194,17 +258,22 @@ pub async fn ingest(
         if !batch.is_empty() {
             let _ = tx.blocking_send(batch);
         }
-        (stats, unmatched, outside)
+        (stats, unmatched, outside, cov)
     });
 
     let mut written = 0usize;
     while let Some(batch) = rx.recv().await {
         written += store.upsert_programmes(&batch).await?;
     }
-    let (stats, unmatched, outside) = parser
+    let (stats, unmatched, outside, cov) = parser
         .await
         .map_err(|_| AppError::local("Reading the guide was interrupted."))?;
     let stats = stats?;
+    // Only a feed read to the end may replace anything: a truncated one proves nothing about
+    // what is missing from it.
+    if !stats.truncated && !cov.is_empty() {
+        replace_within_coverage(store, &cov).await?;
+    }
     Ok(IngestReport {
         programmes: written,
         parsed: stats.programmes,

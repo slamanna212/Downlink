@@ -1116,3 +1116,84 @@ async fn provider_info_is_typed_and_never_exposes_the_account() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn series_rule_carries_the_epg_source_of_the_channels_guide_data() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/channels/channels/2/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 2, "epg_data_id": 41, "effective_epg_data_id": 41
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/epg/epgdata/41/"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"id": 41, "tvg_id": "test-news.test", "epg_source": 7})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/channels/series-rules/"))
+        .and(body_partial_json(
+            json!({"tvg_id": "test-news.test", "epg_source_id": 7, "channel_id": 2}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tfx("series_rule_create.json")))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/channels/series-rules/evaluate/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"success": true})))
+        .mount(&server)
+        .await;
+    let req = RecordRequest {
+        channel_ext_id: "2".into(),
+        tvg_id: Some("test-news.test".into()),
+        programme_ext_id: None,
+        title: "Pattern Playhouse".into(),
+        description: None,
+        start_utc: 1,
+        end_utc: 2,
+    };
+    client(&server).schedule_series_rule(&req).await.unwrap();
+}
+
+#[tokio::test]
+async fn series_rule_omits_epg_source_when_it_is_unknown() {
+    let server = MockServer::start().await;
+    // No channel or guide-data endpoints mounted: the lookup fails and the rule is still created.
+    Mock::given(method("POST"))
+        .and(path("/api/channels/series-rules/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(tfx("series_rule_create.json")))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/channels/series-rules/evaluate/"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"success": true})))
+        .mount(&server)
+        .await;
+    let req = RecordRequest {
+        channel_ext_id: "2".into(),
+        tvg_id: Some("test-news.test".into()),
+        programme_ext_id: None,
+        title: "Pattern Playhouse".into(),
+        description: None,
+        start_utc: 1,
+        end_utc: 2,
+    };
+    client(&server).schedule_series_rule(&req).await.unwrap();
+    let posted = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.method.as_str() == "POST" && r.url.path() == "/api/channels/series-rules/")
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&posted.body).unwrap();
+    assert!(body.get("epg_source_id").is_none(), "{body}");
+}

@@ -21,6 +21,7 @@ pub struct ChannelUpsert {
     pub is_adult: bool,
     pub is_radio: bool,
     pub is_drm: bool,
+    pub epg_shift_secs: i64,
     pub catchup_days: i64,
     pub catchup_template: Option<String>,
     pub stream_redirect: StreamMode,
@@ -132,8 +133,8 @@ impl Store {
             let id: i64 = sqlx::query_scalar(
                 "INSERT INTO channel (source_id, ext_id, uuid, number, name, group_id, tvg_id, tvg_name, logo_key,
                    quality, is_adult, is_radio, is_drm, catchup_days, catchup_template, stream_redirect,
-                   play_url, play_headers, epg_match, sort_key)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   play_url, play_headers, epg_match, sort_key, epg_shift_secs)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                  ON CONFLICT(source_id, ext_id) DO UPDATE SET
                    uuid=excluded.uuid, number=excluded.number, name=excluded.name,
                    group_id=excluded.group_id, tvg_id=excluded.tvg_id, tvg_name=excluded.tvg_name, logo_key=excluded.logo_key,
@@ -142,7 +143,7 @@ impl Store {
                    catchup_template=excluded.catchup_template, stream_redirect=excluded.stream_redirect,
                    play_url=excluded.play_url, play_headers=excluded.play_headers,
                    epg_match=CASE WHEN channel.epg_match IN ('name','display','manual') THEN channel.epg_match ELSE excluded.epg_match END,
-                   sort_key=excluded.sort_key
+                   sort_key=excluded.sort_key, epg_shift_secs=excluded.epg_shift_secs
                  RETURNING id",
             )
             .bind(source_id)
@@ -165,6 +166,7 @@ impl Store {
             .bind(&c.play_headers)
             .bind(&c.epg_match)
             .bind(&c.sort_key)
+            .bind(c.epg_shift_secs)
             .fetch_one(&mut *tx)
             .await?;
             if existing.contains_key(&c.ext_id) {

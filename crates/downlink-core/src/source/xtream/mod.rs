@@ -100,6 +100,16 @@ pub fn normalise_base(input: &str) -> Result<Url> {
 }
 
 /// `Movie Title (2021)` -> 2021.
+/// Panels send `""`, `"0"` or `0` for "no rating"; none of those is a rating.
+fn real_rating(r: Option<&str>) -> Option<String> {
+    let r = r?.trim();
+    match r.parse::<f64>() {
+        Ok(v) if v <= 0.0 => None,
+        _ if r.is_empty() => None,
+        _ => Some(r.to_owned()),
+    }
+}
+
 fn year_in_title(name: &str) -> Option<i64> {
     let t = name.trim_end();
     let inner = t.strip_suffix(')')?.rsplit_once('(')?.1;
@@ -503,7 +513,7 @@ impl XtreamClient {
             ext_id: m.stream_id.clone(),
             title: m.name.clone(),
             year,
-            rating: m.rating.clone().filter(|r| !r.is_empty()),
+            rating: real_rating(m.rating.as_deref()),
             poster: m
                 .icon
                 .as_deref()
@@ -525,7 +535,7 @@ impl XtreamClient {
                 .as_deref()
                 .and_then(|d| d.get(..4))
                 .and_then(|y| y.parse().ok()),
-            rating: s.rating.clone().filter(|r| !r.is_empty()),
+            rating: real_rating(s.rating.as_deref()),
             genre: s.genre.clone().filter(|g| !g.is_empty()),
             plot: s.plot.clone().filter(|p| !p.is_empty()),
             poster: s

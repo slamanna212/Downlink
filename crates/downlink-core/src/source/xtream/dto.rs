@@ -4,8 +4,8 @@ use base64::Engine;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
+use crate::source::Programme;
 use crate::source::dispatcharr::dto::{flex_f64, flex_i64, flex_string};
-use crate::source::{Programme, flags};
 
 fn opt_str<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
     Ok(Option::<Value>::deserialize(d)?
@@ -240,7 +240,6 @@ pub fn epg_listings(v: &Value, server_tz: Option<&str>) -> Vec<Programme> {
             if end <= start {
                 return None;
             }
-            let now_playing = e.get("now_playing").and_then(flex_i64) == Some(1);
             Some(Programme {
                 channel_ref: e
                     .get("channel_id")
@@ -254,7 +253,8 @@ pub fn epg_listings(v: &Value, server_tz: Option<&str>) -> Vec<Programme> {
                 description: text(e.get("description")),
                 season: None,
                 episode: None,
-                flags: if now_playing { flags::LIVE } else { 0 },
+                // `now_playing` is a snapshot only some panels send; "live now" comes from the times.
+                flags: 0,
             })
         })
         .collect()
