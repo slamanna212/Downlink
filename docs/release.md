@@ -11,20 +11,20 @@ dev builds are a button.
 >   `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/downlink.key`
 >   then `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (it prompts for the value).
 > - [x] Paste the public key (`~/.tauri/downlink.key.pub`) into `plugins.updater.pubkey` in `apps/desktop/tauri.conf.json`.
-> - [ ] Re-enable the Release workflow on GitHub (it was disabled by hand): `gh workflow enable release.yml`.
+> - [x] Re-enable the Release workflow on GitHub (it was disabled by hand): `gh workflow enable release.yml`.
 
 ## Workflows
 
 | Workflow | Trigger | Result |
 |---|---|---|
-| `release.yml` | push to `main` **that changes `package.json`** (or manual retry) | Linux tests, then Windows + Linux build into a **draft** release `vX.Y.Z` (version from the root `package.json`). Skipped if that release exists. A `-suffix` version is marked pre-release. |
+| `release.yml` | every push to `main` (or manual retry) | Linux tests, then Windows + Linux build into a **draft** release `vX.Y.Z` (version from the root `package.json`). Skipped if that release exists. A `-suffix` version is marked pre-release. |
 | `dev-build.yml` | manual only: Actions -> Dev build -> Run workflow, pick the branch (normally `dev`) | Linux tests, then Windows + Linux build, published straight away as pre-release `vX.Y.Z-dev.N`. Points the in-app dev channel at it and keeps only the 5 newest dev builds. |
 | `release-notes.yml` | you publish or edit a release | Copies the release text into that release's `latest.json`, so the in-app "What's new" matches GitHub. |
 | `ci.yml` | called by the above; manual | Quality gates on Linux only: fmt, clippy, deny, nextest, UI lint/typecheck/test/build. |
 | `pr-ci.yml` | pull requests to `dev` | `ci.yml`. |
 | `build.yml` | called by `release.yml` and `dev-build.yml` | The shared build and publish pipeline. |
 
-Pushes to `main` that don't touch `package.json` start nothing. Windows is only compiled by the release build
+A push to `main` whose version already has a release stops after the version check. Windows is only compiled by the release build
 itself (no Windows/macOS test legs).
 
 ## Cutting a release

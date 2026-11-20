@@ -1,12 +1,11 @@
-# Stable release: when a push to main changes the root package.json, build that version as a DRAFT release
-# (unless a release for it already exists). You edit the notes and publish it by hand. Pushes that don't touch
-# package.json start no run at all. Same model as Apogee/MatchExec. See docs/release.md.
+# Stable release: every push to main (e.g. merging dev) builds the root package.json version as a DRAFT
+# release, unless a release for that version already exists, in which case the run stops after one quick check.
+# You edit the notes and publish it by hand. To ship again, bump package.json. See docs/release.md.
 name: Release
 
 on:
   push:
     branches: [main]
-    paths: [package.json]
   workflow_dispatch: # retry a failed release by hand (main only)
 
 permissions:
