@@ -130,6 +130,55 @@ stream_type`. It lists **all** viewers' clients, not only ours; filter `clients[
 exposes the provider URL, so it must pass through `redact/` before logging or showing in the debug panel. The
 channel disappears from the list within seconds of the last client disconnecting.
 
+## Live HLS (researched in the 0.34.1 source, tried once)
+
+PLAN §3.5 sketches `/proxy/hls/<token>/index.m3u8` as a fallback. What the server actually does:
+
+**There is no create endpoint and the client does not choose the token.** HLS is an *output format* of the normal live endpoint:
+`GET /proxy/ts/stream/{channel_uuid}?output_format=hls` (alias `?output=hls`; `m3u8` also accepted; other values `ts|mpegts`, `fmp4|mp4`)
+with the usual `X-API-Key`. The server starts a segmenter on the channel's existing buffer, mints a 24-byte url-safe token and answers
+`302 Location: /proxy/hls/<token>/index.m3u8` with the token also in response header `X-Dispatcharr-Session-Token`. The Xtream route
+`/live/<u>/<p>/<id>.m3u8` forces HLS the same way (`.ts` = mpegts, `.mp4` = fmp4).
+
+What selects the format when the client says nothing: user `custom_properties.output_format`, else `stream_settings.default_output_format`
+(unset locally, so `mpegts`). So "the channel's output requires HLS" is **not per channel and not a stream profile**: it is a per-user or
+per-server default, or the client's explicit parameter. The stream profile (FFmpeg/Proxy/Redirect) governs how the server ingests the
+provider, not what it sends the client. (A Redirect-profile channel is answered by `_handle_redirect_stream` before this logic; combining it
+with `output_format=hls` was not tried.)
+
+| Step | Call | Auth | Observed |
+|---|---|---|---|
+| Mint (starts the session, counts as a play, also opens the provider connection if the channel is cold) | `GET /proxy/ts/stream/{uuid}?output_format=hls` | `X-API-Key` (network access `STREAMS` checked here only) | `302`, `Location: /proxy/hls/<token>/index.m3u8`, `X-Dispatcharr-Session-Token: <token>` |
+| Playlist | `GET /proxy/hls/{token}/index.m3u8` | **none: the token is the credential** | `200`, `#EXT-X-VERSION:3`, `TARGETDURATION:6`, 2 s segments here (`#EXTINF:2.000`), live sliding window, relative segment URIs `1.ts`, `2.ts`. Cold channel: the first playlist request is held open (an `#EXTM3U` first line and comment keep-alives, up to ~10 s of media-gate wait) instead of returning an empty list. Warm channel: 5 ms. |
+| Segment | `GET /proxy/hls/{token}/{seq}.ts` | none | `200`, 1.4 MB for 2 s of 1080p |
+| Stop | `DELETE /api/proxy/hls/sessions/{token}/` | `X-API-Key` (401 without), only the minting user | `204`; afterwards the playlist returns `410`, a second delete `404` |
+| List | none | | no listing endpoint. `GET /proxy/ts/status` shows the client with `output_format: "hls"` (and `clients[].client_id`), so our own sessions can be found there, but the token is not exposed |
+
+A minted-but-unused session is cheap to leak but real: it registers a client on the channel. It is reaped by the ghost reaper when no playlist or
+segment poll arrives for `HLS_SEGMENT_DURATION x HLS_CLIENT_GHOST_SEGMENTS` = 4 s x 3 = **12 s** (code constants, not user settings); the Redis
+client record TTL is 60 s; the cold-start wait is 10 s and if the held first request is dropped the client is stopped after a short grace. My
+test minted twice by accident and both were gone after an explicit `DELETE` (the second one was deleted by token; the first by token from the
+`Location` header).
+
+Can TS fail in a way HLS fixes? **Mostly no.** Both outputs read the same channel buffer fed by one upstream connection, so a provider stall,
+failover or the 60 s `channel_init_grace_period` hits both identically. HLS helps only with the *client-to-Dispatcharr leg*: an intermediary
+(reverse proxy, corporate or hotel proxy, CDN) that buffers, times out or breaks a long-lived chunked `video/mp2t` response, because HLS is plain
+short GETs that survive reconnects and need no auth header on the polling requests. Costs: latency of roughly 2 to 3 segments (about 6 to 10 s)
+on top of TS, a fixed small window (poor for catch-up or timeshift-like seeking), an extra remux step on the server, and a session to clean up.
+
+**Recommendation: do not implement automatic TS-to-HLS fallback for 1.0; document it as unnecessary and keep it as an M5+ opt-in.** libmpv with the
+retry/failover policy already covers upstream stalls (which HLS would not fix), and an automatic switch would add a second provider-visible play path
+(rule 4: every extra mint is a real play and a client registration). If a user reports a proxy that breaks TS, add a per-source setting "Use HLS transport"
+with exactly this flow, all in Rust, no mpv options outside `downlink-player`:
+
+1. At play time only, `GET {base}/proxy/ts/stream/{uuid}?output_format=hls` with `X-API-Key`, redirects disabled (same resolver as the Redirect-profile path in
+   PLAN §3.5). Read the token from `X-Dispatcharr-Session-Token` (fall back to parsing `Location`); a non-302 is a normal play error.
+2. Hand mpv `{base}/proxy/hls/{token}/index.m3u8` **with no auth headers** (the token is the capability, so the API key never reaches mpv at all).
+3. Persist `token` in `open_session` for crash cleanup (CLAUDE.md rule 6); on stop, zap, navigate-away, sleep and quit call `DELETE /api/proxy/hls/sessions/{token}/`
+   with the key; treat 404 as already gone.
+4. Redaction: `/proxy/hls/<token>/…` is a new credential-bearing URL shape (the token grants playback); add it to `redact/` with a test (rule 8).
+5. Expect 410 on playlist or segment as "session ended" (reaped or stopped), and re-mint at most once before surfacing an error.
+
 ## VOD (verified against the synthetic Xtream VOD account)
 
 Dispatcharr ingests VOD only from **XC accounts with `enable_vod: true`** (`PATCH /api/m3u/accounts/{id}/ {"enable_vod":true}`, then
