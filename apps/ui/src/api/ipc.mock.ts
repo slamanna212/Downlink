@@ -311,6 +311,7 @@ export function createMockBackend(): Backend {
     },
     get_player_state: () => player,
     play_channel: ({ channelId }) => {
+      if (new URLSearchParams(location.search).has('failplay')) throw appError('stream', 'The server did not answer. Try again in a moment.');
       setPlayer({ state: 'Resolving', mode: 'live', channelId, error: null, programme: mockNowNext(channelId, nowSec(), scheduled).now, position: null, duration: null, buffered: null, seekable: false, resumeAt: null });
       setTimeout(() => setPlayer({ state: 'Connecting' }), 150);
       setTimeout(() => {
@@ -425,6 +426,8 @@ export function createMockBackend(): Backend {
 
   return {
     async invoke(cmd, args) {
+      // Test hook: Playwright reads this to assert what the UI did (e.g. no play_* during guide dwell).
+      (((window as unknown as { __mockCalls?: string[] }).__mockCalls) ??= []).push(cmd);
       return (await (impl[cmd] as (a: unknown) => Promise<never>)(args)) as never;
     },
     async listen(event, handler): Promise<Unlisten> {
