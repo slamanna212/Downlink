@@ -986,8 +986,9 @@ fullscreen, info, plus three menus: **audio** (tracks with language/codec), **su
 tracks, teletext included), and **stream** (Dispatcharr with `Caps::STREAM_SWITCH` only: provider
 streams in failover order, current marked, a one-line note that switching affects everyone watching
 the channel). Mini player and multiview buttons sit next to fullscreen. Zap overlay: number + logo + name pill for 1.2 s. Info panel (I): channel,
-programme + progress, source/stream index, resolution, codec, bitrate, buffer, dropped frames,
-`hwdec-current`. Errors are inline overlays with one action.
+programme + progress, source/stream index, resolution, codec, frame rate, HDR (PQ/HLG, tone-mapped or
+not), colour primaries + bit depth, audio codec/channels/sample rate, container, bitrate, download rate,
+A/V sync, buffer, dropped frames, `hwdec-current`. Errors are inline overlays with one action.
 Back (control bar button or Esc) returns to the screen the player was opened from. From the guide,
 playback continues in the preview pane's top-right box (mini player); clicking it reopens the player.
 With nothing playing the box is a programme-art placeholder.

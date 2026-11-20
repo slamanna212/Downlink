@@ -288,6 +288,24 @@ export interface SessionStats {
   /** 1-based index of the stream in use and how many the channel has. */
   sourceIndex: number | null;
   sourceCount: number | null;
+  fps: number | null;
+  /** Source transfer is PQ or HLG; null until video params are known. */
+  hdr: boolean | null;
+  /** mpv transfer name, e.g. "pq", "hlg", "bt.1886". */
+  transfer: string | null;
+  /** HDR source rendered to an SDR display; null unless `hdr`. */
+  toneMapped: boolean | null;
+  /** e.g. "bt.709", "bt.2020". */
+  primaries: string | null;
+  bitDepth: number | null;
+  /** e.g. "stereo", "5.1". */
+  audioChannels: string | null;
+  audioSampleRate: number | null;
+  /** Network read rate into the cache. */
+  downloadKbps: number | null;
+  avsyncMs: number | null;
+  /** e.g. "mpegts", "hls". */
+  container: string | null;
 }
 
 export interface Counts {

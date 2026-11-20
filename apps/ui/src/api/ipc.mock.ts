@@ -470,7 +470,9 @@ export function createMockBackend(): Backend {
           emit('session://stats', {
             resolution: '1920x1080', videoCodec: 'H.264 High', audioCodec: 'E-AC-3 5.1', bitrateKbps: 8400 + Math.round(Math.random() * 400),
             droppedFrames: 0, bufferSecs: 2 + Math.round(Math.random() * 20) / 10, deinterlace: 'bwdif · on', hwdecCurrent: 'vaapi',
-            sourceIndex: 1, sourceCount: 3,
+            sourceIndex: 1, sourceCount: 3, fps: 59.94, hdr: false, transfer: 'bt.1886', toneMapped: null, primaries: 'bt.709', bitDepth: 8,
+            audioChannels: '5.1', audioSampleRate: 48000, downloadKbps: 9000 + Math.round(Math.random() * 2000), avsyncMs: Math.round(Math.random() * 20 - 10) / 10,
+            container: 'mpegts',
           });
         tick();
         statsTimer = setInterval(tick, 1000);

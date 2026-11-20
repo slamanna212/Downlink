@@ -100,14 +100,30 @@ function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerSta
   const diag = useQuery({ queryKey: ['diagnostics', 'session'], queryFn: () => invoke('get_diagnostics', {}), refetchInterval: 1000 });
   const { stats, bufferHistory } = useSessionStats(true);
   const dash = '–';
+  const join = (parts: (string | null | undefined)[]) => parts.filter(Boolean).join(' · ') || dash;
+  const upper = (v: string | null | undefined) => v?.toUpperCase();
+  const mbps = (kbps: number | null | undefined) => (kbps != null ? `${(kbps / 1000).toFixed(1)} Mb/s` : null);
+  const transfer = upper(stats?.transfer) ?? dash;
+  const hdr =
+    stats?.hdr == null ? dash
+    : !stats.hdr ? t('player.info.hdrNo')
+    : t(stats.toneMapped ? 'player.info.hdrToneMapped' : 'player.info.hdrYes', { transfer });
+  const video = stats?.resolution
+    ? join([stats.resolution, stats.videoCodec, stats.fps != null ? `${stats.fps.toFixed(2)} fps` : null])
+    : player.width && player.height ? join([`${player.width}×${player.height}`, player.videoCodec]) : dash;
   const rows: [string, string][] = [
     [t('player.info.source'), sourceName],
     [t('player.info.channel'), channel ? `${channel.number ?? ''} ${channel.name}`.trim() : dash],
     [t('player.info.stream'), stats?.sourceIndex != null ? t('player.info.streamOf', { n: stats.sourceIndex, total: stats.sourceCount ?? stats.sourceIndex }) : dash],
-    [t('player.info.video'), stats?.resolution ? `${stats.resolution} · ${stats.videoCodec ?? dash}` : player.width && player.height ? `${player.width}×${player.height} · ${player.videoCodec ?? dash}` : dash],
+    [t('player.info.video'), video],
+    [t('player.info.hdr'), hdr],
+    [t('player.info.colour'), join([upper(stats?.primaries), stats?.bitDepth != null ? t('player.info.bitDepth', { n: stats.bitDepth }) : null])],
     [t('player.info.deinterlace'), stats?.deinterlace ?? dash],
-    [t('player.info.audio'), stats?.audioCodec ?? dash],
-    [t('player.info.bitrate'), stats?.bitrateKbps != null ? `${(stats.bitrateKbps / 1000).toFixed(1)} Mb/s` : dash],
+    [t('player.info.audio'), join([stats?.audioCodec, stats?.audioChannels, stats?.audioSampleRate ? `${stats.audioSampleRate / 1000} kHz` : null])],
+    [t('player.info.container'), stats?.container ?? dash],
+    [t('player.info.bitrate'), mbps(stats?.bitrateKbps) ?? dash],
+    [t('player.info.download'), mbps(stats?.downloadKbps) ?? dash],
+    [t('player.info.avsync'), stats?.avsyncMs != null ? `${Math.round(stats.avsyncMs) > 0 ? '+' : ''}${Math.round(stats.avsyncMs)} ms` : dash],
     [t('player.info.dropped'), stats?.droppedFrames != null ? String(stats.droppedFrames) : dash],
     [t('player.info.decoder'), stats?.hwdecCurrent ?? player.hwdecCurrent ?? dash],
     [t('player.info.state'), player.state],
