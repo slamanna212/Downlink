@@ -341,6 +341,7 @@ async fn endpoint_catchup_create_position_delete() {
         ext_id: "1".into(),
         uuid: Some(UUID1.into()),
         stream_mode: StreamMode::Proxy,
+        ..Default::default()
     };
     let plan = c.catchup(key, &programme()).await.unwrap();
     assert_eq!(plan.profile, downlink_core::source::PlayProfile::Seekable);
@@ -412,6 +413,7 @@ async fn catchup_4xx_becomes_a_plain_stream_sentence() {
         ext_id: "1".into(),
         uuid: Some(UUID1.into()),
         stream_mode: StreamMode::Proxy,
+        ..Default::default()
     };
     let e = client(&server)
         .catchup(key, &programme())
@@ -562,6 +564,7 @@ async fn building_plans_makes_no_requests_at_all() {
         ext_id: "1".into(),
         uuid: Some(UUID1.into()),
         stream_mode: StreamMode::Proxy,
+        ..Default::default()
     };
     let plan = c.live_plan(&key).await.unwrap();
     assert_eq!(
@@ -582,6 +585,7 @@ async fn proxy_channel_play_goes_straight_to_the_player_with_the_header() {
         ext_id: "1".into(),
         uuid: Some(UUID1.into()),
         stream_mode: StreamMode::Proxy,
+        ..Default::default()
     };
     let plan = client(&server).play(key).await.unwrap();
     assert!(plan.url.contains("/proxy/ts/stream/"));
@@ -609,6 +613,7 @@ async fn redirect_channel_resolves_location_without_following_and_drops_headers(
         ext_id: "2".into(),
         uuid: Some(UUID2.into()),
         stream_mode: StreamMode::Redirect,
+        ..Default::default()
     };
     let plan = client(&server).play(key).await.unwrap();
     assert_eq!(
@@ -698,6 +703,7 @@ async fn unknown_profile_302_hands_location_without_headers() {
         ext_id: "2".into(),
         uuid: Some(UUID2.into()),
         stream_mode: StreamMode::Unknown,
+        ..Default::default()
     };
     let plan = client(&server).play(key).await.unwrap();
     assert_eq!(plan.url, "http://provider.test/x/1.ts");
@@ -717,6 +723,7 @@ async fn unknown_profile_200_falls_back_to_original_url_with_header() {
         ext_id: "2".into(),
         uuid: Some(UUID2.into()),
         stream_mode: StreamMode::Unknown,
+        ..Default::default()
     };
     let plan = client(&server).play(key).await.unwrap();
     assert_eq!(

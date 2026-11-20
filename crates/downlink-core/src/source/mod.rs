@@ -3,6 +3,7 @@
 
 pub mod dispatcharr;
 pub mod play;
+pub mod xtream;
 
 use std::collections::HashSet;
 
@@ -243,12 +244,40 @@ pub struct VodPage {
 }
 
 /// What `play` needs to know about a channel; built from SQLite, no network.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ChannelKey {
     pub ext_id: String,
     pub uuid: Option<String>,
     /// Effective stream profile is Redirect (PLAN §3.5).
     pub stream_mode: StreamMode,
+    /// M3U: the stored stream URL; Xtream: a `direct_source` override.
+    pub play_url: Option<String>,
+    /// JSON object of per-file headers (M3U aux lines / pipe headers).
+    pub play_headers: Option<String>,
+    /// JSON `catchup::template::CatchupTemplate` (template path).
+    pub catchup_template: Option<String>,
+    pub name: String,
+}
+
+impl ChannelKey {
+    pub fn from_row(r: &crate::store::ChannelRow) -> Self {
+        Self {
+            ext_id: r.ext_id.clone(),
+            uuid: r.uuid.clone(),
+            stream_mode: r.stream_redirect,
+            play_url: r.play_url.clone(),
+            play_headers: r.play_headers.clone(),
+            catchup_template: r.catchup_template.clone(),
+            name: r.name.clone(),
+        }
+    }
+}
+
+/// A downloaded guide file (XMLTV) ready for `xmltv::ingest`. Deleted on drop.
+pub struct GuideFeed {
+    pub file: crate::m3u::load::Fetched,
+    /// Zone for stamps without an offset (the server's, when known).
+    pub default_tz: Option<String>,
 }
 
 /// How a channel's stream endpoint answers (PLAN §3.5). Tri-state so that "we do not know" can
@@ -305,6 +334,10 @@ pub trait Source: Send + Sync {
     /// Report catch-up playback position (seconds). Not an error while playback has not begun.
     async fn catchup_position(&self, _s: &SessionId, _position_secs: u64) -> Result<()> {
         Ok(())
+    }
+    /// A whole-guide file to ingest (XMLTV), for sources without a windowed guide API.
+    async fn guide_feed(&self) -> Result<Option<GuideFeed>> {
+        Ok(None)
     }
     /// Authenticated image fetch (same-origin only).
     async fn fetch_image(&self, _url: &str) -> Result<crate::images::RawImage> {

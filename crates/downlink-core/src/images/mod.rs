@@ -60,6 +60,38 @@ pub struct ImageBytes {
     pub mime: &'static str,
 }
 
+/// Unauthenticated fetch of a public image URL (M3U/Xtream logos). No credentials are sent.
+pub async fn fetch_public(url: &str, insecure_tls: bool) -> Result<RawImage> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err(AppError::local("That image address is not supported."));
+    }
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(insecure_tls)
+        .timeout(std::time::Duration::from_secs(20))
+        .build()?;
+    let r = client.get(url).send().await?;
+    if !r.status().is_success() {
+        return Err(AppError::from_status(
+            r.status().as_u16(),
+            None,
+            "that image",
+        ));
+    }
+    let content_type = r
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned);
+    let bytes = r.bytes().await?;
+    if bytes.len() > 10 * 1024 * 1024 {
+        return Err(AppError::media("That image is too large."));
+    }
+    Ok(RawImage {
+        bytes: bytes.to_vec(),
+        content_type,
+    })
+}
+
 pub fn hash_url(url: &str) -> String {
     Sha256::digest(url.as_bytes())
         .iter()

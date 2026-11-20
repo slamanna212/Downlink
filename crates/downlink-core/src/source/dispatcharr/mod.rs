@@ -1197,6 +1197,7 @@ mod tests {
             ext_id: "1".into(),
             uuid: Some("u-1".into()),
             stream_mode: StreamMode::Redirect,
+            ..Default::default()
         };
         let plan = build_live_plan(
             &base,
@@ -1218,6 +1219,7 @@ mod tests {
             ext_id: "1".into(),
             uuid: None,
             stream_mode: StreamMode::Proxy,
+            ..Default::default()
         };
         assert!(build_live_plan(&base, &key, None, RedactionSet::new()).is_err());
     }

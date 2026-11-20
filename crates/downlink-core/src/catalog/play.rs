@@ -31,11 +31,7 @@ pub async fn resolve_play_plan(
                 .ok_or_else(|| AppError::local("This source has no server address."))?;
             let base = normalise_base_url(base)?;
             let (hname, secret) = auth.auth_header(&src).await?;
-            let key = ChannelKey {
-                ext_id: ch.ext_id.clone(),
-                uuid: ch.uuid.clone(),
-                stream_mode: ch.stream_redirect,
-            };
+            let key = ChannelKey::from_row(&ch);
             let mut set = RedactionSet::new();
             set.add(secret.expose());
             build_live_plan(&base, &key, Some((hname, secret)), set)

@@ -82,11 +82,7 @@ pub async fn play_catchup(
     if row.start_utc > now {
         return Err(AppError::stream("This programme has not started yet."));
     }
-    let key = ChannelKey {
-        ext_id: ch.ext_id.clone(),
-        uuid: ch.uuid.clone(),
-        stream_mode: ch.stream_redirect,
-    };
+    let key = ChannelKey::from_row(&ch);
     let plan = client
         .catchup(key, &to_programme(&row, ch.tvg_id.as_deref().unwrap_or("")))
         .await?;

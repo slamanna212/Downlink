@@ -1,0 +1,616 @@
+//! Xtream Codes client and `Source` (PLAN §6.5, §5.3). Credentials live only in the keychain and
+//! in this client's memory; every URL it builds carries them, so URLs are never logged and every
+//! error is URL-free (`AppError` redacts again as a second line of defence).
+//!
+//! Quirks absorbed: numbers as strings, `auth: 0` with HTTP 200, empty results as `[]`/`{}`/`null`,
+//! `allowed_output_formats` picks `.ts` vs `.m3u8`, `server_info.timezone` drives `xc` catch-up,
+//! base64 EPG text. Play URLs are built at play time, never cached (load-balanced panels).
+
+mod dto;
+
+use std::sync::Mutex;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use reqwest::{StatusCode, Url};
+use serde_json::Value;
+use tokio::sync::Semaphore;
+
+pub use dto::*;
+
+use super::dispatcharr::dto::{flex_i64, flex_string};
+use super::{
+    AccountInfo, Caps, ChannelKey, ChannelPage, Page, PlayPlan, PlayProfile, Programme, SessionId,
+    Source, SourceChannel, SourceGroup, SourceId, SourceKind, Surface, TimeWindow, UserLevel,
+};
+use crate::auth::SecretString;
+use crate::catchup::template::{CatchupTemplate, ExpandCtx, Mode, TimeSemantics, XcParts, expand};
+use crate::error::{AppError, Result};
+use crate::m3u::load::{Fetched, Fetcher, HttpFetcher};
+use crate::redact::RedactionSet;
+
+const MAX_CONCURRENT: usize = 2;
+
+#[derive(Debug, Clone, Default)]
+struct AccountState {
+    server_tz: Option<String>,
+    formats: Vec<String>,
+    connected: bool,
+}
+
+pub struct XtreamClient {
+    id: SourceId,
+    http: reqwest::Client,
+    insecure_tls: bool,
+    base: Url,
+    username: String,
+    password: SecretString,
+    sem: Semaphore,
+    state: Mutex<AccountState>,
+}
+
+impl std::fmt::Debug for XtreamClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("XtreamClient(***)")
+    }
+}
+
+/// `http://host:port` or `host:port`; any path, query or credentials are dropped.
+pub fn normalise_base(input: &str) -> Result<Url> {
+    let t = input.trim();
+    let with = if t.contains("://") {
+        t.to_owned()
+    } else {
+        format!("http://{t}")
+    };
+    let mut u = Url::parse(&with)?;
+    if !matches!(u.scheme(), "http" | "https") {
+        return Err(AppError::local(
+            "The server address must start with http:// or https://.",
+        ));
+    }
+    // Keep a path prefix (some panels live under /panel) but drop the script and the query.
+    let path = u.path().to_owned();
+    let trimmed = path
+        .trim_end_matches('/')
+        .trim_end_matches("player_api.php")
+        .trim_end_matches("get.php")
+        .trim_end_matches('/')
+        .to_owned();
+    u.set_path(&format!("{trimmed}/"));
+    u.set_query(None);
+    u.set_fragment(None);
+    let _ = u.set_username("");
+    let _ = u.set_password(None);
+    Ok(u)
+}
+
+fn some_str(v: &Value, k: &str) -> Option<String> {
+    v.get(k).and_then(flex_string)
+}
+
+impl XtreamClient {
+    pub fn new(
+        id: SourceId,
+        base_url: &str,
+        username: &str,
+        password: SecretString,
+        insecure_tls: bool,
+    ) -> Result<Self> {
+        Ok(Self {
+            id,
+            http: reqwest::Client::builder()
+                .danger_accept_invalid_certs(insecure_tls)
+                .timeout(Duration::from_secs(60))
+                .connect_timeout(Duration::from_secs(20))
+                .user_agent(concat!("Downlink/", env!("CARGO_PKG_VERSION")))
+                .build()?,
+            insecure_tls,
+            base: normalise_base(base_url)?,
+            username: username.to_owned(),
+            password,
+            sem: Semaphore::new(MAX_CONCURRENT),
+            state: Mutex::new(AccountState::default()),
+        })
+    }
+
+    pub fn base_url(&self) -> &Url {
+        &self.base
+    }
+
+    /// Literal secrets for redaction (username and password).
+    pub fn redaction_set(&self) -> RedactionSet {
+        let mut s = RedactionSet::new();
+        s.add(self.username.clone());
+        s.add(self.password.expose());
+        s
+    }
+
+    fn st(&self) -> AccountState {
+        self.state.lock().map(|g| g.clone()).unwrap_or_default()
+    }
+
+    // ---- URL builders (pure; the results carry credentials) ---------------------------------
+
+    fn script_url(
+        &self,
+        script: &str,
+        action: Option<&str>,
+        extra: &[(&str, String)],
+    ) -> Result<Url> {
+        let mut u = self.base.join(script)?;
+        {
+            let mut q = u.query_pairs_mut();
+            q.append_pair("username", &self.username);
+            q.append_pair("password", self.password.expose());
+            if let Some(a) = action {
+                q.append_pair("action", a);
+            }
+            for (k, v) in extra {
+                q.append_pair(k, v);
+            }
+        }
+        Ok(u)
+    }
+
+    fn path_url(&self, kind: &str, id: &str, ext: &str) -> Result<String> {
+        let mut u = self.base.clone();
+        u.path_segments_mut()
+            .map_err(|_| AppError::local("The server address cannot be used."))?
+            .pop_if_empty()
+            .extend([
+                kind,
+                &self.username,
+                self.password.expose(),
+                &format!("{id}.{ext}"),
+            ]);
+        Ok(u.to_string())
+    }
+
+    /// Output container: `.ts` when the account allows it (lowest latency), else `.m3u8`.
+    pub fn live_ext(&self) -> &'static str {
+        let f = self.st().formats;
+        if f.is_empty() || f.iter().any(|x| x.eq_ignore_ascii_case("ts")) {
+            "ts"
+        } else {
+            "m3u8"
+        }
+    }
+
+    /// `/live/<user>/<pass>/<id>.<ext>`.
+    pub fn live_url(&self, stream_id: &str) -> Result<String> {
+        self.path_url("live", stream_id, self.live_ext())
+    }
+
+    pub fn movie_url(&self, stream_id: &str, ext: &str) -> Result<String> {
+        self.path_url("movie", stream_id, ext)
+    }
+
+    pub fn series_url(&self, episode_id: &str, ext: &str) -> Result<String> {
+        self.path_url("series", episode_id, ext)
+    }
+
+    /// `xmltv.php?username=&password=`.
+    pub fn xmltv_url(&self) -> Result<String> {
+        Ok(self.script_url("xmltv.php", None, &[])?.to_string())
+    }
+
+    /// `streaming/timeshift.php?…` (the query form some panels use instead of the path form).
+    pub fn timeshift_php_url(
+        &self,
+        stream_id: &str,
+        start_wallclock: &str,
+        duration_minutes: i64,
+    ) -> Result<String> {
+        Ok(self
+            .script_url(
+                "streaming/timeshift.php",
+                None,
+                &[
+                    ("stream", stream_id.to_owned()),
+                    ("start", start_wallclock.to_owned()),
+                    ("duration", duration_minutes.to_string()),
+                ],
+            )?
+            .to_string())
+    }
+
+    /// `get.php?username=&password=&type=m3u_plus`: the panel's own playlist URL.
+    pub fn playlist_url(&self) -> Result<String> {
+        Ok(self
+            .script_url(
+                "get.php",
+                None,
+                &[("type", "m3u_plus".to_owned()), ("output", "ts".to_owned())],
+            )?
+            .to_string())
+    }
+
+    // ---- transport --------------------------------------------------------------------------
+
+    async fn get_json(
+        &self,
+        action: Option<&str>,
+        extra: &[(&str, String)],
+        what: &str,
+    ) -> Result<Value> {
+        let url = self.script_url("player_api.php", action, extra)?;
+        let _permit = self
+            .sem
+            .acquire()
+            .await
+            .map_err(|_| AppError::local("The client is shutting down."))?;
+        let resp = self.http.get(url).send().await?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(match status {
+                // Dispatcharr's XC surface answers only XC-enabled users: a permissions problem.
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => AppError::auth(
+                    "The server refused this account's Xtream access. Check that Xtream is enabled for this user.",
+                ),
+                s => AppError::from_status(s.as_u16(), None, what),
+            });
+        }
+        let bytes = resp.bytes().await?;
+        if bytes.iter().all(u8::is_ascii_whitespace) {
+            return Ok(Value::Null);
+        }
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    async fn list<T: serde::de::DeserializeOwned>(
+        &self,
+        action: &str,
+        extra: &[(&str, String)],
+        what: &str,
+    ) -> Result<Vec<T>> {
+        let v = self.get_json(Some(action), extra, what).await?;
+        let items = match v {
+            Value::Array(a) => a,
+            // Some panels wrap, some answer `{}` for "nothing".
+            Value::Object(mut o) => match o.remove("data").or_else(|| o.remove("results")) {
+                Some(Value::Array(a)) => a,
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        Ok(items
+            .into_iter()
+            .filter_map(|i| serde_json::from_value(i).ok())
+            .collect())
+    }
+
+    // ---- API --------------------------------------------------------------------------------
+
+    /// `player_api.php` with no action: account and server info. `auth: 0` is an auth error even
+    /// though the HTTP status is 200.
+    pub async fn account(&self) -> Result<AccountInfo> {
+        let v = self.get_json(None, &[], "its account").await?;
+        let ui = v.get("user_info");
+        let authed = ui.and_then(|u| u.get("auth")).and_then(flex_i64);
+        if ui.is_none() || authed == Some(0) {
+            return Err(AppError::auth("The username or password was not accepted."));
+        }
+        let ui = ui.cloned().unwrap_or(Value::Null);
+        let si = v.get("server_info").cloned().unwrap_or(Value::Null);
+        let formats: Vec<String> = ui
+            .get("allowed_output_formats")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_ascii_lowercase))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let max = ui
+            .get("max_connections")
+            .and_then(flex_i64)
+            .and_then(|n| u32::try_from(n).ok());
+        let exp = ui.get("exp_date").and_then(flex_i64).filter(|e| *e > 0);
+        let tz = some_str(&si, "timezone");
+        if let Ok(mut g) = self.state.lock() {
+            *g = AccountState {
+                server_tz: tz.clone(),
+                formats,
+                connected: true,
+            };
+        }
+        if ui
+            .get("status")
+            .and_then(Value::as_str)
+            .is_some_and(|s| s.eq_ignore_ascii_case("expired"))
+        {
+            tracing::warn!("account reports status expired");
+        }
+        Ok(AccountInfo {
+            server_version: None,
+            user_id: None,
+            username: some_str(&ui, "username").or_else(|| Some(self.username.clone())),
+            user_level: Some(UserLevel::Standard),
+            timezone: tz,
+            expires_at: exp,
+            max_connections: max,
+        })
+    }
+
+    async fn ensure_account(&self) -> Result<()> {
+        if !self.st().connected {
+            self.account().await?;
+        }
+        Ok(())
+    }
+
+    pub async fn live_categories(&self) -> Result<Vec<CategoryDto>> {
+        self.list("get_live_categories", &[], "its live categories")
+            .await
+    }
+
+    pub async fn live_streams(&self, category: Option<&str>) -> Result<Vec<LiveStreamDto>> {
+        let extra: Vec<(&str, String)> = category
+            .map(|c| ("category_id", c.to_owned()))
+            .into_iter()
+            .collect();
+        self.list("get_live_streams", &extra, "its live channels")
+            .await
+    }
+
+    pub async fn vod_categories(&self) -> Result<Vec<CategoryDto>> {
+        self.list("get_vod_categories", &[], "its movie categories")
+            .await
+    }
+
+    pub async fn vod_streams(&self, category: Option<&str>) -> Result<Vec<VodStreamDto>> {
+        let extra: Vec<(&str, String)> = category
+            .map(|c| ("category_id", c.to_owned()))
+            .into_iter()
+            .collect();
+        self.list("get_vod_streams", &extra, "its movies").await
+    }
+
+    pub async fn series_categories(&self) -> Result<Vec<CategoryDto>> {
+        self.list("get_series_categories", &[], "its series categories")
+            .await
+    }
+
+    pub async fn series(&self, category: Option<&str>) -> Result<Vec<SeriesDto>> {
+        let extra: Vec<(&str, String)> = category
+            .map(|c| ("category_id", c.to_owned()))
+            .into_iter()
+            .collect();
+        self.list("get_series", &extra, "its series").await
+    }
+
+    pub async fn series_info(&self, series_id: &str) -> Result<SeriesInfoDto> {
+        let v = self
+            .get_json(
+                Some("get_series_info"),
+                &[("series_id", series_id.to_owned())],
+                "that series",
+            )
+            .await?;
+        Ok(SeriesInfoDto::from_value(&v))
+    }
+
+    /// `get_short_epg`: the next few programmes of one channel.
+    pub async fn short_epg(&self, stream_id: &str, limit: u32) -> Result<Vec<Programme>> {
+        self.ensure_account().await.ok();
+        let tz = self.st().server_tz;
+        let v = self
+            .get_json(
+                Some("get_short_epg"),
+                &[
+                    ("stream_id", stream_id.to_owned()),
+                    ("limit", limit.to_string()),
+                ],
+                "the guide",
+            )
+            .await?;
+        Ok(dto::epg_listings(&v, tz.as_deref()))
+    }
+
+    /// `get_simple_data_table`: the channel's full EPG.
+    pub async fn full_epg(&self, stream_id: &str) -> Result<Vec<Programme>> {
+        self.ensure_account().await.ok();
+        let tz = self.st().server_tz;
+        let v = self
+            .get_json(
+                Some("get_simple_data_table"),
+                &[("stream_id", stream_id.to_owned())],
+                "the guide",
+            )
+            .await?;
+        Ok(dto::epg_listings(&v, tz.as_deref()))
+    }
+
+    fn fetcher(&self) -> Result<HttpFetcher> {
+        HttpFetcher::new(self.insecure_tls)
+    }
+
+    fn live_to_channel(&self, s: &LiveStreamDto, tz: Option<&str>) -> SourceChannel {
+        let template = (s.tv_archive && s.tv_archive_days > 0).then(|| {
+            CatchupTemplate {
+                mode: Mode::Xc,
+                source: None,
+                time: TimeSemantics::LocalWallclock {
+                    tz: tz.unwrap_or("UTC").to_owned(),
+                },
+                correction_secs: 0,
+                days: s.tv_archive_days,
+            }
+            .to_json()
+        });
+        SourceChannel {
+            ext_id: s.stream_id.clone(),
+            number: s.num,
+            name: s.name.clone(),
+            group_ext_id: s.category_id.clone(),
+            tvg_id: s.epg_channel_id.clone(),
+            logo_key: s.icon.clone(),
+            is_adult: s.is_adult,
+            is_radio: s.stream_type.as_deref() == Some("radio_streams"),
+            is_catchup: s.tv_archive,
+            catchup_days: if s.tv_archive { s.tv_archive_days } else { 0 },
+            catchup_template: template,
+            play_url: s.direct_source.clone(),
+            ..Default::default()
+        }
+    }
+}
+
+#[async_trait]
+impl Source for XtreamClient {
+    fn id(&self) -> SourceId {
+        self.id
+    }
+
+    fn kind(&self) -> SourceKind {
+        SourceKind::Xtream
+    }
+
+    fn caps(&self) -> Caps {
+        Caps::LIVE | Caps::EPG | Caps::CATCHUP | Caps::FAVOURITES | Caps::LIMITS
+    }
+
+    async fn connect(&self) -> Result<AccountInfo> {
+        self.account().await
+    }
+
+    /// Xtream is not paginated: everything arrives as one page.
+    async fn channels(&self, _page: Page) -> Result<ChannelPage> {
+        self.ensure_account().await?;
+        let tz = self.st().server_tz;
+        let streams = self.live_streams(None).await?;
+        let channels: Vec<SourceChannel> = streams
+            .iter()
+            .map(|s| self.live_to_channel(s, tz.as_deref()))
+            .collect();
+        Ok(ChannelPage {
+            count: Some(channels.len() as u64),
+            channels,
+            has_next: false,
+        })
+    }
+
+    async fn groups(&self) -> Result<Vec<SourceGroup>> {
+        Ok(self
+            .live_categories()
+            .await?
+            .into_iter()
+            .map(|c| SourceGroup {
+                ext_id: c.id,
+                name: c.name,
+            })
+            .collect())
+    }
+
+    /// No windowed guide API: the guide comes from `guide_feed` (`xmltv.php`).
+    async fn guide(&self, _window: TimeWindow) -> Result<Vec<Programme>> {
+        Ok(Vec::new())
+    }
+
+    async fn guide_feed(&self) -> Result<Option<super::GuideFeed>> {
+        let url = self.xmltv_url()?;
+        let file: Fetched = self.fetcher()?.fetch(&url).await?;
+        Ok(Some(super::GuideFeed {
+            file,
+            default_tz: self.st().server_tz,
+        }))
+    }
+
+    async fn play(&self, ch: ChannelKey) -> Result<PlayPlan> {
+        self.ensure_account().await?;
+        // A direct source, when the panel provides one, wins; otherwise build at play time.
+        let url = match ch.play_url.as_deref().filter(|u| !u.is_empty()) {
+            Some(u) => u.to_owned(),
+            None => self.live_url(&ch.ext_id)?,
+        };
+        let hls = url.contains(".m3u8");
+        let mut redact = self.redaction_set();
+        redact.add(url.clone());
+        Ok(PlayPlan {
+            url,
+            headers: vec![],
+            surface: if hls { Surface::Hls } else { Surface::Ts },
+            profile: PlayProfile::Live,
+            session: None,
+            redact,
+            needs_redirect_resolve: false,
+            unknown_profile: false,
+        })
+    }
+
+    /// `timeshift` template path: times come from the programme row; the wall clock is rendered
+    /// in the panel's declared timezone (carried on the channel's template as data).
+    async fn catchup(&self, ch: ChannelKey, p: &Programme) -> Result<PlayPlan> {
+        self.ensure_account().await?;
+        let template = ch
+            .catchup_template
+            .as_deref()
+            .and_then(CatchupTemplate::from_json)
+            .unwrap_or_else(|| CatchupTemplate {
+                mode: Mode::Xc,
+                source: None,
+                time: TimeSemantics::LocalWallclock {
+                    tz: self.st().server_tz.unwrap_or_else(|| "UTC".into()),
+                },
+                correction_secs: 0,
+                days: 0,
+            });
+        let ctx = ExpandCtx {
+            live_url: "",
+            start_utc: p.start_utc,
+            end_utc: p.end_utc,
+            now_utc: crate::sync::now_utc(),
+            channel_id: &ch.ext_id,
+            catchup_id: &ch.ext_id,
+            xc: Some(XcParts {
+                base: self.base.as_str().trim_end_matches('/').to_owned(),
+                username: self.username.clone(),
+                password: self.password.expose().to_owned(),
+                stream_id: ch.ext_id.clone(),
+            }),
+        };
+        let url = expand(&template, &ctx)?;
+        let mut redact = self.redaction_set();
+        redact.add(url.clone());
+        // Template-path sessions have no server session to delete.
+        Ok(PlayPlan {
+            url,
+            headers: vec![],
+            surface: Surface::Direct,
+            profile: PlayProfile::Seekable,
+            session: None,
+            redact,
+            needs_redirect_resolve: false,
+            unknown_profile: false,
+        })
+    }
+
+    async fn stop_session(&self, _s: SessionId) -> Result<()> {
+        Ok(())
+    }
+
+    async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {
+        crate::images::fetch_public(url, self.insecure_tls).await
+    }
+}
+
+#[async_trait]
+impl crate::sessions::SessionStopper for XtreamClient {
+    async fn stop(&self, _source_id: i64, _kind: &str, _session_id: &str) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl crate::userstate::AppDataRemote for XtreamClient {
+    async fn get(&self, _key: &str) -> Result<Option<Value>> {
+        Ok(None)
+    }
+    async fn put(&self, _key: &str, _value: &Value) -> Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests;

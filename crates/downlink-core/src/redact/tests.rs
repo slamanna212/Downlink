@@ -192,3 +192,33 @@ fn tracing_writer_redacts_events() {
         "{text}"
     );
 }
+
+/// Every URL shape the Xtream client and M3U playlists can produce must redact (PLAN §2.6).
+#[test]
+fn every_xtream_url_shape_redacts() {
+    let shapes = [
+        "http://p.test:8080/live/alice/hunter22/1001.ts",
+        "http://p.test:8080/live/alice/hunter22/1001.m3u8",
+        "https://p.test/movie/alice/hunter22/2001.mkv",
+        "https://p.test/series/alice/hunter22/3001.mp4",
+        "http://p.test/timeshift/alice/hunter22/60/2026-07-01:13-00/1001.ts",
+        "http://p.test/panel/live/alice/hunter22/7.ts",
+        "http://p.test/player_api.php?username=alice&password=hunter22&action=get_live_streams",
+        "http://p.test/player_api.php?action=get_short_epg&username=alice&stream_id=1&password=hunter22&limit=4",
+        "http://p.test/get.php?username=alice&password=hunter22&type=m3u_plus&output=ts",
+        "http://p.test/xmltv.php?username=alice&password=hunter22",
+        "http://p.test/streaming/timeshift.php?username=alice&password=hunter22&stream=1&start=2026-07-01:13-00&duration=60",
+        "http://alice:hunter22@p.test/stream/1.ts",
+        "http://p.test/stream/1.ts?token=hunter22",
+    ];
+    for u in shapes {
+        let out = redact(u);
+        assert!(
+            !out.contains("hunter22") && !out.contains("alice"),
+            "{u} -> {out}"
+        );
+        // Embedded in a sentence or an error message too.
+        let msg = redact(&format!("request to {u} failed: connection reset"));
+        assert!(!msg.contains("hunter22"), "{msg}");
+    }
+}
