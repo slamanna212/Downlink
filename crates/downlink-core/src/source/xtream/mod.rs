@@ -136,7 +136,7 @@ impl XtreamClient {
             http: crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
                 .timeout(Duration::from_secs(60))
                 .connect_timeout(Duration::from_secs(20))
-                .user_agent(concat!("Downlink/", env!("CARGO_PKG_VERSION")))
+                .user_agent(crate::user_agent())
                 .build()?,
             insecure_tls,
             base: normalise_base(base_url)?,

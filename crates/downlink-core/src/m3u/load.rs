@@ -74,7 +74,7 @@ impl HttpFetcher {
             client: crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
                 .timeout(Duration::from_secs(300))
                 .connect_timeout(Duration::from_secs(20))
-                .user_agent(concat!("Downlink/", env!("CARGO_PKG_VERSION")))
+                .user_agent(crate::user_agent())
                 .build()?,
         })
     }

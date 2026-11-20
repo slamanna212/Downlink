@@ -16,9 +16,11 @@ pub mod source;
 pub mod store;
 pub mod sync;
 pub mod tls;
+pub mod user_agent;
 pub mod userstate;
 pub mod util;
 pub mod vault;
 pub mod xmltv;
 
 pub use error::{AppError, ErrorCode, Result};
+pub use user_agent::user_agent;

@@ -196,6 +196,9 @@ pub struct Preferences {
     /// mpv audio device name; `None` = auto.
     pub audio_device: Option<String>,
     pub subtitle: SubtitleStyle,
+    /// mpv `user-agent` for every request (not a secret, so set globally). Empty = mpv default.
+    /// A per-file `User-Agent` header from the play plan still wins.
+    pub user_agent: String,
 }
 
 impl Default for Preferences {
@@ -209,6 +212,7 @@ impl Default for Preferences {
             audio_mode: AudioMode::Surround,
             audio_device: None,
             subtitle: SubtitleStyle::default(),
+            user_agent: String::new(),
         }
     }
 }
@@ -289,6 +293,9 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
         "stream-lavf-o",
         "reconnect=1,reconnect_streamed=1,reconnect_delay_max=2",
     ));
+    if !prefs.user_agent.is_empty() {
+        o.push(kv("user-agent", prefs.user_agent.clone()));
+    }
     o.push(kv("deinterlace", prefs.deinterlace.mpv_value()));
     o.extend(audio_mode_options(prefs.audio_mode_effective()));
     o.extend(subtitle_options(&prefs.subtitle));
@@ -341,10 +348,20 @@ pub fn loadfile_options(
         .into_iter()
         .map(|(k, v)| format!("{k}={}", quote(&v)))
         .collect();
-    if !headers.is_empty() {
-        let inner = headers
+    // A plan-supplied User-Agent (M3U `http-user-agent`, pipe headers) goes through mpv's own
+    // per-file option so it replaces the default instead of being sent twice.
+    let (ua, rest): (Vec<_>, Vec<_>) = headers
+        .iter()
+        .partition(|(k, _)| k.eq_ignore_ascii_case("user-agent"));
+    if let Some((_, v)) = ua.last() {
+        parts.push(format!("user-agent={}", quote(v)));
+    }
+    if !rest.is_empty() {
+        // `http-header-fields` is a string list: items are split on `,` and only `\,` escapes
+        // a comma. `%n%` quoting does not apply inside the list (it would be sent verbatim).
+        let inner = rest
             .iter()
-            .map(|(k, v)| quote(&format!("{k}: {v}")))
+            .map(|(k, v)| format!("{k}: {v}").replace(',', "\\,"))
             .collect::<Vec<_>>()
             .join(",");
         parts.push(format!("http-header-fields={}", quote(&inner)));
@@ -439,12 +456,54 @@ mod tests {
             &[("X-API-Key".into(), "k,1".into())],
             None,
         );
-        // inner item: "X-API-Key: k,1" is 14 bytes -> "%14%X-API-Key: k,1" (18 bytes)
+        // inner list: "X-API-Key: k\,1" (15 bytes), the comma escaped for mpv's list parser
+        assert!(s.contains("http-header-fields=%15%X-API-Key: k\\,1"), "{s}");
+        assert!(s.contains("cache-secs=%1%2"));
+    }
+
+    #[test]
+    fn multiple_headers_are_list_items() {
+        let s = loadfile_options(
+            Profile::Live,
+            &Preferences::default(),
+            &[
+                ("Authorization".into(), "Bearer t".into()),
+                ("Referer".into(), "http://r.test".into()),
+            ],
+            None,
+        );
         assert!(
-            s.contains("http-header-fields=%18%%14%X-API-Key: k,1"),
+            s.contains("http-header-fields=%46%Authorization: Bearer t,Referer: http://r.test"),
             "{s}"
         );
-        assert!(s.contains("cache-secs=%1%2"));
+    }
+
+    #[test]
+    fn plan_user_agent_becomes_per_file_option() {
+        let s = loadfile_options(
+            Profile::Live,
+            &Preferences::default(),
+            &[
+                ("User-Agent".into(), "Agent/1, x".into()),
+                ("X-API-Key".into(), "k".into()),
+            ],
+            None,
+        );
+        assert!(s.contains("user-agent=%10%Agent/1, x"), "{s}");
+        assert!(s.contains("http-header-fields=%12%X-API-Key: k"), "{s}");
+        assert!(!s.contains("User-Agent:"), "{s}");
+    }
+
+    #[test]
+    fn global_user_agent_only_when_set() {
+        let none = base_options(&Preferences::default(), RenderBackend::RenderApi);
+        assert!(!none.iter().any(|(k, _)| k == "user-agent"));
+        let p = Preferences {
+            user_agent: "Downlink/1.0.0 (Linux)".into(),
+            ..Preferences::default()
+        };
+        let o = base_options(&p, RenderBackend::RenderApi);
+        assert!(has(&o, "user-agent", "Downlink/1.0.0 (Linux)"));
     }
 
     #[test]

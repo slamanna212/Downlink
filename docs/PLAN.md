@@ -434,7 +434,12 @@ video-sync=audio         keep-open=no          idle=yes
 osc=no                   input-default-bindings=no   terminal=no
 stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=2
 deinterlace=auto         alang=<pref>          slang=<pref>
+user-agent=Downlink/<version> (<platform>; <OS>)   (same string as every core HTTP client)
 ```
+
+Per-file headers go in `http-header-fields` as a string list: items joined with `,`, a literal comma
+escaped as `\,` (mpv's `%n%` quoting does not apply inside the list). A plan `User-Agent` header goes
+to the per-file `user-agent` option instead, so it replaces the default rather than being sent twice.
 
 Profile `live` (live TV):
 

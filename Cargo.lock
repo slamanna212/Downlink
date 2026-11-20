@@ -1337,6 +1337,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "whoami",
  "wiremock",
 ]
 

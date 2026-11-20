@@ -216,7 +216,7 @@ impl DispatcharrClient {
         let base = normalise_base_url(base_url)?;
         let http = crate::tls::apply(reqwest::Client::builder(), opts.insecure_tls)?
             .timeout(opts.timeout)
-            .user_agent(concat!("Downlink/", env!("CARGO_PKG_VERSION")))
+            .user_agent(crate::user_agent())
             .build()?;
         let mut secrets = RedactionSet::new();
         match &creds {

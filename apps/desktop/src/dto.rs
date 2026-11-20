@@ -149,7 +149,10 @@ pub fn failure_error(f: &FailureInfo) -> AppError {
 
 /// UI `AppSettings` (types.ts) -> player preferences. Unknown or missing fields keep defaults.
 pub fn preferences_from_settings(v: &Value) -> Preferences {
-    let mut p = Preferences::default();
+    let mut p = Preferences {
+        user_agent: downlink_core::user_agent().to_owned(),
+        ..Preferences::default()
+    };
     if let Some(n) = v.get("liveBufferSecs").and_then(Value::as_f64) {
         p.live_buffer_secs = n.round().clamp(1.0, 10.0) as u32;
     }
