@@ -168,7 +168,10 @@ impl Multiview {
             PlayerEvent::State(snap) => {
                 let changed = {
                     let mut g = lock(&shared);
-                    let st = g.status.entry(slot).or_default();
+                    // A removed tile's last events (its own stop) must not bring it back.
+                    let Some(st) = g.status.get_mut(&slot) else {
+                        return;
+                    };
                     let failure = (snap.state == Some(SessionState::Failed))
                         .then(|| snap.failure.as_ref().map(|f| f.kind))
                         .flatten();
@@ -328,6 +331,25 @@ impl Multiview {
 
     pub async fn tile_channel(&self, slot: u32) -> Option<i64> {
         lock(&self.shared).status.get(&slot).map(|s| s.channel_id)
+    }
+
+    /// Dev driver: (slot, position, dropped frames) per tile.
+    #[cfg(feature = "e2e")]
+    pub async fn positions(&self) -> Vec<(u32, Option<f64>, Option<i64>, u64)> {
+        let tiles = self.tiles.lock().await;
+        let mut v: Vec<_> = tiles
+            .iter()
+            .map(|(s, t)| {
+                let snap = t.player.snapshot();
+                #[cfg(target_os = "linux")]
+                let frames = lock(&t.surface).render_count();
+                #[cfg(not(target_os = "linux"))]
+                let frames = 0;
+                (*s, snap.position_secs, snap.dropped_frames, frames)
+            })
+            .collect();
+        v.sort_by_key(|x| x.0);
+        v
     }
 
     /// Leave multiview (and sleep / quit): every tile's stream stops, audio returns to the main player.

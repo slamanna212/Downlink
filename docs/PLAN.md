@@ -442,6 +442,7 @@ video-sync=audio         keep-open=no          idle=yes
 osc=no                   input-default-bindings=no   terminal=no
 stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=2
 deinterlace=auto         alang=<pref>          slang=<pref>
+ao=pipewire,pulse,alsa (Linux) | wasapi (Windows) | coreaudio (macOS)   — never SDL/JACK/sndio/OpenAL
 user-agent=Downlink/<version> (<platform>; <OS>)   (same string as every core HTTP client)
 ```
 
@@ -567,6 +568,10 @@ A CI job runs each artefact on a clean VM/container with **no mpv or libmpv inst
   context. Windows: one `--wid` child HWND per tile beneath WebView2. macOS: one NSView per tile;
   until the macOS surface is reworked for several instances, macOS reports a cap of 1 tile and the
   entry points are hidden.
+- **Rendering.** While more than one surface is attached, render calls pass
+  `MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME=0`: every surface renders on the GTK main thread, and one
+  blocking render starves the rest (observed: tiles froze after two frames). The audio output list
+  excludes SDL, whose global init crashed when several instances started at once (§4.3).
 - **Options.** Tiles use profile `multiview` (owned by `downlink-player`): the `live` profile plus
   `hwdec=auto-safe`, `vd-lavc-skiploopfilter=nonkey` above 4 tiles, and `mute=yes` on every tile but
   the audible one. Only one tile is ever unmuted.

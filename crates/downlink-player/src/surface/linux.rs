@@ -99,6 +99,14 @@ struct GtkState {
     create: CreateSlot,
 }
 
+/// More than one surface is attached (multiview). Renders then must not block for the frame's
+/// target time: all surfaces render on the GTK main thread, and one blocking render starves the rest.
+static SURFACES: AtomicU64 = AtomicU64::new(0);
+
+fn multi_active() -> bool {
+    SURFACES.load(Ordering::Relaxed) > 1
+}
+
 thread_local! {
     static STATE: RefCell<HashMap<u32, GtkState>> = RefCell::new(HashMap::new());
 }
@@ -298,7 +306,7 @@ impl VideoSurface for LinuxSurface {
                         // valid out pointer for one GLint.
                         unsafe { f(GL_FRAMEBUFFER_BINDING, &mut fbo) };
                     }
-                    if let Err(e) = rc.render(fbo, w, h, true) {
+                    if let Err(e) = rc.render(fbo, w, h, true, !multi_active()) {
                         tracing::warn!("mpv render failed: {e}");
                     }
                     rc.report_swap();
@@ -351,6 +359,7 @@ impl VideoSurface for LinuxSurface {
         }
 
         let slot = self.slot;
+        SURFACES.fetch_add(1, Ordering::Relaxed);
         STATE.with(|s| {
             s.borrow_mut().insert(
                 slot,
@@ -402,6 +411,7 @@ impl VideoSurface for LinuxSurface {
         let slot = self.slot;
         STATE.with(|s| {
             if let Some(st) = s.borrow_mut().remove(&slot) {
+                SURFACES.fetch_sub(1, Ordering::Relaxed);
                 st.glarea.make_current();
                 *st.render.borrow_mut() = None;
                 st.overlay.remove(&st.glarea);

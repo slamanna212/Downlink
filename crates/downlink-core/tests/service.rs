@@ -1174,7 +1174,10 @@ async fn stream_picker_is_hidden_and_refused_for_non_admins() {
     let s = e.svc.add_source(input(&server)).await.unwrap();
     let v = serde_json::to_value(&s).unwrap();
     assert_eq!(v["caps"].as_u64().unwrap() & 512, 0, "no STREAM_SWITCH bit");
-    assert_eq!(v["streamLimit"], 3, "stream limit recorded for the multiview budget");
+    assert_eq!(
+        v["streamLimit"], 3,
+        "stream limit recorded for the multiview budget"
+    );
     let chans = e
         .svc
         .list_channels(ListChannelsArgs::default())

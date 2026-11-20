@@ -116,7 +116,7 @@ fn draw(frames: &AtomicU64) {
             if let Some(f) = st.gl_get {
                 f(GL_FRAMEBUFFER_BINDING, &mut fbo);
             }
-            if let Err(e) = rc.render(fbo, w, h, true) {
+            if let Err(e) = rc.render(fbo, w, h, true, true) {
                 tracing::warn!("mpv render failed: {e}");
             }
             rc.report_swap();

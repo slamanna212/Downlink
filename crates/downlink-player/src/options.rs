@@ -273,6 +273,18 @@ fn kv(k: &str, v: impl Into<String>) -> (String, String) {
 }
 
 /// Base options, applied once before `mpv_initialize` (all sessions).
+/// Audio outputs mpv may try, in order. Never SDL, JACK, sndio or OpenAL: with no usable device mpv
+/// otherwise falls through to SDL, whose global audio init crashes when several instances (multiview
+/// tiles) start at once. When none of these opens, the player switches to `ao=null` and plays silent.
+#[cfg(target_os = "linux")]
+pub const AUDIO_OUTPUTS: &str = "pipewire,pulse,alsa";
+#[cfg(target_os = "windows")]
+pub const AUDIO_OUTPUTS: &str = "wasapi";
+#[cfg(target_os = "macos")]
+pub const AUDIO_OUTPUTS: &str = "coreaudio";
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+pub const AUDIO_OUTPUTS: &str = "";
+
 pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
     let mut o: Opts = Vec::new();
     match backend {
@@ -290,6 +302,7 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
         }
     }
     o.push(kv("hwdec", prefs.hwdec_effective()));
+    o.push(kv("ao", AUDIO_OUTPUTS));
     o.push(kv("video-sync", "audio"));
     o.push(kv("keep-open", "no"));
     o.push(kv("idle", "yes"));
@@ -396,6 +409,19 @@ mod tests {
 
     fn has(o: &Opts, k: &str, v: &str) -> bool {
         o.iter().any(|(a, b)| a == k && b == v)
+    }
+
+    #[test]
+    fn audio_outputs_never_include_sdl() {
+        let o = base_options(&Preferences::default(), RenderBackend::RenderApi);
+        let ao = o.iter().find(|(k, _)| k == "ao").map(|(_, v)| v.as_str());
+        assert_eq!(ao, Some(AUDIO_OUTPUTS));
+        for bad in ["sdl", "jack", "sndio", "openal"] {
+            assert!(
+                !AUDIO_OUTPUTS.contains(bad),
+                "{bad} must not be an audio output"
+            );
+        }
     }
 
     #[test]

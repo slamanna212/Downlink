@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Popover, SegmentedControl, Switch, TextInput } from '@mantine/core';
+import { Popover, SegmentedControl, Switch, TextInput, VisuallyHidden } from '@mantine/core';
 import {
   IconArrowsMaximize,
   IconGauge,
@@ -67,7 +67,10 @@ function ChannelPicker({ channels, recents, onScreen, budgetText, onPick }: {
   onPick: (c: Channel) => void;
 }) {
   const [query, setQuery] = useState('');
-  const [tab, setTab] = useState<PickerTab>('favourites');
+  // Open on the first tab that has something in it.
+  const [tab, setTab] = useState<PickerTab>(() =>
+    channels.some((c) => c.isFavourite) ? 'favourites' : recents.length ? 'recent' : 'all',
+  );
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     const base = q ? channels : tab === 'favourites' ? channels.filter((c) => c.isFavourite) : tab === 'recent' ? recents : channels;
@@ -164,13 +167,13 @@ function Tile(p: TileProps) {
       {!inTauri() && p.tile && !failed && <div className={classes.devVideo} aria-hidden>tile {p.slot + 1}</div>}
       {!p.tile ? (
         <Popover opened={p.pickerOpen} onChange={p.onPickerChange} width={360} position="bottom" trapFocus withinPortal shadow="lg">
-          <Popover.Target>
-            <div className={classes.empty}>
+          <div className={classes.empty}>
+            <Popover.Target>
               <DLButton variant="default" icon={IconPlus} onClick={() => p.onPickerChange(!p.pickerOpen)}>
                 {t('multiview.addChannel')}
               </DLButton>
-            </div>
-          </Popover.Target>
+            </Popover.Target>
+          </div>
           <Popover.Dropdown>{p.picker}</Popover.Dropdown>
         </Popover>
       ) : failed && p.tile.failure === 'limit' ? (
@@ -405,7 +408,12 @@ export function MultiviewPage() {
           aria-label={t('multiview.layout')}
           data={allowed.map((l) => ({
             value: l,
-            label: <Icon icon={LAYOUT_ICON[l]} size={16} aria-label={t(`multiview.layout.${l}` as MessageKey)} />,
+            label: (
+              <>
+                <Icon icon={LAYOUT_ICON[l]} size={16} />
+                <VisuallyHidden>{t(`multiview.layout.${l}` as MessageKey)}</VisuallyHidden>
+              </>
+            ),
           }))}
         />
         <Switch size="sm" checked={audioFollows} onChange={(e) => setAudioFollows(e.currentTarget.checked)} label={t('multiview.audioFollows')} />

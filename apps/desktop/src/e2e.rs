@@ -36,6 +36,7 @@ pub fn spawn(app: AppHandle, mode: String) {
         let r = match mode.as_str() {
             "offline" => offline(&st, &db).await,
             "zap" => zap(&st).await,
+            "multiview" => multiview(&st).await,
             "failover" => failover(&st).await,
             "smoke" => smoke(&st).await,
             "perf-setup" => perf_setup(&st).await,
@@ -308,6 +309,106 @@ async fn zap(st: &AppState) -> Result<(), String> {
         "commandMs": { "p50": percentile(&cmd_ms, 0.5), "p95": percentile(&cmd_ms, 0.95) },
         "firstFrameMs": { "p50": percentile(&first_ms, 0.5), "p95": percentile(&first_ms, 0.95) },
     }));
+    Ok(())
+}
+
+/// `DOWNLINK_E2E=multiview`: main player plus three tiles (PLAN §4.11) laid out 2x2 in the window.
+/// Waits for every tile to play, moves audio, removes one tile and leaves multiview; reports tile
+/// states at each step. Channels from `DOWNLINK_E2E_MV` (main first, comma separated).
+async fn multiview(st: &AppState) -> Result<(), String> {
+    use downlink_player::SurfaceBounds;
+    let names = std::env::var("DOWNLINK_E2E_MV")
+        .unwrap_or_else(|_| "Channel One,Test News,XC News,XC Sports".into());
+    let pb = st.playback().await.map_err(|e| e.message)?;
+    let mv = pb.multiview.get().cloned().ok_or("multiview unavailable")?;
+    let mut ids = Vec::new();
+    for n in names.split(',') {
+        ids.push(channel_id(st, n.trim()).await?);
+    }
+    let Some((&main, tiles)) = ids.split_first() else {
+        return Err("no channels".into());
+    };
+    pb.play_channel(main).await.map_err(|e| e.message)?;
+    let snap = pb.snapshot_wait(
+        |s| matches!(s, SessionState::Playing | SessionState::Failed),
+        Duration::from_secs(20),
+    );
+    say(
+        json!({ "step": "mv_main", "state": snap.state, "maxTiles": mv.state(Some(main)).await.max_tiles }),
+    );
+    let (w, h) = (480u32, 300u32);
+    if let Some(s) = st.surface().await {
+        use downlink_player::VideoSurface;
+        s.set_bounds(SurfaceBounds {
+            x: 0,
+            y: 0,
+            w,
+            h,
+            scale: 1.0,
+        });
+        s.set_visible(true);
+    }
+    for (i, id) in tiles.iter().enumerate() {
+        let slot = i as u32 + 1;
+        let t0 = Instant::now();
+        let r = mv.set_tile(slot, *id, Some(main)).await;
+        mv.set_bounds(
+            slot,
+            SurfaceBounds {
+                x: (slot % 2 * w) as i32,
+                y: (slot / 2 * h) as i32,
+                w,
+                h,
+                scale: 1.0,
+            },
+            true,
+        )
+        .await;
+        say(
+            json!({ "step": "mv_add", "slot": slot, "ok": r.is_ok(), "error": r.err().map(|e| e.message), "ms": t0.elapsed().as_millis() as u64 }),
+        );
+    }
+    let deadline = Instant::now() + Duration::from_secs(25);
+    loop {
+        let d = mv.state(Some(main)).await;
+        let done = d
+            .tiles
+            .iter()
+            .filter(|t| t.slot > 0)
+            .all(|t| t.state == "Playing" || t.state == "Failed");
+        if done || Instant::now() > deadline {
+            say(json!({ "step": "mv_tiles", "state": d }));
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    if std::env::var_os("DOWNLINK_E2E_MV_STOPMAIN").is_some() {
+        let _ = pb.stop().await;
+        say(json!({ "step": "mv_main_stopped" }));
+    }
+    for _ in 0..3 {
+        #[cfg(target_os = "linux")]
+        let main_frames = st.surface().await.map(|s| s.render_count());
+        #[cfg(not(target_os = "linux"))]
+        let main_frames: Option<u64> = None;
+        say(
+            json!({ "step": "mv_positions", "main": pb.snapshot().position_secs, "mainFrames": main_frames, "tiles": mv.positions().await }),
+        );
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
+    mv.set_audio(2, Some(main)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    say(
+        json!({ "step": "mv_audio", "audible": mv.state(Some(main)).await.audible, "mainMuted": pb.snapshot().muted }),
+    );
+    mv.remove_tile(3, Some(main)).await;
+    say(json!({ "step": "mv_remove", "state": mv.state(Some(main)).await }));
+    mv.clear().await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let d = mv.state(Some(main)).await;
+    say(
+        json!({ "step": "mv_exit", "tiles": d.tiles.len(), "mainMuted": pb.snapshot().muted, "mainState": pb.snapshot().state }),
+    );
     Ok(())
 }
 

@@ -12,7 +12,9 @@
   display: grid;
   gap: 0.25rem; /* theme.other.multiview.tileGap (4 px) */
   padding: 0.25rem;
-  background: var(--dl-multiview-canvas);
+  /* No background here: it would cover the native video surfaces under the webview. The canvas
+     colour is painted by empty / failed tiles; gaps show the window's own dark base. */
+  background: transparent;
 }
 
 .tile {
@@ -24,7 +26,7 @@
 }
 
 .tile[data-empty],
-.tile[data-failed] { background: var(--dl-surface-1); }
+.tile[data-failed] { background: var(--dl-multiview-canvas); }
 
 /* inset ring: an outer ring would be clipped by the neighbouring tile */
 .tile[data-focused]::after {

@@ -390,7 +390,16 @@ impl RenderContext {
     }
 
     /// Render into framebuffer `fbo` of size `w` x `h`. Call with the GL context current.
-    pub fn render(&self, fbo: i32, w: i32, h: i32, flip_y: bool) -> Result<(), PlayerError> {
+    /// `block`: wait until the frame's display time (mpv's default). Must be false when several
+    /// render contexts share one thread (multiview), or one blocking render starves the others.
+    pub fn render(
+        &self,
+        fbo: i32,
+        w: i32,
+        h: i32,
+        flip_y: bool,
+        block: bool,
+    ) -> Result<(), PlayerError> {
         let mut f = ffi::MpvOpenGlFbo {
             fbo,
             w,
@@ -398,6 +407,7 @@ impl RenderContext {
             internal_format: 0x8058, // GL_RGBA8: GtkGLArea FBOs are RGBA8
         };
         let mut flip: c_int = c_int::from(flip_y);
+        let mut block: c_int = c_int::from(block);
         let mut params = [
             ffi::MpvRenderParam {
                 kind: ffi::RENDER_PARAM_OPENGL_FBO,
@@ -406,6 +416,10 @@ impl RenderContext {
             ffi::MpvRenderParam {
                 kind: ffi::RENDER_PARAM_FLIP_Y,
                 data: (&raw mut flip).cast::<c_void>(),
+            },
+            ffi::MpvRenderParam {
+                kind: ffi::RENDER_PARAM_BLOCK_FOR_TARGET_TIME,
+                data: (&raw mut block).cast::<c_void>(),
             },
             ffi::MpvRenderParam {
                 kind: 0,
@@ -436,7 +450,15 @@ impl Drop for RenderContext {
 }
 
 /// libmpv refuses to run unless `LC_NUMERIC` is "C"; GTK and friends reset it from the environment.
+///
+/// Done once per process: `setlocale` is not thread-safe, and later engines (multiview tiles, the
+/// supervisor's replacement) are created on worker threads while GTK and other mpv instances run.
 fn force_c_numeric_locale() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(set_c_numeric_locale);
+}
+
+fn set_c_numeric_locale() {
     #[cfg(unix)]
     {
         unsafe extern "C" {
