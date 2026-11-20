@@ -5,6 +5,15 @@ all-features = true
 [advisories]
 version = 2
 yanked = "warn"
+# Reviewed 2026-11-20. Unmaintained notices with no safe upgrade, all transitive:
+ignore = [
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error via gtk-rs 0.18 macros (tauri/wry Linux stack); no upgrade until tauri moves to gtk4" },
+  { id = "RUSTSEC-2026-0370", reason = "zvariant via zbus 5 (keyring secret-service, logind watcher); folded into zbus upstream, revisit on zbus 6" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names via zbus 5; see RUSTSEC-2026-0370" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via zbus 5; see RUSTSEC-2026-0370" },
+  { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained notice; used for UTC/tz math in core and by deps; migrate to jiff post-1.0 (tracked)" },
+  { id = "RUSTSEC-2026-0555", reason = "chrono-tz unmaintained notice; same migration as chrono" },
+]
 
 [licenses]
 version = 2
