@@ -13,8 +13,9 @@ import { formatClock, minutesLeft, progress } from '../../lib/time';
 import { useDLFocusable } from '../../lib/spatial';
 import { useNowEpoch } from '../../lib/useNow';
 import { modKeyLabel } from '../../lib/platform';
+import { useInteractive } from '../../lib/perf';
 import { t } from '../../lib/i18n';
-import { openPalette } from '../palette/CommandPalette';
+import { openPalette } from '../../lib/palette';
 import { playCatchup, playChannel, playRecording, playVod, restartProgramme } from '../player/actions';
 import classes from './Home.module.css';
 
@@ -122,6 +123,7 @@ export function HomePage() {
   const navigate = useNavigate();
   const { loaded, hasSource } = useCaps();
   const home = useHome();
+  useInteractive(!!home.data);
   const now = useNowEpoch(30_000);
   const a = useActions();
   if (loaded && !hasSource) return <EmptySource />;

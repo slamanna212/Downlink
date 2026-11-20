@@ -24,6 +24,7 @@ for (const route of ROUTES) {
   test(`axe: ${route}`, async ({ page }) => {
     await page.goto(route);
     await page.waitForLoadState('networkidle');
+    if (route === '/guide') await expect(page.getByRole('gridcell').first()).toBeVisible();
     await page.waitForTimeout(600); // route fade-in + first data
     const { violations } = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze();
     expect(violations.map((v) => `${v.id} (${v.impact}) ${v.nodes[0]?.target.join(' ')}`)).toEqual([]);

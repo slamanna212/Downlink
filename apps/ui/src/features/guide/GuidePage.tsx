@@ -17,6 +17,7 @@ import { EmptySource } from '../../pages/EmptySource';
 import { addDays, dayLabel, floorToTick, formatClock, formatDay, nowEpoch, progress, startOfDay } from '../../lib/time';
 import { useNowEpoch } from '../../lib/useNow';
 import { useDLFocusable } from '../../lib/spatial';
+import { useInteractive } from '../../lib/perf';
 import { t } from '../../lib/i18n';
 import { useDetailStore } from '../../store/detail';
 import { useUiStore } from '../../store/ui';
@@ -197,6 +198,7 @@ export function GuidePage() {
   const pendingFocus = useRef(false);
 
   const sources = useSources();
+  useInteractive(!!counts.data);
   const backDays = Math.max(1, sources.data?.[0]?.archiveDays ?? 1);
   const rowH = dl.density[density].guideRow;
   const scale = density === 'tv' ? dl.density.tv.typeScale : 1;
@@ -265,6 +267,8 @@ export function GuidePage() {
   useEffect(() => {
     updateRef.current = update;
   });
+  // The scroller only mounts once the channel count is known (it renders a skeleton before that).
+  const hasScroller = totalRows > 0;
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -274,7 +278,7 @@ export function GuidePage() {
     lastGeo.current = geo;
     cached.current = null;
     updateRef.current();
-  }, [geo, loaded, hasSource, COL_W]);
+  }, [geo, loaded, hasSource, COL_W, hasScroller]);
   // Row count or density change: refresh the render range without touching the scroll position.
   useEffect(() => {
     cached.current = null;
@@ -541,6 +545,7 @@ export function GuidePage() {
           role="grid"
           aria-label={t('guide.grid')}
           aria-rowcount={totalRows}
+          aria-busy={blocks.length === 0 || undefined}
           tabIndex={0}
           onScroll={onScroll}
           onKeyDown={onKeyDown}

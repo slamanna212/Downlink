@@ -4,7 +4,7 @@ import { IconArrowBarLeft, IconDownload } from '@tabler/icons-react';
 import { FocusContext } from '@noriginmedia/norigin-spatial-navigation';
 import { useCaps, useSources } from '../api/queries';
 import type { Source, SourceStatus } from '../api/types';
-import { openPalette } from '../features/palette/CommandPalette';
+import { openPalette } from '../lib/palette';
 import { Icon } from '../components/Icon/Icon';
 import { DLIconButton } from '../components/DLIconButton/DLIconButton';
 import { useDLFocusable } from '../lib/spatial';

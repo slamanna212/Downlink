@@ -27,7 +27,9 @@ test('channels keyboard: down down Enter plays, zap pill, number entry, Esc goes
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/player$/);
+  await expect(page.locator('[data-video-rect]')).toBeVisible(); // lazy player chunk mounted
   await expect(page.getByText('Cobalt Sports').first()).toBeVisible(); // third channel
+  await page.waitForTimeout(250); // key listeners attach in an effect after mount
   // "5" has no exact match: the lowest number >= 5 wins (channel 5.5, PLAN §8.4). Enter confirms early.
   await page.keyboard.press('5');
   await expect(page.getByRole('status', { name: 'Channel number' })).toBeVisible();
@@ -40,6 +42,7 @@ test('channels keyboard: down down Enter plays, zap pill, number entry, Esc goes
 test('guide: Home goes to now, a past+archive block opens catch-up with a seek bar, End goes live; dwell never plays', async ({ page }) => {
   await page.goto('/guide');
   await settle(page);
+  await expect(page.getByRole('gridcell').first()).toBeVisible(); // lazy chunk + first data
   const grid = page.getByRole('grid').first();
   await grid.focus();
   await page.keyboard.press('Home');

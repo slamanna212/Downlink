@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Spotlight, spotlight, type SpotlightActionData, type SpotlightActionGroupData } from '@mantine/spotlight';
@@ -25,11 +25,11 @@ import { Icon } from '../../components/Icon/Icon';
 import { useUiStore } from '../../store/ui';
 import { useDetailStore } from '../../store/detail';
 import { dayLabel, formatClock } from '../../lib/time';
+import { onOpenPalette } from '../../lib/palette';
 import { t } from '../../lib/i18n';
 import { activateProgramme } from '../guide/activate';
 import { playChannel } from '../player/actions';
 
-export const openPalette = () => spotlight.open();
 
 const ic = (g: Parameters<typeof Icon>[0]['icon']) => <Icon icon={g} size={16} />;
 
@@ -45,6 +45,7 @@ export function CommandPalette() {
   const setRailPref = useUiStore((s) => s.setRailPref);
   const [query, setQuery] = useState('');
   const q = useDeferredValue(query.trim());
+  useEffect(() => onOpenPalette(() => spotlight.open()), []);
 
   const results = useQuery({
     queryKey: ['catalog', 'palette', q],

@@ -257,6 +257,7 @@ export function createMockBackend(): Backend {
     get_channel_by_uuid: ({ uuid }) => channels.find((c) => c.uuid === uuid) ?? null,
     export_diagnostics: () => '/home/user/Downloads/downlink-diagnostics.zip',
     reveal_path: () => null,
+    report_ui_timing: () => null,
     list_vod_categories: ({ kind }) => vod.vodCategories(kind),
     list_movies: (a) => vod.listMovies(a),
     get_movie: ({ id }) => {

@@ -92,6 +92,8 @@ export interface Commands {
   get_channel_by_uuid: { args: { uuid: string }; result: Channel | null };
   export_diagnostics: { args: Record<string, never>; result: string };
   reveal_path: { args: { path: string }; result: null };
+  /** Debug: the UI reports a named startup timing (ms since navigation start) for the desktop perf harness. */
+  report_ui_timing: { args: { name: string; ms: number }; result: null };
 }
 export type CommandName = keyof Commands;
 

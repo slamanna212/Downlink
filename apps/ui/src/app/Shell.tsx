@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { useHotkeys } from '@mantine/hooks';
 import { dl } from '../theme';
@@ -12,11 +12,23 @@ import { playCatchup, playChannel } from '../features/player/actions';
 import { Banner } from '../components/Banner/Banner';
 import { formatUpdated } from '../lib/time';
 import { readTvSignals, wantsTv } from '../lib/tv';
-import { CommandPalette } from '../features/palette/CommandPalette';
-import { ChannelDetail } from '../features/detail/ChannelDetail';
 import { Rail, type RailMode } from './Rail';
+import { preloadRoutes } from './routes';
+import { useDetailStore } from '../store/detail';
+import { whenIdle } from '../lib/perf';
 import { isCollapsedRoute } from './nav';
 import classes from './Shell.module.css';
+
+const CommandPalette = lazy(() => import('../features/palette/CommandPalette').then((m) => ({ default: m.CommandPalette })));
+const ChannelDetail = lazy(() => import('../features/detail/ChannelDetail').then((m) => ({ default: m.ChannelDetail })));
+
+/** Mounts the code-split palette once the app is idle (a queued open request is replayed on mount). */
+function IdleMount({ children, when }: { children: React.ReactNode; when?: boolean }) {
+  const [ready, setReady] = useState(false);
+  useEffect(() => whenIdle(() => setReady(true)), []);
+  if (when && !ready) setReady(true); // latch: once opened, stay mounted so the exit transition can run
+  return ready ? <Suspense fallback={null}>{children}</Suspense> : null;
+}
 
 /** Remounted per path (via key) so every route change fades in. */
 function RouteTransition({ children }: { children: React.ReactNode }) {
@@ -108,6 +120,11 @@ function useDeepLinks() {
 }
 
 export function Shell() {
+  const detailOpen = useDetailStore((s) => s.open !== null);
+  useEffect(() => {
+    const id = window.setTimeout(preloadRoutes, 1500);
+    return () => window.clearTimeout(id);
+  }, []);
   useAutoDensity();
   useDeepLinks();
   useEscapeBack();
@@ -156,8 +173,8 @@ export function Shell() {
           <Outlet />
         </RouteTransition>
       </main>
-      <ChannelDetail />
-      <CommandPalette />
+      <IdleMount when={detailOpen}><ChannelDetail /></IdleMount>
+      <IdleMount><CommandPalette /></IdleMount>
     </div>
   );
 }

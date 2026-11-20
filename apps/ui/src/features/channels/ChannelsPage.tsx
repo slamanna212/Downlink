@@ -15,6 +15,7 @@ import { EmptySource } from '../../pages/EmptySource';
 import { isEditableTarget, isListKey, isTypeaheadKey, nextIndex } from '../../lib/listNav';
 import { useDLFocusable } from '../../lib/spatial';
 import { useNowEpoch } from '../../lib/useNow';
+import { useInteractive } from '../../lib/perf';
 import { t } from '../../lib/i18n';
 import { usePlayerStore } from '../../store/player';
 import { useUiStore } from '../../store/ui';
@@ -51,6 +52,7 @@ export function ChannelsPage() {
     query: deferred.trim() || null,
   });
   const channels = useMemo(() => list.data ?? [], [list.data]);
+  useInteractive(channels.length > 0);
   const rowH = dl.density[density].channelRow;
 
   // eslint-disable-next-line react-hooks/incompatible-library
