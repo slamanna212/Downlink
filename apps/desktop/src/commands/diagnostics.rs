@@ -118,3 +118,65 @@ pub async fn export_diagnostics(app: AppHandle, state: State<'_, AppState>) -> C
         .map_err(|e| AppError::local(format!("Could not save the bundle: {e}")))?;
     Ok(path.display().to_string())
 }
+
+/// True when `path` (canonicalised) lies inside one of `roots` (canonicalised).
+pub fn path_allowed(path: &std::path::Path, roots: &[std::path::PathBuf]) -> bool {
+    let Ok(p) = path.canonicalize() else {
+        return false;
+    };
+    roots
+        .iter()
+        .filter_map(|r| r.canonicalize().ok())
+        .any(|r| p.starts_with(r))
+}
+
+/// Open the folder containing `path` in the OS file manager. Only paths inside the downloads,
+/// app data or log directories are accepted (the UI passes the diagnostics bundle path).
+#[tauri::command]
+pub async fn reveal_path(app: AppHandle, path: String) -> CmdResult<()> {
+    use downlink_core::AppError;
+    use tauri_plugin_opener::OpenerExt;
+    let p = std::path::PathBuf::from(&path);
+    let roots: Vec<std::path::PathBuf> = [
+        app.path().download_dir().ok(),
+        app.path().app_data_dir().ok(),
+        app.path().app_log_dir().ok(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if !path_allowed(&p, &roots) {
+        return Err(AppError::local("That location cannot be opened."));
+    }
+    app.opener()
+        .reveal_item_in_dir(&p)
+        .map_err(|e| AppError::local(format!("Could not open the folder: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_paths_inside_roots_are_allowed() {
+        let base = std::env::temp_dir().join(format!("dl-reveal-{}", std::process::id()));
+        let inside = base.join("dl");
+        let _ = std::fs::create_dir_all(&inside);
+        let f = inside.join("x.zip");
+        let _ = std::fs::write(&f, b"x");
+        assert!(path_allowed(&f, std::slice::from_ref(&inside)));
+        assert!(!path_allowed(
+            &std::env::temp_dir(),
+            std::slice::from_ref(&inside)
+        ));
+        assert!(!path_allowed(
+            &inside.join("../../etc/passwd"),
+            std::slice::from_ref(&inside)
+        ));
+        assert!(!path_allowed(
+            &inside.join("missing"),
+            std::slice::from_ref(&inside)
+        ));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+}

@@ -1,8 +1,7 @@
 //! Desktop-layer DTOs and mappings between core types and the UI contract
 //! (`apps/ui/src/api/types.ts`). Core owns most shapes; only the ones that differ are mapped here.
 
-use downlink_core::catalog;
-use downlink_core::service::{ChannelDto, HomeDto, ProgrammeDto, SearchDto, Service};
+use downlink_core::service::ProgrammeDto;
 use downlink_core::{AppError, ErrorCode};
 use downlink_player::options::{SubtitleBackground, SubtitleSize};
 use downlink_player::{
@@ -145,78 +144,6 @@ pub fn preferences_from_settings(v: &Value) -> Preferences {
         };
     }
     p
-}
-
-// ---- Home / search: core DTOs differ from the UI contract -----------------------------------
-
-async fn channel_dto(service: &Service, id: i64) -> Option<ChannelDto> {
-    let row = service.store().channel(id).await.ok()??;
-    // Logo is not resolved here (core exposes no by-id DTO builder yet).
-    Some(ChannelDto::from_row(&row, None, false))
-}
-
-pub async fn home_to_ui(service: &Service, h: HomeDto) -> Value {
-    let mut cont = Vec::new();
-    for c in &h.continue_watching {
-        let channel = match c.channel_id {
-            Some(id) => channel_dto(service, id).await,
-            None => None,
-        };
-        let kind = match c.kind.as_str() {
-            k @ ("live" | "catchup" | "movie" | "episode" | "recording") => k,
-            _ => "movie",
-        };
-        let progress = c
-            .duration_ms
-            .filter(|d| *d > 0)
-            .map(|d| (c.position_ms as f64 / d as f64).clamp(0.0, 1.0));
-        let remaining = c
-            .duration_ms
-            .map(|d| ((d - c.position_ms).max(0) / 1000) as f64);
-        cont.push(serde_json::json!({
-            "kind": kind,
-            "id": c.programme_id.clone().unwrap_or_else(|| c.item_key.clone()),
-            "channel": channel,
-            "programme": null,
-            "title": c.title.clone().unwrap_or_default(),
-            "subtitle": null,
-            "art": null,
-            "progress": progress,
-            "remainingSecs": remaining,
-        }));
-    }
-    let on_now: Vec<Value> = h
-        .on_now
-        .iter()
-        .map(|o| serde_json::json!({ "channel": o.channel, "now": o.programme }))
-        .collect();
-    serde_json::json!({
-        "continueWatching": cont,
-        "favourites": h.favourites,
-        "onNow": on_now,
-        "recents": h.recents,
-    })
-}
-
-pub async fn search_to_ui(service: &Service, s: SearchDto) -> Value {
-    let mut hits = Vec::new();
-    for p in &s.programmes {
-        let ch = match s.channels.iter().find(|c| c.id == p.channel_id) {
-            Some(c) => Some(c.clone()),
-            None => channel_dto(service, p.channel_id).await,
-        };
-        if let Some(channel) = ch {
-            hits.push(serde_json::json!({ "programme": p, "channel": channel }));
-        }
-    }
-    serde_json::json!({ "channels": s.channels, "programmes": hits })
-}
-
-/// Visible-channel count for `get_counts` with core's default filter (adult/radio/DRM hidden).
-pub async fn all_count(service: &Service) -> i64 {
-    catalog::count_channels(service.store(), &catalog::ChannelFilter::default())
-        .await
-        .unwrap_or(0)
 }
 
 #[cfg(test)]

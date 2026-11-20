@@ -303,6 +303,8 @@ macro_rules! handlers {
             commands::diagnostics::get_diagnostics,
             commands::diagnostics::set_debug_logging,
             commands::diagnostics::export_diagnostics,
+            commands::diagnostics::reveal_path,
+            commands::catalog::get_channel_by_uuid,
             commands::updates::get_update_status,
             commands::updates::set_update_channel,
             commands::updates::check_for_updates,
@@ -337,6 +339,7 @@ fn main() {
     };
     let builder = builder
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .on_page_load(|webview, payload| {
             if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {

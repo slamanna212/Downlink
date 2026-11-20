@@ -1,16 +1,11 @@
 use downlink_core::AppError;
-use downlink_core::epg;
 use downlink_core::service::{
-    AddSourceInput, ChannelDto, GroupDto, GuideArgs, GuideDto, ListChannelsArgs, NowNextDto,
-    ProgrammeDto, SourceDto, TestSourceResult,
+    AddSourceInput, ChannelDto, CountsDto, GroupDto, GuideArgs, GuideDto, HomeDto,
+    ListChannelsArgs, NowNextDto, ProgrammeDto, SearchDto, SourceDto, TestSourceResult,
 };
-use downlink_core::source::TimeWindow;
-use serde::Serialize;
-use serde_json::Value;
 use tauri::State;
 
 use super::CmdResult;
-use crate::dto;
 use crate::state::AppState;
 
 #[tauri::command]
@@ -174,28 +169,17 @@ pub async fn get_programmes(
     start: i64,
     end: i64,
 ) -> CmdResult<Vec<ProgrammeDto>> {
-    let rows = epg::window(
-        state.service.store(),
-        &[channel_id],
-        TimeWindow {
-            start_utc: start,
-            end_utc: end,
-        },
-    )
-    .await?;
-    Ok(rows.iter().map(ProgrammeDto::from).collect())
+    state.service.get_programmes(channel_id, start, end).await
 }
 
 #[tauri::command]
-pub async fn get_home(state: State<'_, AppState>) -> CmdResult<Value> {
-    let h = state.service.get_home().await?;
-    Ok(dto::home_to_ui(&state.service, h).await)
+pub async fn get_home(state: State<'_, AppState>) -> CmdResult<HomeDto> {
+    state.service.get_home().await
 }
 
 #[tauri::command]
-pub async fn search(state: State<'_, AppState>, query: String, limit: i64) -> CmdResult<Value> {
-    let s = state.service.search(&query, limit).await?;
-    Ok(dto::search_to_ui(&state.service, s).await)
+pub async fn search(state: State<'_, AppState>, query: String, limit: i64) -> CmdResult<SearchDto> {
+    state.service.search(&query, limit).await
 }
 
 #[tauri::command]
@@ -207,28 +191,29 @@ pub async fn set_favourite(
     state.service.set_favourite(channel_id, favourite).await
 }
 
-#[derive(Serialize)]
-pub struct Counts {
-    all: i64,
-    favourites: i64,
-}
-
 #[tauri::command]
-pub async fn get_counts(state: State<'_, AppState>) -> CmdResult<Counts> {
-    let favs = state
-        .service
-        .list_channels(ListChannelsArgs {
-            favourites_only: true,
-            ..Default::default()
-        })
-        .await?;
-    Ok(Counts {
-        all: dto::all_count(&state.service).await,
-        favourites: favs.len() as i64,
-    })
+pub async fn get_counts(state: State<'_, AppState>) -> CmdResult<CountsDto> {
+    state.service.get_counts().await
 }
 
 #[tauri::command]
 pub async fn schedule_recording(_programme_id: String, _kind: String) -> CmdResult<()> {
     Err(AppError::local("Recording is not available yet."))
+}
+
+/// Channel DTO by Dispatcharr channel uuid (deep links and the UI use uuids). Core has no uuid
+/// lookup, so this walks the sources' `uuid -> id` maps in the store.
+#[tauri::command]
+pub async fn get_channel_by_uuid(
+    state: State<'_, AppState>,
+    uuid: String,
+) -> CmdResult<ChannelDto> {
+    let uuid = uuid.to_ascii_lowercase();
+    for s in state.service.list_sources().await? {
+        let map = state.service.store().channels_by_uuid(s.id).await?;
+        if let Some((_, id)) = map.iter().find(|(u, _)| u.to_ascii_lowercase() == uuid) {
+            return state.service.get_channel(*id).await;
+        }
+    }
+    Err(AppError::local("That channel is not in your list."))
 }
