@@ -134,8 +134,8 @@ async fn add_source_persists_reference_not_secret_and_emits_events() {
     assert_eq!(v["status"], "connected");
     assert_eq!(
         v["caps"],
-        1 | 2 | 4 | 32,
-        "LIVE|EPG|CATCHUP|FAVOURITES in the UI's bit layout"
+        1 | 2 | 4 | 16 | 32,
+        "LIVE|EPG|CATCHUP|DVR|FAVOURITES in the UI bit layout"
     );
     assert_eq!(v["host"], format!("127.0.0.1:{}", server.address().port()));
     assert!(!v.to_string().contains(KEY));
