@@ -55,7 +55,7 @@ artwork in public places, please).
 
 ### 7. Updater
 
-- Settings, Updates: choose the **dev** channel for pre-release builds. "Check for updates" reports the result.
+- Settings, Updates: choose the **dev** channel for pre-release builds. **Check now** reports the result.
 - When a newer build exists it downloads in the background and installs when you quit; playback is never
   interrupted. Start the app again and check the version in Settings.
 
@@ -66,7 +66,7 @@ artwork in public places, please).
 
 ## Sending a bug report
 
-1. In Settings, Diagnostics, choose **Export diagnostics**. Downlink writes a zip into your Downloads folder and
+1. In Settings → About & diagnostics, choose **Export diagnostics**. Downlink writes a zip into your Downloads folder and
    offers to show it. The bundle holds redacted logs, app and server versions, player state, the hardware decoder in
    use, your OS and GPU details, and the last 50 player state changes. Credentials and stream addresses are scrubbed.
 2. Open the zip and look through it if you like; it is plain text and JSON.
@@ -74,5 +74,5 @@ artwork in public places, please).
    from "Before you start".
 
 For a crash, also send the time it happened. For picture problems ("green screen", wrong colours) the
-hardware-decoder line in the bundle is the first thing we look at; there is also a decoder switch in Settings,
+hardware-decoder line in the bundle is the first thing we look at; there is also a **Hardware decoding** setting in Settings,
 Playback, which is worth trying and reporting.
