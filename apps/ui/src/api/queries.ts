@@ -43,6 +43,19 @@ export async function startCatalogBridge(qc: QueryClient): Promise<() => void> {
   });
 }
 
+/** Keeps the update status query current from `update://status` (rail dot, Settings → Updates). */
+export async function startUpdateBridge(qc: QueryClient): Promise<() => void> {
+  return listen('update://status', (s) => qc.setQueryData(['update'], s));
+}
+
+export const useUpdateStatus = () =>
+  useQuery({ queryKey: ['update'], queryFn: () => invoke('get_update_status', {}), staleTime: Infinity });
+
+/** True while a newer version is waiting (found, downloading or downloaded). */
+export function useUpdateWaiting(): boolean {
+  return !!useUpdateStatus().data?.available;
+}
+
 export const useSources = () =>
   useQuery({ queryKey: ['catalog', 'sources'], queryFn: () => invoke('list_sources', {}) });
 

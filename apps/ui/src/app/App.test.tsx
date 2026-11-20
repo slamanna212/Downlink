@@ -29,6 +29,28 @@ describe('app shell', () => {
     window.history.pushState({}, '', '/');
   });
 
+  it('flags a waiting update on Settings and offers restart and update', async () => {
+    window.history.pushState({}, '', '/?mock=update');
+    setBackend(createMockBackend());
+    render(<App router={createTestRouter(['/'])} client={createQueryClient()} />);
+    const settings = await screen.findByRole('link', { name: 'Settings · Update available' });
+    expect(settings).toHaveAttribute('href', '/settings/updates');
+    expect(screen.getByTestId('rail-notice-dot')).toBeInTheDocument();
+    await userEvent.setup().click(settings);
+    expect(await screen.findByTestId('update-card')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-update-dot')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Restart and update' })).toBeEnabled();
+    expect(screen.getByText(/Faster guide scrolling/)).toBeInTheDocument();
+    window.history.pushState({}, '', '/');
+  });
+
+  it('has no update dot when up to date', async () => {
+    render(<App router={createTestRouter(['/settings/updates'])} client={createQueryClient()} />);
+    expect(await screen.findByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');
+    expect(screen.queryByTestId('rail-notice-dot')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('update-card')).not.toBeInTheDocument();
+  });
+
   it('searches channels and programmes', async () => {
     const user = userEvent.setup();
     render(<App router={createTestRouter(['/search'])} client={createQueryClient()} />);

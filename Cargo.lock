@@ -1295,7 +1295,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "downlink-cli"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "clap",
  "downlink-core",
@@ -1307,7 +1307,7 @@ dependencies = [
 
 [[package]]
 name = "downlink-core"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
@@ -1343,7 +1343,7 @@ dependencies = [
 
 [[package]]
 name = "downlink-desktop"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "downlink-core",
  "downlink-platform",
@@ -1368,7 +1368,7 @@ dependencies = [
 
 [[package]]
 name = "downlink-platform"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "souvlaki",
  "thiserror 2.0.21",
@@ -1379,7 +1379,7 @@ dependencies = [
 
 [[package]]
 name = "downlink-player"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "block2",
  "gtk",

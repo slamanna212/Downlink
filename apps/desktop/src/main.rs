@@ -170,6 +170,7 @@ macro_rules! handlers {
             commands::updates::get_update_status,
             commands::updates::set_update_channel,
             commands::updates::check_for_updates,
+            commands::updates::install_update,
             $($extra),*
         ]
     };

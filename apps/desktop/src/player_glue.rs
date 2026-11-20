@@ -315,6 +315,17 @@ impl SinkContext {
                         "hwdecCurrent": s.hwdec_current,
                         "sourceIndex": idx,
                         "sourceCount": count,
+                        "fps": s.fps,
+                        "hdr": s.hdr,
+                        "transfer": s.transfer,
+                        "toneMapped": s.tone_mapped,
+                        "primaries": s.primaries,
+                        "bitDepth": s.bit_depth,
+                        "audioChannels": s.audio_channels,
+                        "audioSampleRate": s.audio_sample_rate,
+                        "downloadKbps": s.download_kbps,
+                        "avsyncMs": s.avsync_ms,
+                        "container": s.container,
                     }),
                 );
             }

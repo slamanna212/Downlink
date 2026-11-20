@@ -1,6 +1,7 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useIdle } from '@mantine/hooks';
 import { Popover, SegmentedControl, Switch, TextInput, VisuallyHidden } from '@mantine/core';
 import {
   IconArrowsMaximize,
@@ -27,6 +28,7 @@ import { progress } from '../../lib/time';
 import { useNowEpoch } from '../../lib/useNow';
 import { useVideoBounds } from '../../lib/useVideoBounds';
 import { usePlayerStore } from '../../store/player';
+import { dl } from '../../theme';
 import { playChannel } from '../player/actions';
 import { holdSession, releaseSession } from '../player/session';
 import { layoutFor, nextStyle, stylesFor, type GridArea, type LayoutStyle } from './layout';
@@ -54,6 +56,38 @@ function useMultiviewState() {
   return q.data ?? EMPTY;
 }
 
+/** States in which a tile's mpv surface has a picture worth showing; otherwise the canvas covers it. */
+const SHOWS_VIDEO = new Set(['Buffering', 'Playing', 'Paused']);
+
+/**
+ * The window is transparent so the native video surfaces under the webview show through. Anything
+ * opaque in the webview covers them, so the canvas is one SVG path: the whole view minus a hole per
+ * tile that has video (`data-hole`). Gaps, centred short rows and loading tiles get the canvas;
+ * the desktop never shows through.
+ */
+function useCanvasPath(rootRef: React.RefObject<HTMLDivElement | null>, layoutKey: string) {
+  const [d, setD] = useState('');
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const measure = () => {
+      const r = root.getBoundingClientRect();
+      let path = `M0 0H${r.width}V${r.height}H0Z`;
+      root.querySelectorAll<HTMLElement>('[data-hole]').forEach((el) => {
+        const b = el.getBoundingClientRect();
+        path += `M${b.left - r.left} ${b.top - r.top}h${b.width}v${b.height}h${-b.width}Z`;
+      });
+      setD(path);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(root);
+    root.querySelectorAll('[data-hole]').forEach((el) => ro.observe(el));
+    return () => ro.disconnect();
+  }, [rootRef, layoutKey]);
+  return d;
+}
+
 type PickerTab = 'favourites' | 'recent' | 'all';
 
 /** Channel picker for a slot: search plus Favourites / Recent / All; on-screen channels are disabled. */
@@ -72,6 +106,9 @@ function ChannelPicker({ onScreen, budgetText, onPick }: {
   const all = useChannelPages({ query: deferred || null }, 60, !!deferred || tab === 'all');
   const page = deferred || tab === 'all' ? all : tab === 'favourites' ? favourites : null;
   const list = (page ? page.data?.pages.flat() ?? [] : home?.recents ?? []).filter((c) => !c.isRadio);
+  const listIds = list.map((c) => c.id);
+  const nn = useNowNextWindow(listIds, `multiview-picker|${listIds.join(',')}`);
+  const onNow = new Map((nn.data ?? []).map((x) => [x.channelId, x.now?.title ?? null]));
   return (
     <div className={classes.picker}>
       <TextInput
@@ -110,7 +147,10 @@ function ChannelPicker({ onScreen, budgetText, onPick }: {
             >
               <ChannelLogo channelId={c.id} name={c.name} src={c.logo} density="compact" />
               <span className={classes.pickerNumber}>{c.number ?? ''}</span>
-              <span className={classes.pickerName}>{c.name}</span>
+              <span className={classes.pickerText}>
+                <span className={classes.pickerName}>{c.name}</span>
+                {onNow.get(c.id) && <span className={classes.pickerNow}>{onNow.get(c.id)}</span>}
+              </span>
               {slot != null && <span className={classes.pickerHint}>{t('multiview.alreadyIn', { n: slot + 1 })}</span>}
             </button>
           );
@@ -153,6 +193,7 @@ function Tile(p: TileProps) {
   useVideoBounds(ref, !!p.tile && p.tile.failure == null, p.slot, `${p.area.gridColumn}|${p.area.gridRow}`);
   const failed = p.tile?.state === 'Failed';
   const loading = p.tile && ['Resolving', 'Connecting', 'Buffering'].includes(p.tile.state);
+  const hole = !!p.tile && p.tile.failure == null && SHOWS_VIDEO.has(p.tile.state);
   return (
     <div
       ref={ref}
@@ -162,6 +203,8 @@ function Tile(p: TileProps) {
       data-audible={(p.audible && !!p.tile) || undefined}
       data-empty={!p.tile || undefined}
       data-failed={failed || undefined}
+      data-hole={hole || undefined}
+      data-picker={p.pickerOpen || undefined}
       onMouseDown={p.onFocus}
       aria-label={p.channel ? t('multiview.tileLabel', { n: p.position + 1, name: p.channel.name }) : t('multiview.emptySlot', { n: p.position + 1 })}
       role="group"
@@ -270,6 +313,12 @@ export function MultiviewPage() {
   const [audioFollows, setAudioFollows] = useState(true);
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [toolbarHover, setToolbarHover] = useState(false);
+  // Chrome (focus ring, audio badge, tile actions, toolbar) fades after a few seconds without input,
+  // like the player's control bar; it stays while the pointer rests on the toolbar or a picker is open.
+  const idle = useIdle(dl.controlsIdleMs, { events: ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel'], initialState: false });
+  const chromeHidden = idle && !toolbarHover && !addOpen && pickerSlot == null;
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   // Keep the session (main player) alive while here; every tile stops when leaving (rule 6).
   useEffect(() => {
@@ -376,8 +425,17 @@ export function MultiviewPage() {
     />
   );
 
+  const layoutKey = [effectiveStyle, ...shown.map((slot) => {
+    const x = tiles.get(slot);
+    return `${slot}:${x && x.failure == null && SHOWS_VIDEO.has(x.state) ? 1 : 0}`;
+  })].join('|');
+  const canvas = useCanvasPath(rootRef, layoutKey);
+
   return (
-    <div className={classes.root}>
+    <div ref={rootRef} className={classes.root} data-idle={chromeHidden || undefined}>
+      <svg className={classes.canvas} aria-hidden>
+        <path d={canvas} fillRule="evenodd" />
+      </svg>
       <div className={classes.grid} style={{ gridTemplateColumns: spec.gridTemplateColumns, gridTemplateRows: spec.gridTemplateRows }}>
         {shown.map((slot, position) => {
           const tile = tiles.get(slot);
@@ -406,7 +464,8 @@ export function MultiviewPage() {
           );
         })}
       </div>
-      <div className={`${classes.toolbar} ${classes.glass}`} role="toolbar" aria-label={t('player.multiview')}>
+      <div className={`${classes.toolbar} ${classes.glass}`} role="toolbar" aria-label={t('player.multiview')}
+        onMouseEnter={() => setToolbarHover(true)} onMouseLeave={() => setToolbarHover(false)}>
         {order.length > 0 && (
           <Popover opened={addOpen} onChange={setAddOpen} width={360} position="top" trapFocus withinPortal shadow="lg">
             <Popover.Target>

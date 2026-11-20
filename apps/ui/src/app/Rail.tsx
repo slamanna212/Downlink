@@ -2,7 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { Box, Group, NavLink, Stack, Text, Tooltip } from '@mantine/core';
 import { IconArrowBarLeft, IconDownload } from '@tabler/icons-react';
 import { FocusContext } from '@noriginmedia/norigin-spatial-navigation';
-import { useCaps, useSources } from '../api/queries';
+import { useCaps, useSources, useUpdateWaiting } from '../api/queries';
 import type { Source, SourceStatus } from '../api/types';
 import { openPalette } from '../lib/palette';
 import { Icon } from '../components/Icon/Icon';
@@ -25,31 +25,37 @@ const DOT_CLASS: Record<SourceStatus | 'none', string | undefined> = {
   none: classes.dotNone,
 };
 
-function RailItem({ entry, mode }: { entry: NavEntry; mode: RailMode }) {
+/**
+ * `notice`: a dot on the icon plus a different target, e.g. Settings → Updates while an update waits.
+ * The dot is a status dot, so it also changes the accessible name.
+ */
+function RailItem({ entry, mode, notice }: { entry: NavEntry; mode: RailMode; notice?: { to: string; label: string } }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const active = entry.to === '/' ? pathname === '/' : pathname === entry.to || pathname.startsWith(`${entry.to}/`);
-  const { ref, focusProps } = useDLFocusable({ onEnterPress: () => (entry.id === 'search' ? openPalette() : void navigate(entry.to)) });
-  const label = t(entry.label);
+  const to = notice?.to ?? entry.to;
+  const { ref, focusProps } = useDLFocusable({ onEnterPress: () => (entry.id === 'search' ? openPalette() : void navigate(to)) });
+  const label = notice ? `${t(entry.label)} · ${notice.label}` : t(entry.label);
   const hint = entry.hint === '#mod' ? modKeyLabel() : entry.hint;
 
   const link = (
     <NavLink
       ref={ref as React.Ref<HTMLAnchorElement>}
       component={Link}
-      to={entry.to}
+      to={to}
       active={active}
       onClick={entry.id === 'search' ? (e: React.MouseEvent) => (e.preventDefault(), openPalette()) : undefined}
       aria-current={active ? 'page' : undefined}
-      aria-label={mode === 'collapsed' ? label : undefined}
+      aria-label={mode === 'collapsed' || notice ? label : undefined}
       className={classes.item}
       classNames={{ body: classes.itemInner, label: classes.itemLabel, section: classes.section }}
       leftSection={
         <span className={classes.icon}>
           <Icon icon={entry.icon} size={mode === 'tv' ? 24 : 20} />
+          {notice && <span className={classes.noticeDot} data-testid="rail-notice-dot" />}
         </span>
       }
-      label={mode === 'collapsed' ? undefined : label}
+      label={mode === 'collapsed' ? undefined : t(entry.label)}
       rightSection={mode === 'expanded' && hint ? <span className={classes.hint}>{hint}</span> : undefined}
       {...focusProps}
     />
@@ -94,6 +100,7 @@ function SourceStatus({ source, mode }: { source: Source | undefined; mode: Rail
 export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void }) {
   const { caps } = useCaps();
   const { data: sources } = useSources();
+  const updateWaiting = useUpdateWaiting();
   const { ref, focusKey } = useDLFocusable<object, HTMLDivElement>({ focusKey: 'RAIL', trackChildren: true, saveLastFocusedChild: true });
 
   return (
@@ -127,7 +134,11 @@ export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void 
           <RailItem key={e.id} entry={e} mode={mode} />
         ))}
         <div className={classes.spacer} />
-        <RailItem entry={SETTINGS_NAV} mode={mode} />
+        <RailItem
+          entry={SETTINGS_NAV}
+          mode={mode}
+          notice={updateWaiting ? { to: '/settings/updates', label: t('nav.updateWaiting') } : undefined}
+        />
         <SourceStatus source={sources?.[0]} mode={mode} />
       </Stack>
     </FocusContext.Provider>

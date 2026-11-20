@@ -91,6 +91,7 @@ export interface Commands {
   get_update_status: { args: Record<string, never>; result: UpdateStatus };
   set_update_channel: { args: { channel: UpdateChannel }; result: UpdateStatus };
   check_for_updates: { args: Record<string, never>; result: UpdateStatus };
+  install_update: { args: Record<string, never>; result: null };
   list_vod_categories: { args: { kind: 'movie' | 'series'; withCounts?: boolean }; result: VodCategory[] };
   list_movies: { args: VodListArgs & { compact?: boolean }; result: Movie[] };
   get_movie: { args: { id: number }; result: Movie };

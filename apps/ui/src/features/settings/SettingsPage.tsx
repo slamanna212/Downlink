@@ -1,20 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal, NavLink, SegmentedControl, Select, Slider, Switch, Text } from '@mantine/core';
 import { IconPalette, IconPlayerPlay, IconPlugConnected, IconRefresh, IconStethoscope } from '@tabler/icons-react';
-import { invoke, listen } from '../../api/ipc';
-import { useSettings, useSources } from '../../api/queries';
+import { invoke } from '../../api/ipc';
+import { useSettings, useSources, useUpdateStatus, useUpdateWaiting } from '../../api/queries';
 import type { AudioOutput, Deinterlace, DensitySetting, HwdecSetting, Source, UpdateChannel } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { Icon, type TablerIcon } from '../../components/Icon/Icon';
 import { SettingRow } from '../../components/SettingRow/SettingRow';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
+import { parseReleaseNotes } from '../../lib/releaseNotes';
 import { formatUpdated } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
 import { useTasksStore } from '../../store/tasks';
 import { useUiStore } from '../../store/ui';
 import { copyDiagnostics } from '../diagnostics/copyDiagnostics';
+import { notifyError } from '../../components/Notify/notify';
 import classes from './Settings.module.css';
 
 const SECTIONS: { id: string; label: MessageKey; icon: TablerIcon }[] = [
@@ -246,16 +248,7 @@ function PlaybackSection() {
 
 function UpdatesSection() {
   const qc = useQueryClient();
-  const status = useQuery({ queryKey: ['update'], queryFn: () => invoke('get_update_status', {}), staleTime: Infinity });
-  useEffect(() => {
-    let off: (() => void) | null = null;
-    let cancelled = false;
-    void listen('update://status', (s) => qc.setQueryData(['update'], s)).then((u) => (cancelled ? u() : (off = u)));
-    return () => {
-      cancelled = true;
-      off?.();
-    };
-  }, [qc]);
+  const status = useUpdateStatus();
   const setChannel = useMutation({
     mutationFn: (channel: UpdateChannel) => invoke('set_update_channel', { channel }),
     onSuccess: (s) => qc.setQueryData(['update'], s),
@@ -264,15 +257,45 @@ function UpdatesSection() {
     mutationFn: () => invoke('check_for_updates', {}),
     onSuccess: (s) => qc.setQueryData(['update'], s),
   });
+  const install = useMutation({
+    mutationFn: () => invoke('install_update', {}),
+    onError: (e) => notifyError(e),
+  });
   const s = status.data;
   if (!s) return <SkeletonList rows={2} label={t('loading.generic')} />;
   const help = s.available
-    ? t('settings.updates.available', { available: s.available })
+    ? s.ready
+      ? t('settings.updates.available', { available: s.available })
+      : t('settings.updates.downloading', { available: s.available })
     : s.lastChecked
       ? t('settings.updates.upToDate', { time: formatUpdated(s.lastChecked) })
       : t('settings.updates.never');
   return (
     <Section title={t('settings.updates')} help={t('settings.updates.help')}>
+      {s.available && (
+        <div className={classes.updateCard} role="status" data-testid="update-card">
+          <div className={classes.updateHead}>
+            <span className={classes.updateDot} aria-hidden />
+            <div className={classes.updateText}>
+              <h3 className={classes.updateTitle}>
+                {t(s.ready ? 'settings.updates.ready.title' : 'settings.updates.available.title', { available: s.available })}
+              </h3>
+              <p className={classes.updateBody}>
+                {s.ready ? t('settings.updates.ready.body') : t('settings.updates.downloading.body')}
+              </p>
+            </div>
+            <DLButton
+              variant="filled"
+              loading={install.isPending || !s.ready}
+              disabled={!s.ready}
+              onClick={() => install.mutate()}
+            >
+              {t('settings.updates.install')}
+            </DLButton>
+          </div>
+          {s.notes && <ReleaseNotes version={s.available} notes={s.notes} />}
+        </div>
+      )}
       <SettingRow label={t('settings.updates.channel')} help={t('settings.updates.channel.help')} wide>
         <SegmentedControl
           aria-label={t('settings.updates.channel')}
@@ -290,6 +313,27 @@ function UpdatesSection() {
         </DLButton>
       </SettingRow>
     </Section>
+  );
+}
+
+function ReleaseNotes({ version, notes }: { version: string; notes: string }) {
+  const blocks = parseReleaseNotes(notes);
+  if (blocks.length === 0) return null;
+  return (
+    <div className={classes.notes}>
+      <h3 className={classes.notesTitle}>{t('settings.updates.whatsNew', { available: version })}</h3>
+      {blocks.map((b, i) =>
+        b.kind === 'heading' ? (
+          <h4 key={i} className={classes.notesHeading}>{b.text}</h4>
+        ) : b.kind === 'list' ? (
+          <ul key={i} className={classes.notesList}>
+            {b.items.map((item, j) => <li key={j}>{item}</li>)}
+          </ul>
+        ) : (
+          <p key={i} className={classes.notesPara}>{b.text}</p>
+        ),
+      )}
+    </div>
   );
 }
 
@@ -380,6 +424,7 @@ function AboutSection() {
 
 export function SettingsPage() {
   const { section } = useParams();
+  const updateWaiting = useUpdateWaiting();
   if (!section || !SECTIONS.some((s) => s.id === section)) return <Navigate to="/settings/sources" replace />;
   return (
     <div className={classes.page}>
@@ -394,7 +439,11 @@ export function SettingsPage() {
             aria-current={section === s.id ? 'page' : undefined}
             className={classes.navItem}
             label={t(s.label)}
+            aria-label={s.id === 'updates' && updateWaiting ? `${t(s.label)} · ${t('settings.updates.navWaiting')}` : undefined}
             leftSection={<Icon icon={s.icon} size={20} />}
+            rightSection={
+              s.id === 'updates' && updateWaiting ? <span className={classes.navDot} data-testid="settings-update-dot" /> : undefined
+            }
           />
         ))}
       </nav>

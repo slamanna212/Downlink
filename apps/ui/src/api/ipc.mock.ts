@@ -166,7 +166,7 @@ export function createMockBackend(): Backend {
     liveBufferSecs: 2, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
     deinterlace: 'auto', subtitleSize: 100, subtitleBackground: true, resumeLastChannel: false,
   };
-  let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, lastChecked: null };
+  let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, notes: null, lastChecked: null, ready: false };
   let searchIndex: { programme: Programme; channel: Channel; hay: string }[] | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let player = idleState();
@@ -470,7 +470,9 @@ export function createMockBackend(): Backend {
           emit('session://stats', {
             resolution: '1920x1080', videoCodec: 'H.264 High', audioCodec: 'E-AC-3 5.1', bitrateKbps: 8400 + Math.round(Math.random() * 400),
             droppedFrames: 0, bufferSecs: 2 + Math.round(Math.random() * 20) / 10, deinterlace: 'bwdif · on', hwdecCurrent: 'vaapi',
-            sourceIndex: 1, sourceCount: 3,
+            sourceIndex: 1, sourceCount: 3, fps: 59.94, hdr: false, transfer: 'bt.1886', toneMapped: null, primaries: 'bt.709', bitDepth: 8,
+            audioChannels: '5.1', audioSampleRate: 48000, downloadKbps: 9000 + Math.round(Math.random() * 2000), avsyncMs: Math.round(Math.random() * 20 - 10) / 10,
+            container: 'mpegts',
           });
         tick();
         statsTimer = setInterval(tick, 1000);
@@ -536,19 +538,42 @@ export function createMockBackend(): Backend {
     list_audio_devices: () => [{ id: 'default', name: 'System default' }, { id: 'hdmi-1', name: 'Demo TV (HDMI)' }, { id: 'usb-1', name: 'Demo headset (USB)' }],
     get_update_status: () => update,
     set_update_channel: ({ channel }) => {
-      update = { ...update, channel, available: null };
+      update = { ...update, channel, available: null, notes: null, ready: false };
       emit('update://status', update);
       return update;
     },
     check_for_updates: async () => {
       await wait(600);
-      update = { ...update, lastChecked: nowSec(), available: update.channel === 'dev' ? '0.1.0-dev.4' : null };
+      const available = update.channel === 'dev' ? '0.1.0-dev.4' : null;
+      const fresh = available !== update.available;
+      update = { ...update, lastChecked: nowSec(), available, ready: available ? !fresh && !!update.ready : false };
       emit('update://status', update);
+      if (available && !update.ready) {
+        setTimeout(() => {
+          update = { ...update, ready: true };
+          emit('update://status', update);
+        }, 1200);
+      }
       return update;
+    },
+    install_update: async () => {
+      await wait(600);
+      return null;
     },
     set_fullscreen: () => null,
     set_mini_player: () => null,
   };
+
+  // `?mock=update`: a newer version is downloaded and waiting (rail dot, Settings → Updates card).
+  if (mode === 'update') {
+    update = {
+      ...update,
+      available: '0.1.0',
+      notes: "## What's new\n- Faster guide scrolling\n- Restart and update from Settings",
+      lastChecked: nowSec(),
+      ready: true,
+    };
+  }
 
   // `?mock=resume`: the shell resumes the last channel at launch (setting on, playback starts by itself).
   if (mode === 'resume') {

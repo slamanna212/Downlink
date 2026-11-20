@@ -1,0 +1,38 @@
+# When you publish a release (or edit a published one), copy its notes into that release's latest.json, so the
+# in-app "What's new" shows exactly what the GitHub release says. Only your own publish/edit starts this: GitHub
+# does not fire release events for drafts, nor for releases the workflows publish with GITHUB_TOKEN.
+name: Release notes
+
+on:
+  release:
+    types: [published, edited]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-notes-${{ github.event.release.tag_name }}
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: Copy notes into latest.json
+    if: ${{ !github.event.release.draft }}
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Update latest.json notes
+        run: |
+          if ! gh release download "$TAG" --repo "$REPO" --pattern latest.json --dir . 2>/dev/null; then
+            echo "$TAG has no latest.json (unsigned build or not a Downlink build); nothing to do."
+            exit 0
+          fi
+          gh release view "$TAG" --repo "$REPO" --json body --jq .body > notes.md
+          jq --rawfile notes notes.md '.notes = ($notes | rtrimstr("\n"))' latest.json > latest.new.json
+          if cmp -s latest.json latest.new.json; then echo "notes unchanged"; exit 0; fi
+          mv latest.new.json latest.json
+          gh release upload "$TAG" latest.json --repo "$REPO" --clobber
+          echo "latest.json notes updated for $TAG"

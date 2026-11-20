@@ -97,9 +97,9 @@ const GuideControls = memo(function GuideControls({ span, onSpan, groupId, group
   );
 });
 
-const GuideLabel = memo(function GuideLabel({ ch, y, h }: { ch: Channel | undefined; y: number; h: number }) {
+const GuideLabel = memo(function GuideLabel({ ch, row, y, h }: { ch: Channel | undefined; row: number; y: number; h: number }) {
   return (
-    <div className={classes.label} style={{ top: y, height: h }} aria-hidden={!ch}>
+    <div className={classes.label} style={{ top: y, height: h }} aria-hidden={!ch} data-tune={ch ? row : undefined} title={ch ? t('guide.tune') : undefined}>
       {ch && (
         <>
           <ChannelLogo channelId={ch.id} name={ch.name} src={ch.logo} density="compact" />
@@ -132,7 +132,7 @@ const GuideRow = memo(function GuideRow({ row, ch, list, geo, t0, t1, now, focus
   const visible = useMemo(() => sliceRange(list ?? [], t0, t1), [list, t0, t1]);
   if (visible.length === 0)
     return loaded ? (
-      <div className={classes.noData} style={{ top: y, height: geo.rowH, left: geo.colW, width: totalWidth(geo) - geo.colW }}>
+      <div className={classes.noData} data-tune={row} title={t('guide.tune')} style={{ top: y, height: geo.rowH, left: geo.colW, width: totalWidth(geo) - geo.colW }}>
         <span className={classes.noDataText}>{t('guide.noData')}</span>
       </div>
     ) : null;
@@ -378,16 +378,25 @@ export function GuidePage() {
     mutationFn: (v: { programmeId: string; kind: 'once' | 'series' }) => invoke('schedule_recording', v),
   });
 
+  const tuneRow = useCallback(
+    (row: number) => {
+      const ch = rowChannel.get(row);
+      if (ch) void playChannel(ch.id).then((err) => (err ? undefined : navigate('/player')));
+    },
+    [rowChannel, navigate],
+  );
+
   const activate = useCallback(
     (p: Programme | null) => {
-      if (!p) return;
+      // No programme under the cursor (channel without guide data, or a gap): tune the channel live.
+      if (!p) return tuneRow(focus.row);
       const ch = rowChannel.get(focus.row) ?? undefined;
       const action = enterAction(blockState(p, ch, nowEpoch()));
       if (action === 'play-live') void playChannel(p.channelId).then((err) => (err ? undefined : navigate('/player')));
       else if (action === 'play-catchup') void playCatchup(p.id).then((err) => (err ? undefined : navigate('/player')));
       else if (action === 'details') showDetail(p.channelId, p.id);
     },
-    [rowChannel, focus.row, navigate, showDetail],
+    [rowChannel, focus.row, navigate, showDetail, tuneRow],
   );
 
   const pageRows = Math.max(1, Math.floor((size.h - HEADER_H) / rowH) - 1);
@@ -427,6 +436,13 @@ export function GuidePage() {
   const mergedRef = useMergedRef(scrollRef, spatialRef);
 
   const onClick = (e: React.MouseEvent) => {
+    const tune = (e.target as HTMLElement).closest<HTMLElement>('[data-tune]');
+    if (tune) {
+      const row = Number(tune.dataset.tune);
+      setFocusState({ row, t: focus.t });
+      tuneRow(row);
+      return;
+    }
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-pid]');
     if (!el) return;
     const row = Number(el.dataset.row);
@@ -484,7 +500,7 @@ export function GuidePage() {
     for (let row = range.r0; row <= range.r1; row++) {
       const y = row * rowH;
       const ch = rowChannel.get(row);
-      labels.push(<GuideLabel key={`l${row}`} ch={ch} y={y} h={rowH} />);
+      labels.push(<GuideLabel key={`l${row}`} ch={ch} row={row} y={y} h={rowH} />);
       if (!ch) {
         fillers.push(
           <div key={`s${row}`} className={classes.skeleton} style={{ top: y, height: rowH, left: timeToX(geo, range.t0 + (range.t1 - range.t0) / 3), width: 320 }}>

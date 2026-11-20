@@ -1,0 +1,67 @@
+# Manual dev build: "Run workflow", pick a branch (normally `dev`). Runs the Linux tests, builds Windows + Linux
+# and publishes a pre-release straight away, then points the in-app dev update channel at it. See docs/release.md.
+#
+# Version: vX.Y.Z-dev.<run number>. The run number always increases, so the updater can order dev builds.
+# X.Y.Z is the root package.json version when it is ahead of the newest stable release (a bump not released
+# yet), otherwise the next patch after it, so a dev build never sorts below the release it came after.
+name: Dev build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dev-build
+  cancel-in-progress: true
+
+jobs:
+  check-version:
+    name: Compute dev version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute dev version and tag
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          base=$(jq -r .version package.json)
+          base="${base%%-*}"   # drop any pre-release suffix
+          latest=$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName // ""')
+          latest="${latest#v}"
+          if [[ -n "$latest" && "$(printf '%s\n%s\n' "$base" "$latest" | sort -V | tail -n1)" == "$latest" ]]; then
+            # package.json is not ahead of the newest release: use the next patch after the release.
+            IFS=. read -r ma mi pa <<< "$latest"
+            base="$ma.$mi.$((pa + 1))"
+          fi
+          VERSION="$base-dev.$GITHUB_RUN_NUMBER"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Dev build $VERSION from $GITHUB_REF_NAME"
+
+  ci:
+    name: Tests (Linux)
+    needs: check-version
+    uses: ./.github/workflows/ci.yml
+    with:
+      linux-runner: ${{ vars.LINUX_RUNNER || 'ubuntu-24.04' }}
+
+  build:
+    name: Build and publish
+    needs: [check-version, ci]
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: write
+    secrets: inherit
+    with:
+      version: ${{ needs.check-version.outputs.version }}
+      tag: ${{ needs.check-version.outputs.tag }}
+      prerelease: true
+      channel: dev
+      linux-runner: ${{ vars.LINUX_RUNNER || 'ubuntu-24.04' }}

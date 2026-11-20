@@ -157,6 +157,65 @@ pub struct StatsSnapshot {
     pub deinterlace: Option<String>,
     pub hwdec_current: Option<String>,
     pub source_index: u32,
+    pub fps: Option<f64>,
+    /// Source transfer is PQ or HLG. `None` until video params are known.
+    pub hdr: Option<bool>,
+    /// mpv `video-params/gamma`, e.g. "pq", "hlg", "bt.1886".
+    pub transfer: Option<String>,
+    /// HDR source rendered to an SDR target. `None` unless `hdr` is true and the target is known.
+    pub tone_mapped: Option<bool>,
+    /// mpv `video-params/primaries`, e.g. "bt.709", "bt.2020".
+    pub primaries: Option<String>,
+    pub bit_depth: Option<u8>,
+    /// e.g. "stereo", "5.1".
+    pub audio_channels: Option<String>,
+    pub audio_sample_rate: Option<u32>,
+    /// Network read rate into the demuxer cache.
+    pub download_kbps: Option<u32>,
+    pub avsync_ms: Option<f64>,
+    /// mpv `file-format`, e.g. "mpegts", "hls".
+    pub container: Option<String>,
+}
+
+fn is_hdr_transfer(gamma: &str) -> bool {
+    matches!(gamma, "pq" | "hlg")
+}
+
+/// Bit depth from an FFmpeg pixel format name (`yuv420p10le`, `p010`, `nv12`, ...).
+/// `None` for opaque hardware surface formats.
+fn bit_depth(pixfmt: &str) -> Option<u8> {
+    const OPAQUE: [&str; 8] = [
+        "vaapi",
+        "vdpau",
+        "cuda",
+        "d3d11",
+        "dxva2_vld",
+        "videotoolbox_vld",
+        "drm_prime",
+        "vulkan",
+    ];
+    let f = pixfmt
+        .strip_suffix("le")
+        .or_else(|| pixfmt.strip_suffix("be"))
+        .unwrap_or(pixfmt);
+    if f.is_empty() || OPAQUE.contains(&f) {
+        return None;
+    }
+    if f.starts_with("nv") {
+        return Some(8);
+    }
+    let start = f.trim_end_matches(|c: char| c.is_ascii_digit()).len();
+    let digits = &f[start..];
+    // p010 / p210 / y210: the last two digits are the depth.
+    let depth = if digits.len() == 3 {
+        &digits[1..]
+    } else {
+        digits
+    };
+    match depth.parse::<u8>() {
+        Ok(n @ 9..=16) => Some(n),
+        _ => Some(8),
+    }
 }
 
 impl fmt::Debug for PlayRequest {
@@ -1195,6 +1254,12 @@ fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
         (None, None) => None,
         (v, a) => Some(((v.unwrap_or(0.0) + a.unwrap_or(0.0)) / 1000.0).round() as u32),
     };
+    let transfer = e.get_property("video-params/gamma").filter(|g| g != "auto");
+    let hdr = transfer.as_deref().map(is_hdr_transfer);
+    let tone_mapped = match (hdr, e.get_property("video-target-params/gamma")) {
+        (Some(true), Some(t)) if t != "auto" => Some(!is_hdr_transfer(&t)),
+        _ => None,
+    };
     StatsSnapshot {
         resolution: match (s.stats.width, s.stats.height) {
             (Some(w), Some(h)) => Some(format!("{w}x{h}")),
@@ -1208,6 +1273,22 @@ fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
         deinterlace: e.get_property("deinterlace"),
         hwdec_current: s.stats.hwdec.clone(),
         source_index: s.request.as_ref().map_or(0, |r| r.source_index),
+        fps: s.stats.fps,
+        hdr,
+        transfer,
+        tone_mapped,
+        primaries: e
+            .get_property("video-params/primaries")
+            .filter(|v| v != "auto"),
+        bit_depth: e
+            .get_property("video-params/hw-pixelformat")
+            .or_else(|| e.get_property("video-params/pixelformat"))
+            .and_then(|f| bit_depth(&f)),
+        audio_channels: e.get_property("audio-params/hr-channels"),
+        audio_sample_rate: num("audio-params/samplerate").map(|r| r.round() as u32),
+        download_kbps: num("cache-speed").map(|b| (b * 8.0 / 1000.0).round() as u32),
+        avsync_ms: num("avsync").map(|a| a * 1000.0),
+        container: e.get_property("file-format"),
     }
 }
 
@@ -1319,6 +1400,32 @@ fn rebuild_engine(inner: &Arc<Inner>) -> Result<(), PlayerError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hdr_and_bit_depth_from_video_params() {
+        assert!(is_hdr_transfer("pq"));
+        assert!(is_hdr_transfer("hlg"));
+        assert!(!is_hdr_transfer("bt.1886"));
+        assert!(!is_hdr_transfer("srgb"));
+        for (f, d) in [
+            ("yuv420p", Some(8)),
+            ("nv12", Some(8)),
+            ("nv16", Some(8)),
+            ("yuv420p10le", Some(10)),
+            ("yuv420p10", Some(10)),
+            ("p010", Some(10)),
+            ("p210", Some(10)),
+            ("p016", Some(16)),
+            ("y210", Some(10)),
+            ("yuv444p12be", Some(12)),
+            ("gray10le", Some(10)),
+            ("rgb24", Some(8)),
+            ("vaapi", None),
+            ("", None),
+        ] {
+            assert_eq!(bit_depth(f), d, "{f}");
+        }
+    }
 
     #[test]
     fn debug_never_prints_url_or_headers() {

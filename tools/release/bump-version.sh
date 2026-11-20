@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Bump the Downlink release version. Only the ROOT package.json is edited and committed; tauri.conf.json,
-# Cargo.toml and apps/ui/package.json are derived from it at build time (tools/release/set-version.mjs).
+# Bump the Downlink release version. The ROOT package.json is the source of truth; tauri.conf.json, Cargo.toml,
+# Cargo.lock and apps/ui/package.json are synced from it here too, so local builds (User-Agent, About) report the
+# right version. CI re-injects the version at build time anyway (tools/release/set-version.mjs).
 # Usage: tools/release/bump-version.sh 0.2.0      (X.Y.Z or X.Y.Z-pre, no leading "v")
 # Then: git commit -am "chore: release v0.2.0" && git push   (a push to main publishes it)
 set -euo pipefail
@@ -18,4 +19,6 @@ const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
 p.version = process.argv[1];
 fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");
 ' "$VER"
+node tools/release/set-version.mjs "$VER"
+cargo update -w --offline --quiet
 echo "package.json version is now $(node -p "require('./package.json').version")"

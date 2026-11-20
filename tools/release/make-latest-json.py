@@ -10,10 +10,11 @@ Keys produced:
   darwin-x86_64           Downlink_<ver>_universal.app.tar.gz
   linux-x86_64            Downlink_<ver>_amd64.AppImage
   linux-x86_64-deb        Downlink_<ver>_amd64.deb
-  linux-x86_64-rpm        Downlink-<ver>-1.x86_64.rpm
+
+darwin-* keys only with --macos (macOS builds are not in the pipeline yet).
 
 Usage: make-latest-json.py --version 0.2.0 --repo owner/name --tag v0.2.0 \
-         --assets DIR [--notes FILE] [--out latest.json]
+         --assets DIR [--notes FILE] [--macos] [--out latest.json]
 Fails if any platform asset or its .sig is missing.
 """
 import argparse
@@ -28,7 +29,6 @@ PATTERNS = {
     "darwin-x86_64": ["*_universal.app.tar.gz", "*.app.tar.gz"],
     "linux-x86_64": ["*_amd64.AppImage"],
     "linux-x86_64-deb": ["*_amd64.deb"],
-    "linux-x86_64-rpm": ["*.x86_64.rpm"],
 }
 
 
@@ -47,13 +47,13 @@ def main() -> int:
     ap.add_argument("--tag", required=True, help="release tag the asset URLs point at")
     ap.add_argument("--assets", required=True, type=pathlib.Path)
     ap.add_argument("--notes", type=pathlib.Path)
-    ap.add_argument("--no-macos", action="store_true", help="omit darwin-* keys (macOS builds disabled)")
+    ap.add_argument("--macos", action="store_true", help="include darwin-* keys (needs the universal .app.tar.gz)")
     ap.add_argument("--out", type=pathlib.Path, default=pathlib.Path("latest.json"))
     a = ap.parse_args()
 
     platforms, missing = {}, []
     for key, globs in PATTERNS.items():
-        if a.no_macos and key.startswith("darwin-"):
+        if not a.macos and key.startswith("darwin-"):
             continue
         f = find(a.assets, globs)
         sig = pathlib.Path(str(f) + ".sig") if f else None

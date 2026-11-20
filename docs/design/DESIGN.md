@@ -49,6 +49,11 @@ catch-up, playing row, links) · `--dl-on-accent #120A33` (text on accent fill, 
 - Live `#F2495C`: dot, now line, REC dot. Text `#FF8B97` on 18% tint. Never solid red with white text.
 - OK `#34D399` (text `#6EE7B7`): connected, test passed.
 - Warn `#F5B544`: offline, stale guide, name-matched EPG, stream limit.
+- Notice `--dl-notice` (`#9D8CFF`, the Iris value): the 8 px "update waiting" dot on the rail's Settings item and
+  the Settings → Updates nav row. Its only use. Iris, not green, so it never reads as the source "connected"
+  dot directly below it in the rail. While an update waits, the rail item links straight to Settings → Updates,
+  which shows an update card (surface-2 panel, hairline border, radius 12) holding the release notes and the
+  view's single primary button, Restart and update.
 
 ### States and alpha
 - Interaction = white overlays on any surface: hover 6%, pressed 10%, focus = ring + 4%. Selected = surface-3.
@@ -154,15 +159,21 @@ In 1.0 (PLAN §1.5, §4.11, D17).
   (3 = 2+1, 5 = 3+2, 7 = 3+2+2, 9 = 3×3). No empty slots; removing a tile closes the gap. Counts with a
   second arrangement also offer "featured", one large tile plus the rest: 3–4 = side column, 5 = bottom
   strip, 6 and 8 = L border. Max 4 tiles (9 if hardware allows). 4 px gaps on `--dl-multiview-canvas`.
+  The canvas covers the whole view except the rects of tiles showing video (one SVG path with holes), so
+  gaps, centred short rows and loading tiles never show the desktop through the transparent window.
 - One tile audible: AUDIO badge (accent tint) top-right; others show a muted icon. "Audio follows focus" on.
 - Focused tile: **inset** 3 px accent ring (an outer ring would be clipped) + accent wash.
 - Tile label pill top-left (`--dl-glass`, logo 48×24, number, name). Programme + progress on scrim at bottom.
-- Hover/focus actions centred: listen, make main, full screen, replace, remove (remove in live-text).
-- Stream budget always visible: toolbar "3 of 3 streams" with pips, picker footer "Uses 1 stream · 3 of 4 in use".
+- Hover / keyboard-focus actions centred: listen, make main, full screen, replace, remove (remove in live-text).
+  Buttons sit on `--dl-tile-btn` (hover `--dl-tile-btn-hover`, pressed `--dl-tile-btn-pressed`) with a hairline.
+- Idle chrome: after `controlsIdleMs` without input the focus ring, audio indicator, tile actions and toolbar
+  fade out and the cursor hides; any mouse/key input brings them back. The toolbar stays while the pointer
+  is on it or a picker is open.
+- Stream budget: toolbar (hidden with the rest of the idle chrome) "3 of 3 streams" with pips, picker footer "Uses 1 stream · 3 of 4 in use".
 - Stream-limit tile: amber gauge icon, "Your server is at its stream limit", one sentence, Replace channel / Remove tile.
 - Picker: popover anchored to the toolbar "Add channel" button (or the single empty slot when nothing
   plays); the new channel takes the first free slot. Search + Favourites / Recent / All; on-screen
-  channels disabled with "Already in slot N".
+  channels disabled with "Already in slot N". Each row shows the programme on now under the name (12 px, dim).
 - Floating toolbar bottom centre: Add channel (N), layout segmented (icons; only when the count has more than
   one layout), audio-follows-focus switch, budget, Exit (Esc).
 - Keys: 1–9 focus · A audio · Enter make main · F full screen · Del remove · N add channel · L cycle layout · Esc exit.
