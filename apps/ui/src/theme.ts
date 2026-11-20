@@ -34,7 +34,6 @@ const dlOther = {
     allowBlur: !isLinux,
     motion: { fast: 120, base: 160, route: 240, videoFade: 200, ease: 'cubic-bezier(0.2, 0, 0, 1)' },
     controlsIdleMs: 3000,
-    zapOverlayMs: 1200,
     previewDwellMs: 300,
     layout: { railExpanded: 224, railCollapsed: 68, railTv: 96, groupSidebar: 220, settingsNav: 240, infoPanel: 380 },
     density: {
@@ -152,7 +151,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     // video
     '--dl-on-video': '#F3F6F9',
     '--dl-scrim': 'linear-gradient(to top, rgb(5 6 7 / 0.92), rgb(5 6 7 / 0.6) 55%, rgb(5 6 7 / 0))',
-    '--dl-glass': 'rgb(12 14 17 / 0.72)',        // zap pill, tile labels (with blur)
+    '--dl-glass': 'rgb(12 14 17 / 0.72)',        // tile labels (with blur)
     '--dl-glass-solid': 'rgb(12 14 17 / 0.88)',  // same, when allowBlur is false
     '--dl-video-btn': 'rgb(255 255 255 / 0.10)',
     '--dl-video-btn-hover': 'rgb(255 255 255 / 0.16)',

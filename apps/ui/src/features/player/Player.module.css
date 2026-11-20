@@ -26,33 +26,6 @@
   backdrop-filter: blur(12px);
 }
 
-/* top-left zap pill */
-.zap {
-  position: absolute;
-  top: var(--mantine-spacing-xl);
-  left: var(--mantine-spacing-xl);
-  display: flex;
-  align-items: center;
-  gap: var(--mantine-spacing-lg);
-  padding: var(--mantine-spacing-md) var(--mantine-spacing-lg);
-  opacity: 0;
-  transition: opacity 160ms var(--dl-ease);
-}
-.zap[data-visible] { opacity: 1; }
-.zapNumber {
-  font-size: 2.5rem;
-  font-weight: 650;
-  line-height: 1;
-}
-.zapName {
-  font-size: var(--mantine-font-size-xl);
-  font-weight: 600;
-}
-.zapMeta {
-  font-size: var(--mantine-font-size-sm);
-  color: var(--dl-text-2);
-}
-
 /* top-right number entry */
 .entry {
   position: absolute;
@@ -100,6 +73,17 @@
   pointer-events: none;
 }
 .bar[data-hidden] * { pointer-events: none; }
+
+/* channel logo beside the badge row and title */
+.nowRow {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-lg);
+}
+.nowText {
+  flex: 1;
+  min-width: 0;
+}
 
 .badges {
   display: flex;

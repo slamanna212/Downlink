@@ -19,7 +19,7 @@ test('first run: add a Dispatcharr source, test it, save, land on Channels with 
   await expect(page.locator('[role=list] [data-index="0"]')).toBeFocused();
 });
 
-test('channels keyboard: down down Enter plays, zap pill, number entry, Esc goes back', async ({ page }) => {
+test('channels keyboard: down down Enter plays, number entry, Esc goes back', async ({ page }) => {
   await page.goto('/channels');
   await settle(page);
   await focusFirstRow(page);

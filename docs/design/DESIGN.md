@@ -144,7 +144,7 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 - **Player**: full-bleed video, bottom `--dl-scrim` with badge row, 30/650 title, timeline, 44 px controls.
   Live timeline = programme start→end. Catch-up = position (accent), buffered (white 32%), thumb + time
   tooltip, Go live (live variant, `End`). Info panel 380 px right, mono values, then
-  a BUFFER · n s graph (last 30 samples at 1 Hz, 36 px bars, `--dl-accent-bar`). Zap pill top-left 1.2 s.
+  a BUFFER · n s graph (last 30 samples at 1 Hz, 36 px bars, `--dl-accent-bar`). Channel logo (tv size) left of the badge row and title; no separate zap pill.
   Number entry pill top-right with accent caret.
 
 ## 9. Multiview

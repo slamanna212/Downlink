@@ -50,26 +50,6 @@ import { useMultiviewAvailable } from '../multiview/available';
 import { holdSession, releaseSession } from './session';
 import classes from './Player.module.css';
 
-function ZapPill({ channel, title, until }: { channel: Channel; title: string | null; until: number | null }) {
-  const [visible, setVisible] = useState(true);
-  useEffect(() => {
-    const id = setTimeout(() => setVisible(false), dl.zapOverlayMs);
-    return () => clearTimeout(id);
-  }, []);
-  return (
-    <div className={`${classes.zap} ${classes.glass}`} data-visible={visible || undefined} aria-live="polite">
-      <ChannelLogo channelId={channel.id} name={channel.name} src={channel.logo} density="tv" />
-      <span className={classes.zapNumber}>{channel.number ?? ''}</span>
-      <span>
-        <div className={classes.zapName}>{channel.name}</div>
-        {title && until != null && (
-          <div className={classes.zapMeta}>{t('player.until', { title, time: formatClock(until) })}</div>
-        )}
-      </span>
-    </div>
-  );
-}
-
 const BUFFER_SLOTS = 30;
 
 /** Live stats (1 Hz) plus the last `BUFFER_SLOTS` buffer samples for the graph. */
@@ -475,8 +455,6 @@ export function PlayerPage() {
         <ErrorOverlay error={player.error} onRetry={() => cmd({ kind: 'retry' })} />
       ) : (
         <div className={classes.layer}>
-          {channel && <ZapPill key={channel.id} channel={channel} title={shownProg?.title ?? null} until={shownProg?.endUtc ?? null} />}
-
           {entry && (
             <div className={`${classes.entry} ${classes.glass}`} data-info={infoOpen || undefined} role="status" aria-label={t('player.numberEntry')}>
               {entry.split('').join(' ')}
@@ -508,23 +486,28 @@ export function PlayerPage() {
           )}
 
           <div className={classes.bar} data-hidden={barHidden || undefined}>
-            <div className={classes.badges}>
-              {live && <StatusBadge kind="live" />}
-              {catchup && <StatusBadge kind="catchup" />}
-              {player.mode === 'recording' && <StatusBadge kind="rec" />}
-              {channel && (
-                <span>
-                  {catchup && shownProg
-                    ? t('player.catchupMeta', { number: channel.number ?? '', channel: channel.name, day: dayLabel(shownProg.startUtc, now), range: formatRange(shownProg.startUtc, shownProg.endUtc) })
-                    : `${channel.number} · ${channel.name}`}
-                </span>
-              )}
-              {channel?.quality === '4K' && <StatusBadge kind="4k" />}
-              {(channel?.quality === 'HD' || channel?.quality === 'FHD') && <StatusBadge kind="hd" />}
-            </div>
-            <div className={classes.titleRow}>
-              <h1 className={classes.title}>{player.title ?? shownProg?.title ?? (channel ? t('player.noGuide') : '')}</h1>
-              {live && next && <span className={classes.next}>{t('player.next', { time: formatClock(next.startUtc), title: next.title ?? '' })}</span>}
+            <div className={classes.nowRow}>
+              {channel && <ChannelLogo channelId={channel.id} name={channel.name} src={channel.logo} density="tv" />}
+              <div className={classes.nowText}>
+                <div className={classes.badges}>
+                  {live && <StatusBadge kind="live" />}
+                  {catchup && <StatusBadge kind="catchup" />}
+                  {player.mode === 'recording' && <StatusBadge kind="rec" />}
+                  {channel && (
+                    <span>
+                      {catchup && shownProg
+                        ? t('player.catchupMeta', { number: channel.number ?? '', channel: channel.name, day: dayLabel(shownProg.startUtc, now), range: formatRange(shownProg.startUtc, shownProg.endUtc) })
+                        : `${channel.number} · ${channel.name}`}
+                    </span>
+                  )}
+                  {channel?.quality === '4K' && <StatusBadge kind="4k" />}
+                  {(channel?.quality === 'HD' || channel?.quality === 'FHD') && <StatusBadge kind="hd" />}
+                </div>
+                <div className={classes.titleRow}>
+                  <h1 className={classes.title}>{player.title ?? shownProg?.title ?? (channel ? t('player.noGuide') : '')}</h1>
+                  {live && next && <span className={classes.next}>{t('player.next', { time: formatClock(next.startUtc), title: next.title ?? '' })}</span>}
+                </div>
+              </div>
             </div>
             {timeshift && player.seekable && duration > 0 ? (
               <div className={classes.timeline}>

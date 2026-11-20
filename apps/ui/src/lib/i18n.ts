@@ -118,7 +118,6 @@ export const en = {
   'player.favouriteRemoved': '{name} removed from favourites.',
   'player.exitFullscreen': 'Exit full screen',
   'player.next': 'Next · {time} {title}',
-  'player.until': '{title} · until {time}',
   'player.noGuide': 'No guide data for this channel',
   'player.numberEntry': 'Channel number',
   'player.noSuchChannel': 'No channel {number}',
