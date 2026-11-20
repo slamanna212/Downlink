@@ -2,11 +2,19 @@
 
 > ## Before the first release: TODO for Sam
 >
-> - [ ] Generate the updater keypair: `cargo tauri signer generate -w ~/.tauri/downlink.key` (back it up offline; never commit it).
-> - [ ] Add repo secrets `TAURI_SIGNING_PRIVATE_KEY` (contents of the key file) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+> Automatic triggers are paused: `ci.yml` and `release.yml` run only via "Run workflow" (workflow_dispatch).
+> To re-enable, restore the `pull_request:` trigger in `ci.yml` and the `push:` block in `release.yml`
+> (both are noted in comments there).
+>
+> - [ ] Generate the updater keypair (back it up offline; never commit it):
+>   `cargo tauri signer generate -w ~/.tauri/downlink.key`
+> - [ ] Add the secrets:
+>   `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/downlink.key`
+>   then `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (it prompts for the value).
 > - [ ] Paste the public key (`~/.tauri/downlink.key.pub`) into `plugins.updater.pubkey` in `apps/desktop/tauri.conf.json`.
 > - [ ] (Optional) repo variable `LIBMPV_SRC` for Linux. The Windows libmpv pin lives in `tools/mpv/pins.env`; no `MPV_*` variables are needed.
 > - [ ] Apply the config in "tauri.conf.json requirements" below and implement the `--self-test` flag.
+> - [ ] macOS is OFF by default (releases start as Windows + Linux). See "macOS" below to turn it on.
 
 Implements PLAN §10. Workflows: `.github/workflows/ci.yml` (gates) and `.github/workflows/release.yml`
 (build, sign, publish, smoke).
@@ -54,6 +62,9 @@ Run `git cliff --current` locally to preview.
 |---|---|---|
 | `TAURI_SIGNING_PRIVATE_KEY` | secret | minisign private key (contents of the key file) for updater `.sig` files |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret | its password |
+| `ENABLE_MACOS` | variable | `true` turns on the macOS jobs (libmpv, build, smoke) and the darwin keys in `latest.json`; default off |
+| `MACOS_DEVELOPER_ID` | variable | `true` switches macOS builds from ad-hoc to Developer ID + notarisation (needs the Apple secrets) |
+| `APPLE_*` | secrets | see "macOS" below; only used when `MACOS_DEVELOPER_ID` is `true` |
 | `LIBMPV_SRC` | variable (optional) | absolute path of the `libmpv.so.2` to bundle on Linux; default is the runner's linker cache |
 
 `GITHUB_TOKEN` is used for everything else. Workflow permissions are least-privilege per job
@@ -68,6 +79,37 @@ pre-release, with a workflow warning annotation. The build gets `bundle.createUp
 `dev` release are skipped, so in-app updates do not work until the key is added. A stable tag without the
 key fails in `prepare`. Libmpv pins (Windows tag/asset/SHA-256, Linux, macOS) are read from
 `tools/mpv/pins.env` by the staging scripts.
+
+## macOS
+
+Disabled unless repo variable `ENABLE_MACOS` is `true` (`gh variable set ENABLE_MACOS --body true`). While it
+is off, `mpv-macos`, `build-macos` and the macOS smoke leg are skipped, `publish` still runs, `latest.json`
+omits the `darwin-*` keys and no dmg copy is made.
+
+With only `ENABLE_MACOS`, the build is ad-hoc signed (testers run `xattr -dr com.apple.quarantine`).
+For the Developer ID path (PLAN §10.5) also set variable `MACOS_DEVELOPER_ID=true` and these secrets:
+
+| Secret | Value |
+|---|---|
+| `APPLE_CERTIFICATE` | base64 of the exported Developer ID Application `.p12` |
+| `APPLE_CERTIFICATE_PASSWORD` | password chosen when exporting the `.p12` |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Your Name (TEAMID)` (`security find-identity -v -p codesigning`) |
+| `APPLE_ID` | Apple ID email used for notarisation |
+| `APPLE_PASSWORD` | app-specific password from appleid.apple.com |
+| `APPLE_TEAM_ID` | 10-character team id |
+
+Export the certificate: in Keychain Access, select the "Developer ID Application" certificate together with its
+private key, File -> Export Items -> `.p12`, set a password, then
+`base64 -i cert.p12 | gh secret set APPLE_CERTIFICATE` and
+`gh secret set APPLE_CERTIFICATE_PASSWORD`. Delete the local `.p12` afterwards.
+
+What the gated steps do: import the cert into a temporary keychain, sign every bundled dylib inside-out with
+hardened runtime and timestamp, let `tauri-action` sign the app and notarise with the `APPLE_*` env vars, then
+verify with `codesign --verify --deep --strict`, `spctl --assess` and `xcrun stapler validate`. Hardened runtime
+will block loading the bundled (differently-signed or ad-hoc) libmpv unless the app has the
+`com.apple.security.cs.disable-library-validation` entitlement: add an `entitlements.plist` with that key and
+set `bundle.macOS.entitlements` in `tauri.release.macos.conf.json` before enabling this path.
+These steps are written but untested.
 
 ## Updater keypair
 
@@ -85,7 +127,7 @@ cargo tauri signer generate -w ~/.tauri/downlink.key
 
 - Updater minisign signatures are mandatory on every platform.
 - Windows: unsigned for dev/testers (SmartScreen: More info, Run anyway).
-- macOS: ad-hoc (`signingIdentity: "-"`). Testers run `xattr -dr com.apple.quarantine /Applications/Downlink.app`
+- macOS: off initially; ad-hoc (`signingIdentity: "-"`) when enabled, Developer ID when `MACOS_DEVELOPER_ID` is set (see "macOS"). Testers run `xattr -dr com.apple.quarantine /Applications/Downlink.app`
   once. The smoke job runs `codesign --verify --deep --strict` and checks every `libmpv*.dylib` is
   universal. Moving to a Developer ID later means inside-out signing of every bundled dylib with
   hardened runtime plus notarisation in `build-macos`.

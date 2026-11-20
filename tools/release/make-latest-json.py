@@ -47,11 +47,14 @@ def main() -> int:
     ap.add_argument("--tag", required=True, help="release tag the asset URLs point at")
     ap.add_argument("--assets", required=True, type=pathlib.Path)
     ap.add_argument("--notes", type=pathlib.Path)
+    ap.add_argument("--no-macos", action="store_true", help="omit darwin-* keys (macOS builds disabled)")
     ap.add_argument("--out", type=pathlib.Path, default=pathlib.Path("latest.json"))
     a = ap.parse_args()
 
     platforms, missing = {}, []
     for key, globs in PATTERNS.items():
+        if a.no_macos and key.startswith("darwin-"):
+            continue
         f = find(a.assets, globs)
         sig = pathlib.Path(str(f) + ".sig") if f else None
         if not f or not sig.is_file():
