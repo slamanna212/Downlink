@@ -29,7 +29,7 @@ function Focusable({ children, className, onPlay }: { children: React.ReactNode;
 
 function useActions() {
   const navigate = useNavigate();
-  const go = (p: Promise<unknown>) => void p.then(() => navigate('/player'));
+  const go = (p: Promise<unknown>) => void p.then((err) => (err ? undefined : navigate('/player')));
   return {
     live: (ch: Channel) => go(playChannel(ch.id)),
     open: (it: ContinueItem) => {

@@ -27,8 +27,7 @@ function Row({ r, now, tab, run, busy }: { r: Recording; now: number; tab: Exclu
   const [confirming, setConfirming] = useState(false);
   const watch = () => run(async () => {
     const err = await playRecording(r.id);
-    if (err) throw err;
-    void navigate('/player');
+    if (!err) void navigate('/player');
   });
   return (
     <div className={classes.row} role="listitem">

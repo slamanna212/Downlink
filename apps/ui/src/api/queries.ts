@@ -3,11 +3,15 @@
 import { QueryClient, useQuery } from '@tanstack/react-query';
 import { invoke, listen } from './ipc';
 import type { Caps } from './types';
+import { notifyError } from '../components/Notify/notify';
 import { unionCaps } from '../lib/caps';
 
 export function createQueryClient(): QueryClient {
   return new QueryClient({
-    defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: 1 } },
+    defaultOptions: {
+      queries: { staleTime: 30_000, refetchOnWindowFocus: false, retry: 1 },
+      mutations: { onError: notifyError },
+    },
   });
 }
 

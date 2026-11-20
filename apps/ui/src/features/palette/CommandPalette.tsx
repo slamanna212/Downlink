@@ -60,7 +60,7 @@ export function CommandPalette() {
     const mk = (id: string, label: string, onClick: () => void, icon: Parameters<typeof Icon>[0]['icon'], description?: string): SpotlightActionData => ({ id, label, description, onClick, leftSection: ic(icon) });
 
     const channelActions = (q ? results.data?.channels ?? [] : []).map((c) =>
-      mk(`c${c.id}`, `${c.number ?? ''} ${c.name}`.trim(), () => void playChannel(c.id).then(() => navigate('/player')), IconPlayerPlay),
+      mk(`c${c.id}`, `${c.number ?? ''} ${c.name}`.trim(), () => void playChannel(c.id).then((err) => (err ? undefined : navigate('/player'))), IconPlayerPlay),
     );
     const progActions = (q ? results.data?.programmes ?? [] : []).map(({ programme: p, channel }) =>
       mk(`p${p.id}`, p.title ?? '', () => activateProgramme(p, channel, navigate, showDetail), IconLayoutNavbar, `${channel.name} · ${dayLabel(p.startUtc)} ${formatClock(p.startUtc)}`),

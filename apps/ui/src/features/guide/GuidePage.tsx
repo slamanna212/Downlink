@@ -371,8 +371,8 @@ export function GuidePage() {
       if (!p) return;
       const ch = rowChannel.get(focus.row) ?? undefined;
       const action = enterAction(blockState(p, ch, nowEpoch()));
-      if (action === 'play-live') void playChannel(p.channelId).then(() => navigate('/player'));
-      else if (action === 'play-catchup') void playCatchup(p.id).then(() => navigate('/player'));
+      if (action === 'play-live') void playChannel(p.channelId).then((err) => (err ? undefined : navigate('/player')));
+      else if (action === 'play-catchup') void playCatchup(p.id).then((err) => (err ? undefined : navigate('/player')));
       else if (action === 'details') showDetail(p.channelId, p.id);
     },
     [rowChannel, focus.row, navigate, showDetail],
@@ -424,8 +424,8 @@ export function GuidePage() {
     el.focus({ preventScroll: true });
     const ch = channelFor(row);
     const action = enterAction(blockState(p, ch, nowEpoch()));
-    if (action === 'play-live') void playChannel(p.channelId).then(() => navigate('/player'));
-    else if (action === 'play-catchup') void playCatchup(p.id).then(() => navigate('/player'));
+    if (action === 'play-live') void playChannel(p.channelId).then((err) => (err ? undefined : navigate('/player')));
+    else if (action === 'play-catchup') void playCatchup(p.id).then((err) => (err ? undefined : navigate('/player')));
     else if (action === 'details') showDetail(p.channelId, p.id);
   };
   const onContextMenu = (e: React.MouseEvent) => {
@@ -445,7 +445,7 @@ export function GuidePage() {
     if (focusProgramme) record.mutate({ programmeId: focusProgramme.id, kind });
   });
   const onPrimary = useStable(() => activate(focusProgramme));
-  const onFromStart = useStable(() => focusChannel && void restartProgramme(focusChannel.id).then(() => navigate('/player')));
+  const onFromStart = useStable(() => focusChannel && void restartProgramme(focusChannel.id).then((err) => (err ? undefined : navigate('/player'))));
   const onDetails = useStable(() => focusProgramme && showDetail(focusProgramme.channelId, focusProgramme.id));
   const onFavourite = useStable(() => focusChannel && favourite.mutate({ channelId: focusChannel.id, favourite: !focusChannel.isFavourite }));
   const onGroup = useStable((id: number | null) => {

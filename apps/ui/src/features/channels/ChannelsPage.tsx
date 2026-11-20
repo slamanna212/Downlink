@@ -126,7 +126,7 @@ export function ChannelsPage() {
     (i: number) => {
       const c = channels[i];
       if (!c) return;
-      void playChannel(c.id).then(() => navigate('/player'));
+      void playChannel(c.id).then((err) => (err ? undefined : navigate('/player')));
     },
     [channels, navigate],
   );

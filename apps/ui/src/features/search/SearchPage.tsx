@@ -55,7 +55,7 @@ export function SearchPage() {
 
   const activate = (it: Item | undefined) => {
     if (!it) return;
-    if (it.kind === 'channel') void playChannel(it.channel.id).then(() => navigate('/player'));
+    if (it.kind === 'channel') void playChannel(it.channel.id).then((err) => (err ? undefined : navigate('/player')));
     else activateProgramme(it.hit.programme, it.hit.channel, navigate, showDetail);
   };
 

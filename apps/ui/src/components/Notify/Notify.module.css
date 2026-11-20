@@ -1,0 +1,10 @@
+.root {
+  background: var(--dl-surface-3);
+  border: 1px solid var(--dl-hairline-strong);
+  border-radius: var(--mantine-radius-md);
+  box-shadow: var(--mantine-shadow-md);
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+}
+.description { color: var(--dl-text); font-size: var(--mantine-font-size-md); }
+.icon { background: transparent; color: var(--dl-live-text); }
+.closeButton { color: var(--dl-text-dim); }

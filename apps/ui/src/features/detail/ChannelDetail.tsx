@@ -78,7 +78,7 @@ export function ChannelDetail() {
               variant="filled"
               onClick={() => {
                 close();
-                void playChannel(channel.id).then(() => navigate('/player'));
+                void playChannel(channel.id).then((err) => (err ? undefined : navigate('/player')));
               }}
             >
               {t('detail.watchLive')}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { MantineProvider } from '@mantine/core';
+import { Notifications } from '@mantine/notifications';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { RouterProvider, type DataRouter } from 'react-router';
 import { cssVariablesResolver, theme } from '../theme';
@@ -28,6 +29,7 @@ export function App({ router, client }: { router?: DataRouter; client?: QueryCli
 
   return (
     <MantineProvider theme={theme} cssVariablesResolver={cssVariablesResolver} defaultColorScheme="dark">
+      <Notifications position="bottom-right" limit={3} autoClose={5000}  />
       <QueryClientProvider client={qc}>
         <RouterProvider router={r} />
       </QueryClientProvider>
