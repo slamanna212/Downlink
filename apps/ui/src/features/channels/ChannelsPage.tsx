@@ -239,7 +239,7 @@ export function ChannelsPage() {
               (spatialRef as React.MutableRefObject<HTMLDivElement | null>).current = n;
             }}
             className={classes.scroller}
-            role="listbox"
+            role="list"
             aria-label={t('channels.list')}
             onKeyDown={onListKeyDown}
             {...listFocusProps}

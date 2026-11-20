@@ -12,11 +12,13 @@ import { Icon } from '../../components/Icon/Icon';
 import { Poster } from '../../components/Poster/Poster';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { EmptySource } from '../../pages/EmptySource';
+import { useUiStore } from '../../store/ui';
 import { t } from '../../lib/i18n';
 import { gridColumns, progressOf } from './vod';
 import classes from './Vod.module.css';
 
 const MIN_TILE = 160;
+const TV_SCALE = 1.25;
 const GAP = 16; // matches --mantine-spacing-lg
 const TEXT_H = 52;
 const LIMIT = 5000;
@@ -67,9 +69,10 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
   }, [innerEl]);
 
   const inner = width;
-  const cols = gridColumns(inner, MIN_TILE, GAP);
+  const tvScale = useUiStore((st) => (st.density === 'tv' ? TV_SCALE : 1));
+  const cols = gridColumns(inner, MIN_TILE * tvScale, GAP);
   const tileW = cols > 0 ? (inner - GAP * (cols - 1)) / cols : MIN_TILE;
-  const rowH = Math.round(tileW * 1.5 + TEXT_H + GAP);
+  const rowH = Math.round(tileW * 1.5 + TEXT_H * tvScale + GAP);
   const rows = Math.ceil(tiles.length / cols);
 
   // eslint-disable-next-line react-hooks/incompatible-library

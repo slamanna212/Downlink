@@ -56,7 +56,7 @@
 .hint {
   font-family: var(--mantine-font-family-monospace);
   font-size: 0.6875rem;
-  color: var(--dl-text-faint);
+  color: var(--dl-text-dim);
 }
 
 .icon {
@@ -78,16 +78,26 @@
 
 /* 10-foot: icon over label, 96 px wide */
 .tv .item {
+  overflow: visible;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
   height: auto;
   min-height: 72px;
   padding: var(--mantine-spacing-sm) 0;
 }
 .tv .itemInner {
+  overflow: visible !important;
+  align-items: center;
   flex-direction: column;
   gap: var(--mantine-spacing-xs);
 }
 .tv .itemLabel {
-  font-size: var(--mantine-font-size-sm);
+  font-size: var(--mantine-font-size-xs);
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: nowrap;
 }
 
 .spacer {

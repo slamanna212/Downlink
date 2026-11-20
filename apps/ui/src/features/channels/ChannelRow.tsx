@@ -39,8 +39,8 @@ export const ChannelRow = forwardRef<HTMLDivElement, ChannelRowProps>(function C
   return (
     <div
       ref={ref}
-      role="option"
-      aria-selected={active}
+      role="listitem"
+      aria-current={active ? 'true' : undefined}
       aria-label={label}
       tabIndex={active ? 0 : -1}
       className={classes.row}
@@ -68,7 +68,7 @@ export const ChannelRow = forwardRef<HTMLDivElement, ChannelRowProps>(function C
               <span>{p.title}</span>
               <span className={classes.nowTime}>{formatRange(p.startUtc, p.endUtc)}</span>
             </span>
-            <span className={classes.track} role="progressbar" aria-valuenow={Math.round(progress(p.startUtc, p.endUtc, now) * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <span className={classes.track} role="progressbar" aria-label={p.title ?? ''} aria-valuenow={Math.round(progress(p.startUtc, p.endUtc, now) * 100)} aria-valuemin={0} aria-valuemax={100}>
               <span className={classes.fill} style={{ display: 'block', width: `${progress(p.startUtc, p.endUtc, now) * 100}%` }} />
             </span>
           </>

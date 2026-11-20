@@ -40,6 +40,10 @@ a:hover { color: var(--dl-accent-hover); }
 [data-density='tv'] :where([data-focusable]):focus-visible,
 [data-density='tv'] [data-focused='true'] { box-shadow: var(--dl-focus-ring-tv); }
 
+/* 10-foot: no hover affordances; the pointer hides while the remote / keyboard drives. */
+[data-density='tv'][data-input='keys'] { cursor: none; }
+[data-density='tv'][data-input='keys'] * { cursor: none !important; }
+
 ::selection { background: var(--dl-accent-tint); color: var(--dl-text); }
 
 @media (prefers-reduced-motion: reduce) {

@@ -4,6 +4,7 @@ import { IconArrowBarLeft, IconDownload } from '@tabler/icons-react';
 import { FocusContext } from '@noriginmedia/norigin-spatial-navigation';
 import { useCaps, useSources } from '../api/queries';
 import type { Source, SourceStatus } from '../api/types';
+import { openPalette } from '../features/palette/CommandPalette';
 import { Icon } from '../components/Icon/Icon';
 import { DLIconButton } from '../components/DLIconButton/DLIconButton';
 import { useDLFocusable } from '../lib/spatial';
@@ -27,7 +28,7 @@ function RailItem({ entry, mode }: { entry: NavEntry; mode: RailMode }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const active = entry.to === '/' ? pathname === '/' : pathname === entry.to || pathname.startsWith(`${entry.to}/`);
-  const { ref, focusProps } = useDLFocusable({ onEnterPress: () => void navigate(entry.to) });
+  const { ref, focusProps } = useDLFocusable({ onEnterPress: () => (entry.id === 'search' ? openPalette() : void navigate(entry.to)) });
   const label = t(entry.label);
   const hint = entry.hint === '#mod' ? modKeyLabel() : entry.hint;
 
@@ -37,6 +38,7 @@ function RailItem({ entry, mode }: { entry: NavEntry; mode: RailMode }) {
       component={Link}
       to={entry.to}
       active={active}
+      onClick={entry.id === 'search' ? (e: React.MouseEvent) => (e.preventDefault(), openPalette()) : undefined}
       aria-current={active ? 'page' : undefined}
       aria-label={mode === 'collapsed' ? label : undefined}
       className={classes.item}

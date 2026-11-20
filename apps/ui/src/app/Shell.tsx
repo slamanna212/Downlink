@@ -10,6 +10,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '../api/ipc';
 import { Banner } from '../components/Banner/Banner';
 import { formatUpdated } from '../lib/time';
+import { readTvSignals, wantsTv } from '../lib/tv';
+import { CommandPalette } from '../features/palette/CommandPalette';
 import { ChannelDetail } from '../features/detail/ChannelDetail';
 import { Rail, type RailMode } from './Rail';
 import { isCollapsedRoute } from './nav';
@@ -40,7 +42,32 @@ function StatusBanner({ source, onRetry, onSettings }: { source: Source; onRetry
   );
 }
 
+/** Picks tv density by window size / `--tv` unless the user chose a density; tracks keyboard vs pointer input. */
+function useAutoDensity() {
+  useEffect(() => {
+    const apply = () => {
+      const st = useUiStore.getState();
+      if (st.densityExplicit) return;
+      const want = wantsTv(readTvSignals()) ? 'tv' : 'comfortable';
+      if (want !== st.density) st.setAutoDensity(want);
+    };
+    apply();
+    window.addEventListener('resize', apply);
+    const root = document.documentElement;
+    const keys = () => (root.dataset.input = 'keys');
+    const pointer = () => (root.dataset.input = 'pointer');
+    window.addEventListener('keydown', keys, true);
+    window.addEventListener('mousemove', pointer, true);
+    return () => {
+      window.removeEventListener('resize', apply);
+      window.removeEventListener('keydown', keys, true);
+      window.removeEventListener('mousemove', pointer, true);
+    };
+  }, []);
+}
+
 export function Shell() {
+  useAutoDensity();
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const density = useUiStore((s) => s.density);
@@ -66,7 +93,6 @@ export function Shell() {
     ['G', () => void navigate('/guide')],
     ['L', () => void navigate('/channels')],
     ['/', () => pathname !== '/channels' && void navigate('/search')],
-    ['mod+K', () => void navigate('/search')],
   ]);
 
   return (
@@ -88,6 +114,7 @@ export function Shell() {
         </RouteTransition>
       </main>
       <ChannelDetail />
+      <CommandPalette />
     </div>
   );
 }

@@ -19,15 +19,17 @@ export interface GuideBlockProps {
   pct: number;
   focused: boolean;
   tabbable: boolean;
+  channelName?: string;
 }
 
 /** One programme block. Memoised: scrolling never re-renders blocks that stay on screen. */
-export const GuideBlock = memo(function GuideBlock({ p, row, state, x, y, w, h, pct, focused, tabbable }: GuideBlockProps) {
+export const GuideBlock = memo(function GuideBlock({ p, row, state, x, y, w, h, pct, focused, tabbable, channelName }: GuideBlockProps) {
   return (
     <div
       className={classes.block}
       role="gridcell"
-      aria-label={`${p.title ?? ''} ${formatRange(p.startUtc, p.endUtc)}`}
+      aria-label={`${channelName ? `${channelName}, ` : ''}${p.title ?? ''}, ${formatRange(p.startUtc, p.endUtc)}`}
+      aria-disabled={state === 'past-none' || undefined}
       aria-selected={focused}
       tabIndex={tabbable ? 0 : -1}
       data-pid={p.id}

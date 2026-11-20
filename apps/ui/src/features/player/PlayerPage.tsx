@@ -449,7 +449,7 @@ export function PlayerPage() {
                 value={player.muted ? 0 : player.volume}
                 onChange={(v) => cmd({ kind: 'setVolume', volume: v })}
                 label={null}
-                aria-label={t('player.volume')}
+                thumbLabel={t('player.volume')}
               />
               <span className={classes.spacer} />
               <DLIconButton

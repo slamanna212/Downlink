@@ -30,8 +30,6 @@ import {
 import classes from './Guide.module.css';
 
 const FWD_DAYS = 7;
-const COL_W = dl.guide.channelColumn;
-const HEADER_H = dl.guide.headerHeight;
 const NAV_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'];
 
 /** A callback with a stable identity that always calls the latest closure (keeps memoised children quiet). */
@@ -137,7 +135,7 @@ const GuideRow = memo(function GuideRow({ row, ch, list, geo, t0, t1, now, focus
       </div>
     ) : null;
   return (
-    <>
+    <div role="row" aria-rowindex={row + 1} className={classes.rowWrap}>
       {visible.map((p) => {
         const x = timeToX(geo, p.startUtc);
         const state = blockState(p, ch, now);
@@ -154,10 +152,11 @@ const GuideRow = memo(function GuideRow({ row, ch, list, geo, t0, t1, now, focus
             pct={state === 'now' ? progress(p.startUtc, p.endUtc, now) : 0}
             focused={p.id === focusPid}
             tabbable={p.id === focusPid}
+            channelName={ch.name}
           />
         );
       })}
-    </>
+    </div>
   );
 });
 
@@ -201,6 +200,9 @@ export function GuidePage() {
   const sources = useSources();
   const backDays = Math.max(1, sources.data?.[0]?.archiveDays ?? 1);
   const rowH = dl.density[density].guideRow;
+  const scale = density === 'tv' ? dl.density.tv.typeScale : 1;
+  const COL_W = Math.round(dl.guide.channelColumn * scale);
+  const HEADER_H = Math.round(dl.guide.headerHeight * scale);
   const totalRows = groupId == null ? (counts.data?.all ?? 0) : (groups.data?.find((g) => g.id === groupId)?.count ?? 0);
 
   // Geometry is derived from numbers only; nothing here reads layout.
@@ -209,7 +211,7 @@ export function GuidePage() {
     const rangeStart = addDays(dayStart, -backDays);
     const rangeEnd = addDays(dayStart, FWD_DAYS);
     return { rangeStart, rangeEnd, pps: ppsFor(size.w, COL_W, span), colW: COL_W, headerH: HEADER_H, rowH };
-  }, [size.w, span, rowH, backDays]);
+  }, [size.w, span, rowH, backDays, COL_W, HEADER_H]);
 
   const viewport = useCallback((): Viewport => ({ scrollLeft: scrollPos.current.left, scrollTop: scrollPos.current.top, viewW: size.w, viewH: size.h }), [size]);
 
@@ -255,7 +257,7 @@ export function GuidePage() {
       if (!el) return;
       el.scrollTo({ left: Math.max(0, timeToX(geo, t) - COL_W), top: el.scrollTop });
     },
-    [geo],
+    [geo, COL_W],
   );
 
   // Geometry change (first layout, span, resize): keep the same time at the left edge.
@@ -273,7 +275,7 @@ export function GuidePage() {
     lastGeo.current = geo;
     cached.current = null;
     updateRef.current();
-  }, [geo, loaded, hasSource]);
+  }, [geo, loaded, hasSource, COL_W]);
   // Row count or density change: refresh the render range without touching the scroll position.
   useEffect(() => {
     cached.current = null;
@@ -497,7 +499,7 @@ export function GuidePage() {
 
 
   return (
-    <div className={classes.page}>
+    <div className={classes.page} style={{ ['--gcol' as string]: `${COL_W}px`, ['--ghead' as string]: `${HEADER_H}px`, ['--gscale' as string]: scale }}>
       <GuidePreview
         programme={focusProgramme}
         channel={focusChannel}
@@ -540,8 +542,8 @@ export function GuidePage() {
           onContextMenu={onContextMenu}
           {...focusProps}
         >
-          <div className={classes.canvas} style={{ width: W, height: H }}>
-            <div className={classes.header} style={{ width: W }}>
+          <div className={classes.canvas} style={{ width: W, height: H }} role="presentation">
+            <div className={classes.header} style={{ width: W }} aria-hidden>
               <div className={classes.corner}>{dayLabel(leftTime, now)}</div>
               {range && <GuideTicks geo={geo} t0={range.t0} t1={range.t1} />}
               {nowX > geo.colW && nowX < W && (
@@ -551,12 +553,12 @@ export function GuidePage() {
               )}
             </div>
             <div className={classes.body} style={{ height: totalRows * rowH }}>
-              <div className={classes.col} style={{ height: totalRows * rowH }}>
+              <div className={classes.col} style={{ height: totalRows * rowH }} aria-hidden>
                 {labels}
               </div>
               {fillers}
               {blocks}
-              <div className={classes.nowLine} style={{ left: nowX }} />
+              <div className={classes.nowLine} style={{ left: nowX }} aria-hidden />
             </div>
           </div>
         </div>

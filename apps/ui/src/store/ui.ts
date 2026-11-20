@@ -12,6 +12,13 @@ function readStored<T extends string>(key: string, allowed: readonly T[], fallba
     return fallback;
   }
 }
+function hasStored(key: string): boolean {
+  try {
+    return localStorage.getItem(key) !== null;
+  } catch {
+    return false;
+  }
+}
 function writeStored(key: string, value: string): void {
   try {
     localStorage.setItem(key, value);
@@ -33,6 +40,10 @@ interface UiState {
   setFullscreen: (f: boolean) => void;
   density: DensitySetting;
   setDensity: (d: DensitySetting) => void;
+  /** True once the user picked a density; auto-detection then stays out of the way. */
+  densityExplicit: boolean;
+  /** Apply an auto-detected density without persisting it. */
+  setAutoDensity: (d: DensitySetting) => void;
   /** User preference. 'auto' = collapsed on Guide/Player, expanded elsewhere (DESIGN §8). */
   railPref: RailPref;
   setRailPref: (p: RailPref) => void;
@@ -42,8 +53,13 @@ export const useUiStore = create<UiState>((set) => ({
   fullscreen: false,
   setFullscreen: (fullscreen) => set({ fullscreen }),
   density: readStored(DENSITY_KEY, ['compact', 'comfortable', 'tv'], 'comfortable'),
+  densityExplicit: hasStored(DENSITY_KEY),
   setDensity: (density) => {
     writeStored(DENSITY_KEY, density);
+    applyDensity(density);
+    set({ density, densityExplicit: true });
+  },
+  setAutoDensity: (density) => {
     applyDensity(density);
     set({ density });
   },

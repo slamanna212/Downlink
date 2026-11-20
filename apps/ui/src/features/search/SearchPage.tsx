@@ -94,12 +94,12 @@ export function SearchPage() {
           }
         }}
       />
-      <div id="search-results" ref={listRef} role="listbox" aria-label={t('search.results')}>
+      <div id="search-results" ref={listRef} role={items.length ? 'listbox' : undefined} aria-label={t('search.results')}>
         {deferred.length === 0 && <p className={classes.empty}>{t('search.hint')}</p>}
         {deferred.length > 0 && results.data && items.length === 0 && <p className={classes.empty}>{t('search.empty', { query: deferred })}</p>}
         {channelCount > 0 && (
-          <section className={classes.group}>
-            <h2 className={classes.groupLabel}>{t('search.channels')}</h2>
+          <div role="group" aria-label={t('search.channels')} className={classes.group}>
+            <div className={classes.groupLabel} aria-hidden>{t('search.channels')}</div>
             {items.slice(0, channelCount).map((it, i) =>
               it.kind === 'channel' ? (
                 <div key={`c${it.channel.id}`} id={`sr-${i}`} role="option" aria-selected={i === active} data-active={i === active || undefined} className={classes.item} onClick={() => activate(it)} onMouseMove={() => i !== active && setActive(i)}>
@@ -111,11 +111,11 @@ export function SearchPage() {
                 </div>
               ) : null,
             )}
-          </section>
+          </div>
         )}
         {items.length > channelCount && (
-          <section className={classes.group}>
-            <h2 className={classes.groupLabel}>{t('search.programmes')}</h2>
+          <div role="group" aria-label={t('search.programmes')} className={classes.group}>
+            <div className={classes.groupLabel} aria-hidden>{t('search.programmes')}</div>
             {items.slice(channelCount).map((it, k) => {
               if (it.kind !== 'programme') return null;
               const i = channelCount + k;
@@ -135,7 +135,7 @@ export function SearchPage() {
                 </div>
               );
             })}
-          </section>
+          </div>
         )}
       </div>
     </div>

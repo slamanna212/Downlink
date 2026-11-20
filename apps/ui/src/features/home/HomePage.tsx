@@ -13,6 +13,7 @@ import { useDLFocusable } from '../../lib/spatial';
 import { useNowEpoch } from '../../lib/useNow';
 import { modKeyLabel } from '../../lib/platform';
 import { t } from '../../lib/i18n';
+import { openPalette } from '../palette/CommandPalette';
 import { playCatchup, playChannel, playRecording, playVod, restartProgramme } from '../player/actions';
 import classes from './Home.module.css';
 
@@ -125,7 +126,7 @@ export function HomePage() {
     <div className={classes.page}>
       <div className={classes.top}>
         <h1 className={classes.title}>{t('home.title')}</h1>
-        <DLButton variant="default" justify="space-between" className={classes.searchBtn} icon={IconSearch} onClick={() => void navigate('/search')} aria-label={t('home.search')}>
+        <DLButton variant="default" justify="space-between" className={classes.searchBtn} icon={IconSearch} onClick={openPalette} aria-label={t('home.search')}>
           <span className={classes.searchLabel}>{t('home.search')}</span> <span className={classes.kbd}>{modKeyLabel()}</span>
         </DLButton>
       </div>

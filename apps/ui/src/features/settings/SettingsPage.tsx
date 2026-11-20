@@ -148,7 +148,7 @@ function PlaybackSection() {
             step={1}
             value={shown}
             label={null}
-            aria-label={t('settings.buffer')}
+            thumbLabel={t('settings.buffer')}
             onChange={setBuffer}
             onChangeEnd={(v) => {
               patch.mutate({ liveBufferSecs: v });
@@ -200,7 +200,7 @@ function PlaybackSection() {
             step={10}
             value={subSize ?? data.subtitleSize}
             label={null}
-            aria-label={t('settings.subtitleSize')}
+            thumbLabel={t('settings.subtitleSize')}
             onChange={setSubSize}
             onChangeEnd={(v) => {
               patch.mutate({ subtitleSize: v });

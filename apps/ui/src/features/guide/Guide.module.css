@@ -8,7 +8,7 @@
 
 /* ---------- preview pane (196 px) ---------- */
 .preview {
-  height: 196px;
+  height: calc(196px * var(--gscale, 1));
   flex: none;
   display: flex;
   gap: var(--mantine-spacing-xl);
@@ -16,8 +16,8 @@
   border-bottom: 1px solid var(--dl-hairline);
 }
 .art {
-  width: 264px;
-  height: 148px;
+  width: calc(264px * var(--gscale, 1));
+  height: calc(148px * var(--gscale, 1));
   flex: none;
   border-radius: var(--mantine-radius-lg);
   border: 1px solid var(--dl-hairline);
@@ -102,7 +102,7 @@
   position: sticky;
   top: 0;
   z-index: 4;
-  height: 40px;
+  height: var(--ghead);
   background: var(--dl-surface-0);
   border-bottom: 1px solid var(--dl-hairline);
 }
@@ -110,8 +110,8 @@
   position: sticky;
   left: 0;
   z-index: 5;
-  width: 180px;
-  height: 40px;
+  width: var(--gcol);
+  height: var(--ghead);
   display: flex;
   align-items: center;
   padding: 0 var(--mantine-spacing-lg);
@@ -126,7 +126,7 @@
 .tick {
   position: absolute;
   top: 0;
-  height: 40px;
+  height: var(--ghead);
   display: flex;
   align-items: center;
   padding-left: var(--mantine-spacing-sm);
@@ -147,7 +147,7 @@
   transform: translateX(-50%);
   padding: 0 var(--mantine-spacing-sm);
   border-radius: var(--mantine-radius-sm);
-  background: var(--dl-live);
+  background: var(--mantine-color-live-6);
   color: var(--dl-on-video);
   font-size: var(--mantine-font-size-sm);
   font-weight: 700;
@@ -163,7 +163,7 @@
   position: sticky;
   left: 0;
   z-index: 3;
-  width: 180px;
+  width: var(--gcol);
   background: var(--dl-surface-0);
   border-right: 1px solid var(--dl-hairline);
 }
@@ -239,7 +239,7 @@
 }
 .inner {
   position: sticky;
-  left: 188px;
+  left: calc(var(--gcol) + 8px);
   display: inline-flex;
   flex-direction: column;
   justify-content: center;
@@ -282,7 +282,7 @@
 }
 .noDataText {
   position: sticky;
-  left: 196px;
+  left: calc(var(--gcol) + 16px);
   padding: 0 var(--mantine-spacing-sm);
   font-size: var(--mantine-font-size-md);
   color: var(--dl-text-faint);
@@ -303,7 +303,7 @@
   bottom: 0;
   width: 2px;
   translate: -1px 0;
-  background: var(--dl-live);
+  background: var(--mantine-color-live-6);
   opacity: 1;
   z-index: 2;
   pointer-events: none;
@@ -322,3 +322,5 @@
   text-transform: uppercase;
   color: var(--dl-text-2);
 }
+
+.rowWrap { display: contents; }
