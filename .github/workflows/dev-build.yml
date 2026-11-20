@@ -46,7 +46,7 @@ jobs:
           echo "Dev build $VERSION from $GITHUB_REF_NAME"
 
   ci:
-    name: Tests (Linux)
+    name: Tests
     needs: check-version
     uses: ./.github/workflows/ci.yml
     with:

@@ -33,10 +33,12 @@ jobs:
         id: v
         run: |
           VERSION=$(jq -r .version package.json)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-          # A -suffix version (0.8.0-beta.1) becomes a pre-release, which the stable update channel ignores.
-          if [[ "$VERSION" == *-* ]]; then echo "prerelease=true"; else echo "prerelease=false"; fi >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$VERSION"
+            echo "tag=v$VERSION"
+            # A -suffix version (0.8.0-beta.1) becomes a pre-release, which the stable update channel ignores.
+            if [[ "$VERSION" == *-* ]]; then echo "prerelease=true"; else echo "prerelease=false"; fi
+          } >> "$GITHUB_OUTPUT"
 
       - name: Check if a release already exists for this tag
         id: check_release
@@ -52,7 +54,7 @@ jobs:
           fi
 
   ci:
-    name: Tests (Linux)
+    name: Tests
     needs: check-version
     if: needs.check-version.outputs.release_exists == 'false'
     uses: ./.github/workflows/ci.yml
