@@ -117,3 +117,17 @@ test('a failed play command raises one toast with the error message', async ({ p
   await expect(toast).toHaveCount(1);
   await expect(page).toHaveURL(/\/channels\?/);
 });
+
+test('Ctrl+K opens the command palette from anywhere, even right after load and from a text field', async ({ page }) => {
+  await page.goto('/channels');
+  await page.keyboard.press('Control+K'); // may precede the idle mount: the request is queued
+  const box = page.getByRole('textbox', { name: 'Command palette' });
+  await expect(box).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(box).toBeHidden();
+  await page.getByRole('textbox', { name: 'Type to filter' }).focus();
+  await page.keyboard.press('Control+K');
+  await expect(box).toBeVisible();
+  await page.keyboard.type('harb');
+  await expect(page.getByText('Harbor News 24').first()).toBeVisible();
+});

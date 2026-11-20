@@ -16,6 +16,7 @@ import { Rail, type RailMode } from './Rail';
 import { preloadRoutes } from './routes';
 import { useDetailStore } from '../store/detail';
 import { whenIdle } from '../lib/perf';
+import { openPalette } from '../lib/palette';
 import { isCollapsedRoute } from './nav';
 import classes from './Shell.module.css';
 
@@ -148,12 +149,15 @@ export function Shell() {
   const width = mode === 'tv' ? dl.layout.railTv : mode === 'collapsed' ? dl.layout.railCollapsed : dl.layout.railExpanded;
   const route = pathname.startsWith('/player') ? 'player' : 'app';
 
-  // Keyboard map (PLAN §8.4): G guide, L live list, / or mod+K search.
+  // Keyboard map (PLAN §8.4): G guide, L live list, / search.
   useHotkeys([
     ['G', () => void navigate('/guide')],
     ['L', () => void navigate('/channels')],
     ['/', () => pathname !== '/channels' && void navigate('/search')],
   ]);
+  // Ctrl/Cmd+K opens the command palette from anywhere, text fields included. The palette itself is
+  // code-split; an open request that arrives before it mounts is queued (lib/palette).
+  useHotkeys([['mod+K', () => openPalette(), { preventDefault: true }]], []);
 
   return (
     <div className={`dl-shell ${classes.shell}`} data-route={route} data-allow-blur={String(dl.allowBlur)}>

@@ -108,7 +108,7 @@ export function CommandPalette() {
       filter={(_, a) => a}
       limit={30}
       highlightQuery
-      shortcut={['mod + K']}
+      shortcut={null}
       scrollable
       maxHeight={dl.density.comfortable.channelRow * 8}
       nothingFound={t('palette.nothing')}
