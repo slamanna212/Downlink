@@ -7,7 +7,7 @@
       "command": "bash",
       "args": [
         "-c",
-        "if ! command -v node >/dev/null 2>&1 && [[ -s ${NVM_DIR:-$HOME/.nvm}/nvm.sh ]]; then source \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\"; fi; mkdir -p ../../target; pidfile=../../target/vscode-dev.pid; if [[ -f $pidfile ]] && kill -0 -- -$(cat \"$pidfile\") 2>/dev/null; then echo 'Downlink dev is already running.'; exit 0; fi; setsid bash -c 'echo $$ > ../../target/vscode-dev.pid; exec cargo tauri dev --config \"$DOWNLINK_DEV_CONFIG\"' & child=$!; cleanup() { trap '' TERM; if [[ -f $pidfile ]]; then kill -TERM -- -$(cat \"$pidfile\") 2>/dev/null || true; rm -f \"$pidfile\"; fi; }; trap cleanup EXIT; trap 'exit 0' INT TERM; wait \"$child\""
+        "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; if ! command -v node >/dev/null 2>&1 && [[ -s ${NVM_DIR:-$HOME/.nvm}/nvm.sh ]]; then source \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\"; fi; mkdir -p ../../target; pidfile=../../target/vscode-dev.pid; if [[ -f $pidfile ]] && kill -0 -- -$(cat \"$pidfile\") 2>/dev/null; then echo 'Downlink dev is already running.'; exit 0; fi; setsid bash -c 'echo $$ > ../../target/vscode-dev.pid; exec cargo tauri dev --config \"$DOWNLINK_DEV_CONFIG\"' & child=$!; cleanup() { trap '' TERM; if [[ -f $pidfile ]]; then kill -TERM -- -$(cat \"$pidfile\") 2>/dev/null || true; rm -f \"$pidfile\"; fi; }; trap cleanup EXIT; trap 'exit 0' INT TERM; wait \"$child\""
       ],
       "options": {
         "cwd": "${workspaceFolder}/apps/desktop",
@@ -36,6 +36,28 @@
         "cwd": "${workspaceFolder}"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Downlink: Install dev dependencies",
+      "detail": "Install Debian/Ubuntu native libraries, Node/pnpm and Rust if missing, Tauri CLI, and project dependencies. sudo may prompt for your password.",
+      "type": "process",
+      "command": "bash",
+      "args": [
+        "-c",
+        "set -eo pipefail\nexport PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"\nif [[ -s ${NVM_DIR:-$HOME/.nvm}/nvm.sh ]]; then source \"${NVM_DIR:-$HOME/.nvm}/nvm.sh\"; fi\nif ! command -v apt-get >/dev/null 2>&1; then echo 'This setup task requires Debian or Ubuntu.' >&2; exit 1; fi\nsudo apt-get update\nsudo apt-get install -y build-essential pkg-config curl ca-certificates libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libmpv-dev libssl-dev patchelf ffmpeg python3 util-linux\nif ! command -v node >/dev/null 2>&1; then\n  if command -v nvm >/dev/null 2>&1; then nvm install --lts; else sudo apt-get install -y nodejs npm; fi\nfi\nnode -e 'const [major, minor] = process.versions.node.split(\".\").map(Number); if (!(major === 20 && minor >= 19 || major === 22 && minor >= 12 || major >= 24)) { console.error(\"Vite needs Node 20.19+, 22.12+, or 24+. Update Node and rerun setup.\"); process.exit(1); }'\nif ! command -v pnpm >/dev/null 2>&1; then\n  if ! command -v npm >/dev/null 2>&1; then sudo apt-get install -y npm; fi\n  npm install --global --prefix \"$HOME/.local\" pnpm@10\nfi\nif ! command -v rustup >/dev/null 2>&1; then\n  installer=$(mktemp)\n  curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o \"$installer\"\n  sh \"$installer\" -y --default-toolchain none\n  rm -f \"$installer\"\nfi\nrustup show\nrustup component add clippy rustfmt\ncargo install tauri-cli --version '^2' --locked\npnpm install --frozen-lockfile\ncargo fetch --locked\nprintf '\\nDevelopment dependencies are ready. Run Downlink: Start dev.\\n'\n"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      },
+      "runOptions": {
+        "instanceLimit": 1
+      }
     }
   ]
 }
