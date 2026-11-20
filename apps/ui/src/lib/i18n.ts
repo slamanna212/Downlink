@@ -53,6 +53,7 @@ export const en = {
   'loading.channels': 'Fetching channels…',
   'loading.guide': 'Fetching guide…',
   'button.loading': 'Loading',
+  'button.loadMore': 'Load more',
   'player.idle': 'Nothing playing',
   'player.state.Resolving': 'Resolving stream…',
   'player.state.Connecting': 'Connecting…',

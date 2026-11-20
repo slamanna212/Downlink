@@ -224,6 +224,7 @@ export interface AppError {
 }
 
 export interface CatalogUpdated {
+  scope?: 'status' | 'channels' | 'guide' | 'recordings' | 'syncComplete' | 'sources';
   sourceId: number;
   channels: number;
   groups: number;
@@ -428,6 +429,7 @@ export interface VodCategory {
   id: number;
   name: string;
   count: number;
+  countPending?: boolean;
 }
 
 export interface VodListArgs {

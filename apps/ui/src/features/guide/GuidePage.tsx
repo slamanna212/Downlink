@@ -6,7 +6,7 @@ import { Menu, SegmentedControl, Select } from '@mantine/core';
 import { IconCalendar } from '@tabler/icons-react';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { invoke } from '../../api/ipc';
-import { useCaps, useCounts, useGroups, useOffline, useSources } from '../../api/queries';
+import { invalidateFavourites, useCaps, useCounts, useGroups, useOffline, useSources } from '../../api/queries';
 import type { Channel, Programme } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
@@ -288,35 +288,45 @@ export function GuidePage() {
 
   // ---- data: chunks of (channels x time) ----
   const chunks = useMemo(() => (range ? neededChunks(range, geo.rangeStart) : { c: [], t: [] }), [range, geo.rangeStart]);
+  const channelPages = useQueries({
+    queries: chunks.c.map((c) => ({
+      queryKey: ['catalog', 'channels', 'guide', groupId, c],
+      queryFn: () => invoke('list_channels', { groupId, offset: c * CHANNEL_CHUNK, limit: CHANNEL_CHUNK }),
+      staleTime: 60_000,
+    })),
+  });
   const queries = useQueries({
-    queries: chunks.c.flatMap((c) =>
-      chunks.t.map((ti) => {
+    queries: chunks.c.flatMap((c, page) => {
+      const channelIds = channelPages[page]?.data?.map((ch) => ch.id) ?? [];
+      return chunks.t.map((ti) => {
         const start = geo.rangeStart + ti * TIME_CHUNK;
         return {
-          queryKey: ['catalog', 'guide', groupId, c, ti, geo.rangeStart],
-          queryFn: () => invoke('get_guide', { start, end: start + TIME_CHUNK, channelOffset: c * CHANNEL_CHUNK, channelLimit: CHANNEL_CHUNK, groupId }),
+          queryKey: ['catalog', 'guideProgrammes', c, channelIds, start],
+          queryFn: () => invoke('get_programme_window', { start, end: start + TIME_CHUNK, channelIds }),
+          enabled: channelIds.length > 0,
           staleTime: 60_000,
         };
-      }),
-    ),
+      });
+    }),
   });
-  const dataKey = queries.map((q) => q.dataUpdatedAt).join(',');
+  const dataKey = [...channelPages, ...queries].map((q) => q.dataUpdatedAt).join(',');
   const { byChannel, rowChannel, loadedChunks } = useMemo(() => {
     const list: Programme[][] = [];
     const rc = new Map<number, Channel>();
     const done = new Set<string>();
     let i = 0;
-    for (const c of chunks.c)
+    for (const [page, c] of chunks.c.entries()) {
+      const channels = channelPages[page]?.data;
+      channels?.forEach((ch, k) => rc.set(c * CHANNEL_CHUNK + k, ch));
       for (const ti of chunks.t) {
-        const d = queries[i++]?.data;
-        if (!d) continue;
-        done.add(`${c}:${ti}`);
-        list.push(d.programmes);
-        d.channels.forEach((ch, k) => rc.set(c * CHANNEL_CHUNK + k, ch));
+        const programmes = queries[i++]?.data;
+        if (programmes) list.push(programmes);
+        if (programmes || channels?.length === 0) done.add(`${c}:${ti}`);
       }
+    }
     return { byChannel: mergeProgrammes(list), rowChannel: rc, loadedChunks: done };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataKey, chunks]);
+  }, [dataKey, chunks, groupId, geo.rangeStart]);
 
   const channelFor = useCallback((row: number) => rowChannel.get(row), [rowChannel]);
   const listFor = useCallback((row: number) => {
@@ -362,11 +372,10 @@ export function GuidePage() {
 
   const favourite = useMutation({
     mutationFn: (v: { channelId: number; favourite: boolean }) => invoke('set_favourite', v),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog'] }),
+    onSuccess: () => invalidateFavourites(qc),
   });
   const record = useMutation({
     mutationFn: (v: { programmeId: string; kind: 'once' | 'series' }) => invoke('schedule_recording', v),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog', 'guide'] }),
   });
 
   const activate = useCallback(

@@ -1,12 +1,12 @@
 //! VOD cache, recordings and DVR rules. Local row ids are what the UI sees.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use sqlx::FromRow;
 
 use super::Store;
 use crate::error::Result;
-use crate::source::{RecStatus, RecordingInfo, RuleInfo, VodItem};
+use crate::source::{RecStatus, RecordingInfo, RuleInfo, VodItem, VodKind};
 
 #[derive(Debug, Clone, PartialEq, FromRow)]
 pub struct VodRow {
@@ -75,15 +75,62 @@ impl Store {
         items: &[VodItem],
         now: i64,
     ) -> Result<Vec<VodRow>> {
+        let items: Vec<_> = items.iter().filter_map(|it| Some((it.kind?, it))).collect();
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut tx = self.pool().begin().await?;
         let mut out = Vec::with_capacity(items.len());
-        for it in items {
-            let Some(kind) = it.kind else { continue };
-            let row: VodRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-                "INSERT INTO vod_item (source_id, kind, ext_id, parent_ext, name, year, rating, genre, description,
-                   season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext, updated_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                 ON CONFLICT(source_id, kind, ext_id) DO UPDATE SET
+        for batch in items.chunks(50) {
+            let unique: HashSet<_> = batch.iter().map(|(kind, it)| (*kind, &it.ext_id)).collect();
+            if unique.len() == batch.len() {
+                out.extend(Self::write_vod_items(&mut tx, source_id, batch, now).await?);
+            } else {
+                // Preserve the intermediate row returned by each occurrence of a duplicate.
+                for item in batch {
+                    out.extend(
+                        Self::write_vod_items(&mut tx, source_id, std::slice::from_ref(item), now)
+                            .await?,
+                    );
+                }
+            }
+        }
+        tx.commit().await?;
+        Ok(out)
+    }
+
+    async fn write_vod_items(
+        db: &mut sqlx::SqliteConnection,
+        source_id: i64,
+        items: &[(VodKind, &VodItem)],
+        now: i64,
+    ) -> Result<Vec<VodRow>> {
+        let mut query = sqlx::QueryBuilder::new(
+            "INSERT INTO vod_item (source_id, kind, ext_id, parent_ext, name, year, rating, genre, description,
+                   season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext, updated_at) ",
+        );
+        query.push_values(items, |mut b, &(kind, it)| {
+            b.push_bind(source_id)
+                .push_bind(kind.as_str())
+                .push_bind(&it.ext_id)
+                .push_bind(&it.parent_ext)
+                .push_bind(&it.title)
+                .push_bind(it.year)
+                .push_bind(&it.rating)
+                .push_bind(&it.genre)
+                .push_bind(&it.plot)
+                .push_bind(it.season)
+                .push_bind(it.episode)
+                .push_bind(it.duration_secs)
+                .push_bind(&it.poster)
+                .push_bind(&it.backdrop)
+                .push_bind(&it.uuid)
+                .push_bind(&it.container)
+                .push_bind(&it.category_ext)
+                .push_bind(now);
+        });
+        query.push(format!(
+            " ON CONFLICT(source_id, kind, ext_id) DO UPDATE SET
                    parent_ext = coalesce(excluded.parent_ext, vod_item.parent_ext), name = excluded.name,
                    year = coalesce(excluded.year, vod_item.year), rating = coalesce(excluded.rating, vod_item.rating),
                    genre = coalesce(excluded.genre, vod_item.genre),
@@ -94,32 +141,51 @@ impl Store {
                    backdrop_key = coalesce(excluded.backdrop_key, vod_item.backdrop_key),
                    uuid = coalesce(excluded.uuid, vod_item.uuid), container = coalesce(excluded.container, vod_item.container),
                    category_ext = coalesce(excluded.category_ext, vod_item.category_ext), updated_at = excluded.updated_at
-                 RETURNING {VOD_COLS}"
-            )))
-            .bind(source_id)
-            .bind(kind.as_str())
-            .bind(&it.ext_id)
-            .bind(&it.parent_ext)
-            .bind(&it.title)
-            .bind(it.year)
-            .bind(&it.rating)
-            .bind(&it.genre)
-            .bind(&it.plot)
-            .bind(it.season)
-            .bind(it.episode)
-            .bind(it.duration_secs)
-            .bind(&it.poster)
-            .bind(&it.backdrop)
-            .bind(&it.uuid)
-            .bind(&it.container)
-            .bind(&it.category_ext)
-            .bind(now)
-            .fetch_one(&mut *tx)
+
+                 RETURNING {VOD_COLS}",
+        ));
+        let rows: Vec<VodRow> = query
+            .build_query_as()
+            .persistent(matches!(items.len(), 1 | 50))
+            .fetch_all(db)
             .await?;
-            out.push(row);
-        }
-        tx.commit().await?;
-        Ok(out)
+        let order: HashMap<_, _> = items
+            .iter()
+            .enumerate()
+            .map(|(index, (kind, it))| ((kind.as_str(), it.ext_id.as_str()), index))
+            .collect();
+        let mut rows = rows;
+        rows.sort_by_key(|r| order.get(&(r.kind.as_str(), r.ext_id.as_str())).copied());
+        Ok(rows)
+    }
+
+    pub(crate) async fn vod_resumes(&self, ids: &[i64]) -> Result<HashMap<i64, super::ResumeRow>> {
+        let rows = sqlx::query(
+            "SELECT v.id, r.source_id, r.kind, r.item_key, r.position_ms, r.duration_ms, r.updated_at
+             FROM vod_item v JOIN resume r
+               ON r.source_id = v.source_id AND r.kind = v.kind AND r.item_key = v.ext_id
+             WHERE v.id IN (SELECT value FROM json_each(?))",
+        )
+        .bind(serde_json::to_string(ids)?)
+        .try_map(|row| {
+            use sqlx::Row;
+            Ok((row.try_get("id")?, super::ResumeRow::from_row(&row)?))
+        })
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
+    pub(crate) async fn vod_season_counts(&self, ids: &[i64]) -> Result<HashMap<i64, i64>> {
+        let rows: Vec<(i64, i64)> = sqlx::query_as(
+            "SELECT v.id, (SELECT count(DISTINCT coalesce(e.season, 0)) FROM vod_item e
+               WHERE e.source_id = v.source_id AND e.kind = 'episode' AND e.parent_ext = v.ext_id)
+             FROM vod_item v WHERE v.id IN (SELECT value FROM json_each(?))",
+        )
+        .bind(serde_json::to_string(ids)?)
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows.into_iter().collect())
     }
 
     pub async fn vod_item(&self, id: i64) -> Result<Option<VodRow>> {

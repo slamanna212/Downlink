@@ -134,7 +134,29 @@ pub async fn list_channels(
     let vis = visibility_sql(f);
     let search = f.search.as_deref().and_then(fts_query);
     let numeric: Option<f64> = f.search.as_deref().and_then(|s| s.trim().parse().ok());
-    let sql = if search.is_some() {
+    if search.is_none() {
+        let mut sql = sqlx::QueryBuilder::new(format!("SELECT {COLS} FROM channel c"));
+        if f.favourites_only {
+            sql.push(" JOIN favourite f ON f.channel_id = c.id AND f.deleted = 0");
+        }
+        sql.push(format!(" WHERE {vis}"));
+        if let Some(id) = f.source_id {
+            sql.push(" AND c.source_id = ").push_bind(id);
+        }
+        if let Some(id) = f.group_id {
+            sql.push(" AND c.group_id = ").push_bind(id);
+        }
+        sql.push(" ORDER BY ");
+        if f.favourites_only {
+            sql.push("f.position, ");
+        }
+        sql.push("c.number IS NULL, c.number, c.sort_key, c.id LIMIT ")
+            .push_bind(limit)
+            .push(" OFFSET ")
+            .push_bind(offset);
+        return Ok(sql.build_query_as().fetch_all(store.pool()).await?);
+    }
+    let sql = {
         // Two stages so a broad prefix ("ne") never sorts every match: FTS yields up to CANDIDATES
         // matches (bm25 `rank` is evaluated only for those, never for every match of a broad prefix); exact number matches are added via the number index; the
         // outer query then orders by number proximity, then rank.
@@ -153,18 +175,7 @@ pub async fn list_channels(
                AND (?7 = 0 OR c.id IN (SELECT channel_id FROM favourite WHERE deleted = 0))
              ORDER BY CASE WHEN ?4 IS NOT NULL AND c.number = ?4 THEN 0 ELSE 1 END,
                       CASE WHEN ?4 IS NULL THEN 0 ELSE abs(coalesce(c.number, 1e9) - ?4) END,
-                      m.rank, c.number, c.sort_key
-             LIMIT ?5 OFFSET ?6"
-        )
-    } else {
-        format!(
-            "SELECT {COLS} FROM channel c
-             WHERE {vis} AND (?2 IS NULL OR c.source_id = ?2) AND (?3 IS NULL OR c.group_id = ?3)
-               AND (?1 IS NULL OR 1 = 1) AND (?4 IS NULL OR 1 = 1)
-               AND (?7 = 0 OR c.id IN (SELECT channel_id FROM favourite WHERE deleted = 0))
-             ORDER BY CASE WHEN ?7 = 0 THEN 0
-                           ELSE (SELECT position FROM favourite f WHERE f.channel_id = c.id) END,
-                      c.number IS NULL, c.number, c.sort_key
+                      m.rank, c.number, c.sort_key, c.id
              LIMIT ?5 OFFSET ?6"
         )
     };
@@ -273,15 +284,15 @@ pub async fn channel_by_number(
     number: f64,
 ) -> Result<Option<ChannelRow>> {
     let vis = visibility_sql(f);
-    let sql = format!(
-        "SELECT {COLS} FROM channel c WHERE {vis} AND (?1 IS NULL OR c.source_id = ?1)
-           AND c.number >= ?2 ORDER BY c.number, c.sort_key LIMIT 1"
-    );
-    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
-        .bind(f.source_id)
-        .bind(number)
-        .fetch_optional(store.pool())
-        .await?)
+    let mut query = sqlx::QueryBuilder::new(format!(
+        "SELECT {COLS} FROM channel c WHERE {vis} AND (c.number IS NULL) = 0 AND c.number >= "
+    ));
+    query.push_bind(number);
+    if let Some(id) = f.source_id {
+        query.push(" AND c.source_id = ").push_bind(id);
+    }
+    query.push(" ORDER BY c.number, c.sort_key, c.id LIMIT 1");
+    Ok(query.build_query_as().fetch_optional(store.pool()).await?)
 }
 
 /// Total visible channel count for a filter (ignores `search`; honours `favourites_only`).

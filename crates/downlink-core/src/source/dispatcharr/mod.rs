@@ -176,7 +176,11 @@ pub struct DispatcharrClient {
     epg_map: tokio::sync::Mutex<Option<(std::time::Instant, EpgMap)>>,
     /// `m3u account id -> name` for the stream picker (see [`ACCOUNT_NAMES_TTL`]).
     account_names: tokio::sync::Mutex<Option<(std::time::Instant, AccountNames)>>,
+    vod_categories: tokio::sync::Mutex<HashMap<VodKind, CachedVodCategories>>,
 }
+
+type CachedVodCategories = (std::time::Instant, Vec<VodCategoryInfo>);
+const VOD_CATEGORY_TTL: Duration = Duration::from_secs(120);
 
 /// `m3u account id -> name`.
 type AccountNames = std::sync::Arc<HashMap<i64, String>>;
@@ -276,6 +280,7 @@ impl DispatcharrClient {
             can_switch: std::sync::atomic::AtomicBool::new(false),
             epg_map: tokio::sync::Mutex::new(None),
             account_names: tokio::sync::Mutex::new(None),
+            vod_categories: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -1386,11 +1391,22 @@ impl Source for DispatcharrClient {
         DispatcharrClient::catchup_position(self, s, position_secs).await
     }
 
+    async fn vod_category_names(&self, kind: VodKind) -> Result<Vec<VodCategoryInfo>> {
+        self.cached_vod_categories(kind).await
+    }
+
     async fn vod_categories(&self, kind: VodKind) -> Result<Vec<VodCategoryInfo>> {
-        let mut cats = self.vod_category_list(kind).await?;
-        // Item counts: one cheap request per category (the UI shows them in the filter chips).
-        for c in cats.iter_mut().take(80) {
-            c.count = self.vod_category_count(kind, &c.name).await.ok();
+        use futures_util::{StreamExt, stream};
+
+        let mut cats = self.cached_vod_categories(kind).await?;
+        let names: Vec<_> = cats.iter().take(80).map(|c| c.name.clone()).collect();
+        let counts = stream::iter(names)
+            .map(|name| async move { self.vod_category_count(kind, &name).await.ok() })
+            .buffered(MAX_CONCURRENT)
+            .collect::<Vec<_>>()
+            .await;
+        for (category, count) in cats.iter_mut().zip(counts) {
+            category.count = count;
         }
         Ok(cats)
     }

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Drawer, Menu, UnstyledButton } from '@mantine/core';
 import { IconStar, IconLayoutGrid } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
-import { useCaps, useChannels, useOffline } from '../../api/queries';
+import { invalidateFavourites, useCaps, useChannel, useOffline } from '../../api/queries';
 import type { Programme } from '../../api/types';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
@@ -32,8 +32,7 @@ export function ChannelDetail() {
   const { caps } = useCaps();
   const offline = useOffline();
   const now = useNowEpoch(30_000);
-  const channels = useChannels({});
-  const channel = useMemo(() => channels.data?.find((c) => c.id === open?.channelId), [channels.data, open?.channelId]);
+  const { data: channel } = useChannel(open?.channelId ?? null);
 
   // Schedule: from the earlier of (archive window start, today) to end of tomorrow.
   const range = useMemo(() => {
@@ -51,11 +50,10 @@ export function ChannelDetail() {
 
   const favourite = useMutation({
     mutationFn: (v: { channelId: number; favourite: boolean }) => invoke('set_favourite', v),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog'] }),
+    onSuccess: () => invalidateFavourites(qc),
   });
   const record = useMutation({
     mutationFn: (v: { programmeId: string; kind: 'once' | 'series' }) => invoke('schedule_recording', v),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog'] }),
   });
 
   const watch = (p: Programme) => {

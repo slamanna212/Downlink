@@ -24,7 +24,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { inTauri, invoke, listen } from '../../api/ipc';
-import { useChannels, useNowNextWindow, useSources } from '../../api/queries';
+import { invalidateFavourites, useChannel, useNowNextWindow, useSources } from '../../api/queries';
 import type { AppError, Channel, PlayerState, SessionStats } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
@@ -34,7 +34,7 @@ import { Icon } from '../../components/Icon/Icon';
 import { notifyInfo } from '../../components/Notify/notify';
 import { SeekBar } from '../../components/SeekBar/SeekBar';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
-import { appendDigit, matchChannelNumber, NUMBER_ENTRY_TIMEOUT_MS } from '../../lib/numberEntry';
+import { appendDigit, NUMBER_ENTRY_TIMEOUT_MS } from '../../lib/numberEntry';
 import { dayLabel, formatClock, formatClockSeconds, formatDuration, formatRange, progress } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
 import { useVideoBounds } from '../../lib/useVideoBounds';
@@ -220,9 +220,8 @@ export function PlayerPage() {
   const rootRef = useRef<HTMLDivElement | null>(null);
   useVideoBounds(rootRef);
 
-  const channels = useChannels({});
   const sources = useSources();
-  const channel = useMemo(() => channels.data?.find((c) => c.id === player.channelId), [channels.data, player.channelId]);
+  const { data: channel } = useChannel(player.channelId);
   const channelRef = useRef<Channel | undefined>(channel);
   useEffect(() => {
     channelRef.current = channel;
@@ -244,6 +243,7 @@ export function PlayerPage() {
   const [entry, setEntry] = useState('');
   const [entryMiss, setEntryMiss] = useState(false);
   const [resumeDismissed, setResumeDismissed] = useState<string | null>(null);
+  const entryRequest = useRef(0);
   const entryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idle = useIdle(dl.controlsIdleMs, { events: ['mousemove', 'keydown', 'touchstart', 'click'], initialState: false });
 
@@ -291,7 +291,7 @@ export function PlayerPage() {
     if (st.channelId == null || !ch) return;
     const favourite = !ch.isFavourite;
     void invoke('set_favourite', { channelId: ch.id, favourite }).then(() => {
-      void qc.invalidateQueries({ queryKey: ['catalog'] });
+      void invalidateFavourites(qc);
       notifyInfo(t(favourite ? 'player.favouriteAdded' : 'player.favouriteRemoved', { name: ch.name }));
     });
   }, [qc]);
@@ -318,6 +318,7 @@ export function PlayerPage() {
   }, [navigate]);
 
   const clearEntry = useCallback(() => {
+    entryRequest.current++;
     if (entryTimer.current) clearTimeout(entryTimer.current);
     entryTimer.current = null;
     setEntry('');
@@ -325,19 +326,23 @@ export function PlayerPage() {
 
   const commitEntry = useCallback(
     (value: string) => {
-      const match = matchChannelNumber(value, channels.data ?? []);
       clearEntry();
-      if (match) void playChannel(match.id);
-      else {
+      const request = entryRequest.current;
+      void invoke('find_channel_number', { number: Number(value) }).then((id) => {
+        if (request !== entryRequest.current) return;
+        if (id != null) {
+          void playChannel(id);
+          return;
+        }
         setEntryMiss(true);
         setEntry(value);
         entryTimer.current = setTimeout(() => {
           setEntryMiss(false);
           setEntry('');
         }, 1200);
-      }
+      }).catch(() => undefined);
     },
-    [channels.data, clearEntry],
+    [clearEntry],
   );
 
   useEffect(() => {
@@ -368,6 +373,7 @@ export function PlayerPage() {
       }
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
+        entryRequest.current++;
         setEntryMiss(false);
         const next = appendDigit(entry, e.key);
         setEntry(next);
@@ -401,7 +407,10 @@ export function PlayerPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [mini, toggleMini, entry, infoOpen, menu, hasAudioMenu, hasSubMenu, fullscreen, toggleFavourite, commitEntry, clearEntry, togglePause, toggleMute, toggleFullscreen, goBack, seekBy, restart, goLive]);
 
-  useEffect(() => () => { if (entryTimer.current) clearTimeout(entryTimer.current); }, []);
+  useEffect(() => () => {
+    entryRequest.current++;
+    if (entryTimer.current) clearTimeout(entryTimer.current);
+  }, []);
 
   const showStatus = player.reconnecting || ['Resolving', 'Connecting', 'Buffering'].includes(player.state);
   const catchup = player.mode === 'catchup';

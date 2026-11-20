@@ -50,6 +50,9 @@ export interface Commands {
     args: { groupId?: number | null; query?: string | null; favouritesOnly?: boolean; offset?: number; limit?: number };
     result: Channel[];
   };
+  find_channel_number: { args: { number: number }; result: number | null };
+  get_channel: { args: { channelId: number }; result: Channel };
+  get_programme_window: { args: { channelIds: number[]; start: number; end: number }; result: Programme[] };
   get_now_next: { args: { channelIds: number[] }; result: NowNext[] };
   get_player_state: { args: Record<string, never>; result: PlayerState };
   play_channel: { args: { channelId: number }; result: null };
@@ -88,10 +91,10 @@ export interface Commands {
   get_update_status: { args: Record<string, never>; result: UpdateStatus };
   set_update_channel: { args: { channel: UpdateChannel }; result: UpdateStatus };
   check_for_updates: { args: Record<string, never>; result: UpdateStatus };
-  list_vod_categories: { args: { kind: 'movie' | 'series' }; result: VodCategory[] };
-  list_movies: { args: VodListArgs; result: Movie[] };
+  list_vod_categories: { args: { kind: 'movie' | 'series'; withCounts?: boolean }; result: VodCategory[] };
+  list_movies: { args: VodListArgs & { compact?: boolean }; result: Movie[] };
   get_movie: { args: { id: number }; result: Movie };
-  list_series: { args: VodListArgs; result: Series[] };
+  list_series: { args: VodListArgs & { compact?: boolean }; result: Series[] };
   get_series: { args: { id: number }; result: SeriesDetail };
   play_vod: { args: PlayVodArgs; result: null };
   list_recordings: { args: Record<string, never>; result: RecordingsData };

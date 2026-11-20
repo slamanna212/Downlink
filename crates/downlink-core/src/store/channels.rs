@@ -114,28 +114,155 @@ impl Store {
         channels: &[ChannelUpsert],
         group_ids: &HashMap<String, i64>,
     ) -> Result<UpsertCounts> {
-        let mut tx = self.pool().begin().await?;
+        let mut tx = self.pool().begin_with("BEGIN IMMEDIATE").await?;
         let existing: Vec<(i64, String)> =
             sqlx::query_as("SELECT id, ext_id FROM channel WHERE source_id = ?")
                 .bind(source_id)
                 .fetch_all(&mut *tx)
                 .await?;
-        let existing: HashMap<String, i64> = existing.into_iter().map(|(i, e)| (e, i)).collect();
+        let mut existing: HashMap<String, i64> =
+            existing.into_iter().map(|(i, e)| (e, i)).collect();
+        let prior_streams: Vec<(i64, String, i64)> = sqlx::query_as(
+            "SELECT s.channel_id, s.stream_id, s.position FROM channel_stream s
+             JOIN channel c ON c.id = s.channel_id WHERE c.source_id = ?
+             ORDER BY s.channel_id, s.position",
+        )
+        .bind(source_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut stored_streams: HashMap<i64, Vec<(String, i64)>> = HashMap::new();
+        for (id, stream, position) in prior_streams {
+            stored_streams
+                .entry(id)
+                .or_default()
+                .push((stream, position));
+        }
+        let existing_ids: HashSet<i64> = existing.values().copied().collect();
+        let mut stream_changes = HashMap::new();
         let mut counts = UpsertCounts::default();
         let mut seen: HashSet<i64> = HashSet::with_capacity(channels.len());
 
+        for batch in channels.chunks(40) {
+            let changed = Self::write_channels(&mut tx, source_id, batch, group_ids).await?;
+            existing.extend(changed.into_iter().map(|(id, ext_id)| (ext_id, id)));
+        }
+
         for c in channels {
+            let id = *existing.get(&c.ext_id).ok_or_else(|| {
+                crate::error::AppError::local("A synced channel could not be found.")
+            })?;
+            if existing_ids.contains(&id) {
+                counts.updated += 1;
+            } else {
+                counts.inserted += 1;
+            }
+            seen.insert(id);
+
+            let mut unique = HashSet::new();
+            let streams: Vec<_> = c
+                .streams
+                .iter()
+                .enumerate()
+                .filter_map(|(pos, stream)| {
+                    unique
+                        .insert(stream)
+                        .then_some((stream.as_str(), pos as i64))
+                })
+                .collect();
+            let same = stored_streams
+                .get(&id)
+                .into_iter()
+                .flatten()
+                .map(|(stream, pos)| (stream.as_str(), *pos))
+                .eq(streams.iter().copied());
+            if same {
+                stream_changes.remove(&id);
+            } else {
+                stream_changes.insert(id, streams);
+            }
+        }
+
+        if !stream_changes.is_empty() {
+            let ids: Vec<_> = stream_changes.keys().copied().collect();
+            sqlx::query(
+                "DELETE FROM channel_stream WHERE channel_id IN (SELECT value FROM json_each(?))",
+            )
+            .bind(serde_json::to_string(&ids)?)
+            .execute(&mut *tx)
+            .await?;
+            let entries: Vec<_> = stream_changes
+                .iter()
+                .flat_map(|(&id, streams)| {
+                    streams.iter().map(move |&(stream, pos)| (id, stream, pos))
+                })
+                .collect();
+            for batch in entries.chunks(300) {
+                let mut query = sqlx::QueryBuilder::new(
+                    "INSERT INTO channel_stream (channel_id, stream_id, position) ",
+                );
+                query.push_values(batch, |mut values, &(id, stream, pos)| {
+                    values.push_bind(id).push_bind(stream).push_bind(pos);
+                });
+                query
+                    .build()
+                    .persistent(batch.len() == 300)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+        let removed: Vec<_> = existing_ids.difference(&seen).copied().collect();
+        if !removed.is_empty() {
+            sqlx::query("DELETE FROM channel WHERE id IN (SELECT value FROM json_each(?))")
+                .bind(serde_json::to_string(&removed)?)
+                .execute(&mut *tx)
+                .await?;
+            counts.removed = removed.len();
+        }
+        tx.commit().await?;
+        Ok(counts)
+    }
+
+    async fn write_channels(
+        tx: &mut sqlx::SqliteConnection,
+        source_id: i64,
+        channels: &[ChannelUpsert],
+        group_ids: &HashMap<String, i64>,
+    ) -> Result<Vec<(i64, String)>> {
+        let mut query = sqlx::QueryBuilder::new(
+            "INSERT INTO channel (source_id, ext_id, uuid, number, name, group_id, tvg_id, tvg_name, logo_key,
+                   quality, is_adult, is_radio, is_drm, catchup_days, catchup_template, stream_redirect,
+                   play_url, play_headers, epg_match, sort_key, epg_shift_secs) ",
+        );
+        query.push_values(channels, |mut b, c| {
             let group_id = c
                 .group_ext_id
                 .as_ref()
-                .and_then(|g| group_ids.get(g))
+                .and_then(|key| group_ids.get(key))
                 .copied();
-            let id: i64 = sqlx::query_scalar(
-                "INSERT INTO channel (source_id, ext_id, uuid, number, name, group_id, tvg_id, tvg_name, logo_key,
-                   quality, is_adult, is_radio, is_drm, catchup_days, catchup_template, stream_redirect,
-                   play_url, play_headers, epg_match, sort_key, epg_shift_secs)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                 ON CONFLICT(source_id, ext_id) DO UPDATE SET
+            b.push_bind(source_id)
+                .push_bind(&c.ext_id)
+                .push_bind(&c.uuid)
+                .push_bind(c.number)
+                .push_bind(&c.name)
+                .push_bind(group_id)
+                .push_bind(&c.tvg_id)
+                .push_bind(&c.tvg_name)
+                .push_bind(&c.logo_key)
+                .push_bind(&c.quality)
+                .push_bind(c.is_adult)
+                .push_bind(c.is_radio)
+                .push_bind(c.is_drm)
+                .push_bind(c.catchup_days)
+                .push_bind(&c.catchup_template)
+                .push_bind(c.stream_redirect)
+                .push_bind(&c.play_url)
+                .push_bind(&c.play_headers)
+                .push_bind(&c.epg_match)
+                .push_bind(&c.sort_key)
+                .push_bind(c.epg_shift_secs);
+        });
+        query.push(
+            " ON CONFLICT(source_id, ext_id) DO UPDATE SET
                    uuid=excluded.uuid, number=excluded.number, name=excluded.name,
                    group_id=excluded.group_id, tvg_id=excluded.tvg_id, tvg_name=excluded.tvg_name, logo_key=excluded.logo_key,
                    quality=excluded.quality, is_adult=excluded.is_adult, is_radio=excluded.is_radio,
@@ -144,63 +271,24 @@ impl Store {
                    play_url=excluded.play_url, play_headers=excluded.play_headers,
                    epg_match=CASE WHEN channel.epg_match IN ('name','display','manual') THEN channel.epg_match ELSE excluded.epg_match END,
                    sort_key=excluded.sort_key, epg_shift_secs=excluded.epg_shift_secs
-                 RETURNING id",
-            )
-            .bind(source_id)
-            .bind(&c.ext_id)
-            .bind(&c.uuid)
-            .bind(c.number)
-            .bind(&c.name)
-            .bind(group_id)
-            .bind(&c.tvg_id)
-            .bind(&c.tvg_name)
-            .bind(&c.logo_key)
-            .bind(&c.quality)
-            .bind(c.is_adult)
-            .bind(c.is_radio)
-            .bind(c.is_drm)
-            .bind(c.catchup_days)
-            .bind(&c.catchup_template)
-            .bind(c.stream_redirect)
-            .bind(&c.play_url)
-            .bind(&c.play_headers)
-            .bind(&c.epg_match)
-            .bind(&c.sort_key)
-            .bind(c.epg_shift_secs)
-            .fetch_one(&mut *tx)
-            .await?;
-            if existing.contains_key(&c.ext_id) {
-                counts.updated += 1;
-            } else {
-                counts.inserted += 1;
-            }
-            seen.insert(id);
-
-            sqlx::query("DELETE FROM channel_stream WHERE channel_id = ?")
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
-            for (pos, sid) in c.streams.iter().enumerate() {
-                sqlx::query(
-                    "INSERT OR IGNORE INTO channel_stream (channel_id, stream_id, position) VALUES (?, ?, ?)",
-                )
-                .bind(id)
-                .bind(sid)
-                .bind(pos as i64)
-                .execute(&mut *tx)
-                .await?;
-            }
-        }
-
-        for id in existing.values().filter(|i| !seen.contains(i)) {
-            sqlx::query("DELETE FROM channel WHERE id = ?")
-                .bind(id)
-                .execute(&mut *tx)
-                .await?;
-            counts.removed += 1;
-        }
-        tx.commit().await?;
-        Ok(counts)
+                 WHERE (channel.uuid, channel.number, channel.name, channel.group_id, channel.tvg_id,
+                        channel.tvg_name, channel.logo_key, channel.quality, channel.is_adult,
+                        channel.is_radio, channel.is_drm, channel.catchup_days, channel.catchup_template,
+                        channel.stream_redirect, channel.play_url, channel.play_headers, channel.epg_match,
+                        channel.sort_key, channel.epg_shift_secs)
+                    IS NOT (excluded.uuid, excluded.number, excluded.name, excluded.group_id, excluded.tvg_id,
+                            excluded.tvg_name, excluded.logo_key, excluded.quality, excluded.is_adult,
+                            excluded.is_radio, excluded.is_drm, excluded.catchup_days, excluded.catchup_template,
+                            excluded.stream_redirect, excluded.play_url, excluded.play_headers,
+                            CASE WHEN channel.epg_match IN ('name','display','manual') THEN channel.epg_match ELSE excluded.epg_match END,
+                            excluded.sort_key, excluded.epg_shift_secs)
+                 RETURNING id, ext_id",
+        );
+        Ok(query
+            .build_query_as()
+            .persistent(channels.len() == 40)
+            .fetch_all(tx)
+            .await?)
     }
 
     pub async fn channel(&self, id: i64) -> Result<Option<ChannelRow>> {

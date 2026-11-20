@@ -7,7 +7,7 @@ import { IconLayoutList, IconList, IconSearch } from '@tabler/icons-react';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { invoke } from '../../api/ipc';
 import type { NowNext, RecordKind } from '../../api/types';
-import { useCaps, useChannels, useCounts, useGroups, useNowNextWindow, useOffline } from '../../api/queries';
+import { invalidateFavourites, useCaps, useChannelPages, useCounts, useGroups, useNowNextWindow, useOffline } from '../../api/queries';
 import { dl } from '../../theme';
 import { Icon } from '../../components/Icon/Icon';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
@@ -27,6 +27,8 @@ import { GroupSidebar, selectionKey, type GroupSelection } from './GroupSidebar'
 import classes from './Channels.module.css';
 
 const WINDOW = 50;
+const CHANNEL_PAGE = 150;
+const RECENT_PROGRAMMES = 9 * WINDOW;
 
 export function ChannelsPage() {
   const navigate = useNavigate();
@@ -50,12 +52,18 @@ export function ChannelsPage() {
 
   const groups = useGroups();
   const counts = useCounts();
-  const list = useChannels({
+  const list = useChannelPages({
     groupId: selection.kind === 'group' ? selection.id : null,
     favouritesOnly: selection.kind === 'favourites',
     query: deferred.trim() || null,
-  });
-  const channels = useMemo(() => list.data ?? [], [list.data]);
+  }, CHANNEL_PAGE, hasSource);
+  const channels = useMemo(() => list.data?.pages.flat() ?? [], [list.data]);
+  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } = list;
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage && !isFetchNextPageError && firstVisible >= channels.length - 35) {
+      void fetchNextPage();
+    }
+  }, [hasNextPage, isFetchingNextPage, isFetchNextPageError, firstVisible, channels.length, fetchNextPage]);
   useInteractive(channels.length > 0);
   const rowH = dl.density[density].channelRow;
 
@@ -76,23 +84,28 @@ export function ChannelsPage() {
     [channels, windowIndex],
   );
   const nowNext = useNowNextWindow(windowIds, `${selectionKey(selection)}|${deferred}|${windowIndex}`);
-  // Merge every window's answer instead of replacing it: a fast scroll or scrollbar drag skips windows,
-  // and replacing made visible rows flip between "no guide" and their programme as each window loaded.
+  // Keep recent windows so fast scrolling doesn't flash empty programmes while a request loads.
   const [merged, setMerged] = useState<{ src: NowNext[] | undefined; byId: Map<number, NowNext> }>({ src: undefined, byId: new Map() });
   if (nowNext.data && !nowNext.isPlaceholderData && nowNext.data !== merged.src) {
     const byId = new Map(merged.byId);
-    for (const n of nowNext.data) byId.set(n.channelId, n);
+    for (const n of nowNext.data) {
+      byId.delete(n.channelId);
+      byId.set(n.channelId, n);
+    }
+    for (const id of byId.keys()) {
+      if (byId.size <= RECENT_PROGRAMMES) break;
+      byId.delete(id);
+    }
     setMerged({ src: nowNext.data, byId });
   }
   const nowNextById = merged.byId;
 
   const favourite = useMutation({
     mutationFn: (v: { channelId: number; favourite: boolean }) => invoke('set_favourite', v),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog'] }),
+    onSuccess: () => invalidateFavourites(qc),
   });
   const record = useMutation({
     mutationFn: (v: { programmeId: string; kind: RecordKind }) => invoke('schedule_recording', v),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog'] }),
   });
 
   // Scroll the row into the virtual window, then give it DOM focus once it is mounted (retries a few frames).
@@ -206,7 +219,11 @@ export function ChannelsPage() {
           <div className={classes.headerRow}>
             <h1 className={classes.title}>
               {title}
-              <span className={classes.count}>{channels.length}</span>
+              <span className={classes.count}>{deferred.trim()
+                ? `${channels.length}${hasNextPage ? '+' : ''}`
+                : selection.kind === 'all' ? counts.data?.all ?? channels.length
+                  : selection.kind === 'favourites' ? counts.data?.favourites ?? channels.length
+                    : groups.data?.find((g) => g.id === selection.id)?.count ?? channels.length}</span>
             </h1>
             <div className={classes.tools}>
               <TextInput
@@ -249,7 +266,7 @@ export function ChannelsPage() {
         </div>
         {list.isLoading ? (
           <SkeletonList rows={10} label={t('loading.channels')} />
-        ) : list.isError ? (
+        ) : list.isError && channels.length === 0 ? (
           <ErrorState onRetry={() => void list.refetch()} />
         ) : channels.length === 0 ? (
           <Text className={classes.empty}>{t('channels.empty')}</Text>
@@ -290,6 +307,7 @@ export function ChannelsPage() {
                 );
               })}
             </div>
+            {isFetchNextPageError && <ErrorState onRetry={() => void fetchNextPage()} />}
           </div>
         )}
       </section>

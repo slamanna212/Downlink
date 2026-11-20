@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Popover, SegmentedControl, Switch, TextInput, VisuallyHidden } from '@mantine/core';
 import {
   IconArrowsMaximize,
@@ -15,7 +15,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { inTauri, invoke, listen, toAppError } from '../../api/ipc';
-import { useChannels, useHome, useNowNextWindow } from '../../api/queries';
+import { channelQuery, useChannelPages, useHome, useNowNextWindow } from '../../api/queries';
 import type { Channel, MultiviewState, MultiviewTile } from '../../api/types';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
@@ -57,24 +57,21 @@ function useMultiviewState() {
 type PickerTab = 'favourites' | 'recent' | 'all';
 
 /** Channel picker for a slot: search plus Favourites / Recent / All; on-screen channels are disabled. */
-function ChannelPicker({ channels, recents, onScreen, budgetText, onPick }: {
-  channels: Channel[];
-  recents: Channel[];
+function ChannelPicker({ onScreen, budgetText, onPick }: {
   onScreen: Map<number, number>;
   budgetText: string;
   onPick: (c: Channel) => void;
 }) {
   const [query, setQuery] = useState('');
-  // Open on the first tab that has something in it.
-  const [tab, setTab] = useState<PickerTab>(() =>
-    channels.some((c) => c.isFavourite) ? 'favourites' : recents.length ? 'recent' : 'all',
-  );
-  const list = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const base = q ? channels : tab === 'favourites' ? channels.filter((c) => c.isFavourite) : tab === 'recent' ? recents : channels;
-    const hits = q ? base.filter((c) => c.name.toLowerCase().includes(q) || String(c.number ?? '').startsWith(q)) : base;
-    return hits.filter((c) => !c.isRadio).slice(0, 60);
-  }, [channels, recents, query, tab]);
+  const deferred = useDeferredValue(query.trim());
+  const [selected, setTab] = useState<PickerTab | null>(null);
+  const { data: home } = useHome();
+  const favourites = useChannelPages({ favouritesOnly: true }, 60);
+  const hasFavourites = favourites.data?.pages.some((page) => page.some((c) => !c.isRadio));
+  const tab = selected ?? (hasFavourites ? 'favourites' : home?.recents.length ? 'recent' : 'all');
+  const all = useChannelPages({ query: deferred || null }, 60, !!deferred || tab === 'all');
+  const page = deferred || tab === 'all' ? all : tab === 'favourites' ? favourites : null;
+  const list = (page ? page.data?.pages.flat() ?? [] : home?.recents ?? []).filter((c) => !c.isRadio);
   return (
     <div className={classes.picker}>
       <TextInput
@@ -98,7 +95,7 @@ function ChannelPicker({ channels, recents, onScreen, budgetText, onPick }: {
         />
       )}
       <div className={classes.pickerList} role="listbox" aria-label={t('multiview.pickChannel')}>
-        {list.length === 0 && <div className={classes.pickerEmpty}>{t('multiview.noChannels')}</div>}
+        {list.length === 0 && <div className={classes.pickerEmpty}>{t(page?.isFetching ? 'button.loading' : 'multiview.noChannels')}</div>}
         {list.map((c) => {
           const slot = onScreen.get(c.id);
           return (
@@ -119,6 +116,11 @@ function ChannelPicker({ channels, recents, onScreen, budgetText, onPick }: {
           );
         })}
       </div>
+      {page?.hasNextPage && (
+        <DLButton size="xs" loading={page.isFetchingNextPage} onClick={() => void page.fetchNextPage()}>
+          {t('button.loadMore')}
+        </DLButton>
+      )}
       <div className={classes.pickerFooter}>{budgetText}</div>
     </div>
   );
@@ -243,10 +245,7 @@ export function MultiviewPage() {
   const location = useLocation();
   const player = usePlayerStore((s) => s.player);
   const mv = useMultiviewState();
-  const channels = useChannels({});
-  const home = useHome();
   const now = useNowEpoch(15_000);
-  const byId = useMemo(() => new Map((channels.data ?? []).map((c) => [c.id, c])), [channels.data]);
 
   // Slot 0 mirrors the main player: its channel when playing live.
   const mainChannel = player.mode === 'live' && player.channelId != null ? player.channelId : null;
@@ -286,6 +285,8 @@ export function MultiviewPage() {
   const added = useRef(false);
 
   const ids = useMemo(() => [...tiles.values()].map((x) => x.channelId), [tiles]);
+  const tileChannels = useQueries({ queries: [...new Set(ids)].map(channelQuery) });
+  const byId = new Map(tileChannels.flatMap(({ data }) => data ? [[data.id, data] as const] : []));
   const nn = useNowNextWindow(ids, `multiview|${ids.join(',')}`);
   const nowOf = (id: number) => nn.data?.find((x) => x.channelId === id)?.now ?? null;
 
@@ -369,8 +370,6 @@ export function MultiviewPage() {
 
   const picker = (slot: number) => (
     <ChannelPicker
-      channels={channels.data ?? []}
-      recents={home.data?.recents ?? []}
       onScreen={onScreen}
       budgetText={t('multiview.pickerBudget', { used: inUse, total: budget })}
       onPick={(c) => void setTile(slot, c.id)}

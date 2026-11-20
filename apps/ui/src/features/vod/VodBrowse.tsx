@@ -42,12 +42,27 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
   const [innerEl, setInnerEl] = useState<HTMLDivElement | null>(null);
   const activeCat = useRef<HTMLButtonElement | null>(null);
 
-  const cats = useQuery({ queryKey: ['catalog', 'vodCats', kind], queryFn: () => invoke('list_vod_categories', { kind }) });
+  const cats = useQuery({
+    queryKey: ['catalog', 'vodCats', kind],
+    queryFn: () => invoke('list_vod_categories', { kind, withCounts: false }),
+  });
+  const needsCounts = cats.data?.some((c) => c.countPending) ?? false;
+  const counts = useQuery({
+    queryKey: ['catalog', 'vodCatCounts', kind, cats.data?.map((c) => c.id)],
+    queryFn: () => invoke('list_vod_categories', { kind, withCounts: true }),
+    enabled: needsCounts,
+  });
+  const categories = counts.data ?? cats.data ?? [];
+  // Keep a category selected while its delayed count resolves, even if it turns out to be empty.
+  const selectedCategory = cats.data?.find((c) => c.id === categoryId);
+  const shownCategories = selectedCategory && !categories.some((c) => c.id === categoryId)
+    ? [...categories, selectedCategory]
+    : categories;
   const list = useInfiniteQuery({
     queryKey: ['catalog', 'vod', kind, categoryId, deferred],
     initialPageParam: 0,
     queryFn: async ({ pageParam }): Promise<Tile[]> => {
-      const args = { categoryId, query: deferred || null, offset: pageParam, limit: PAGE };
+      const args = { categoryId, query: deferred || null, offset: pageParam, limit: PAGE, compact: true };
       return kind === 'movie' ? (await invoke('list_movies', args)).map(movieTile) : (await invoke('list_series', args)).map(seriesTile);
     },
     getNextPageParam: (last, pages) => (last.length < PAGE ? undefined : pages.length * PAGE),
@@ -118,16 +133,16 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
 
   if (loaded && !hasSource) return <EmptySource />;
   const label = kind === 'movie' ? t('vod.grid.movies') : t('vod.grid.series');
-  const total = (cats.data ?? []).reduce((n, c) => n + c.count, 0);
+  const total = needsCounts && !counts.data ? null : categories.reduce((n, c) => n + c.count, 0);
   // While pages remain, the heading shows the category's server count (exact unless searching).
-  const known = deferred ? null : categoryId == null ? total : cats.data?.find((c) => c.id === categoryId)?.count;
+  const known = deferred ? null : categoryId == null ? total : categories.find((c) => c.id === categoryId)?.count;
   const shown = !hasNextPage ? String(tiles.length) : known ? String(known) : `${tiles.length}+`;
 
   return (
     <div className={classes.page}>
       <nav className={classes.sidebar} aria-label={t('vod.categories')}>
         <div className={classes.sidebarLabel}>{t('vod.categories')}</div>
-        {[{ id: null as number | null, name: t('vod.all'), count: total }, ...(cats.data ?? [])].map((c) => (
+        {[{ id: null as number | null, name: t('vod.all'), count: total }, ...shownCategories].map((c) => (
           <UnstyledButton
             key={c.id ?? 'all'}
             ref={c.id === categoryId ? activeCat : undefined}
@@ -143,7 +158,7 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
             }}
           >
             <span>{c.name}</span>
-            <span className={classes.catCount}>{c.count}</span>
+            <span className={classes.catCount}>{'countPending' in c && c.countPending ? null : c.count}</span>
           </UnstyledButton>
         ))}
       </nav>

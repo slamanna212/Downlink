@@ -226,15 +226,29 @@ export function createMockBackend(): Backend {
   const impl: { [C in CommandName]: (a: Commands[C]['args']) => Commands[C]['result'] | Promise<Commands[C]['result']> } = {
     list_sources: () => sources.map((s) => ({ ...s })),
     list_groups: () => withCounts(),
-    list_channels: ({ groupId, query, favouritesOnly }) => {
+    list_channels: ({ groupId, query, favouritesOnly, offset = 0, limit = 500 }) => {
       if (blockedBy) throw blockedError();
       return channels.filter(
         (c) =>
           (groupId == null || c.groupId === groupId) &&
           (!favouritesOnly || c.isFavourite) &&
           (!query || c.name.toLowerCase().includes(query.toLowerCase()) || String(c.number ?? '').startsWith(query)),
-      );
+      ).slice(offset, offset + limit);
     },
+    get_channel: ({ channelId }) => {
+      const channel = channels.find((c) => c.id === channelId);
+      if (!channel) throw appError('local', 'That channel is no longer in the list.');
+      return channel;
+    },
+    find_channel_number: ({ number }) => {
+      let best: Channel | undefined;
+      for (const channel of channels) {
+        if (channel.number != null && channel.number >= number && (!best || channel.number < best.number!)) best = channel;
+      }
+      return best?.id ?? null;
+    },
+    get_programme_window: ({ channelIds, start, end }) =>
+      channelIds.flatMap((id) => genProgrammes(id, start, end, scheduled)),
     get_now_next: ({ channelIds }) => channelIds.map((id) => mockNowNext(id, nowSec(), scheduled)),
     get_guide: ({ start, end, channelOffset, channelLimit, groupId }) => {
       const list = channels.filter((c) => groupId == null || c.groupId === groupId).slice(channelOffset, channelOffset + channelLimit);
@@ -262,7 +276,7 @@ export function createMockBackend(): Backend {
       const p = genProgrammes(cid ?? 0, 0, 4e9, scheduled).find((x) => x.id === programmeId);
       const ch = channels.find((c) => c.id === cid);
       if (p && ch) vod.addRecording(nowSec(), { title: p.title ?? ch.name, channelId: ch.id, channelName: ch.name, startUtc: p.startUtc, endUtc: p.endUtc }, kind === 'series');
-      emit('catalog://updated', { sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
+      emit('catalog://updated', { scope: 'recordings', sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
       return null;
     },
     get_home: () => {

@@ -675,7 +675,7 @@ impl Service {
         let rows = self.store.list_sources().await?;
         let probes = rows.iter().map(|r| async move {
             let _ = self.probe_source(r.id).await;
-            if let Ok(c) = self.counts(r.id).await {
+            if let Ok(c) = self.counts(r.id, CatalogChange::Status).await {
                 self.emit(Event::CatalogUpdated(c));
             }
         });
@@ -707,6 +707,7 @@ impl Service {
             g.remove(&source_id);
         }
         self.emit(Event::CatalogUpdated(CatalogUpdated {
+            scope: CatalogChange::Sources,
             source_id,
             channels: 0,
             groups: 0,
@@ -715,7 +716,7 @@ impl Service {
         Ok(())
     }
 
-    async fn counts(&self, source_id: i64) -> Result<CatalogUpdated> {
+    async fn counts(&self, source_id: i64, scope: CatalogChange) -> Result<CatalogUpdated> {
         let one = |sql: &'static str| {
             let pool = self.store.pool().clone();
             async move {
@@ -726,6 +727,7 @@ impl Service {
             }
         };
         Ok(CatalogUpdated {
+            scope,
             source_id,
             channels: one("SELECT count(*) FROM channel WHERE source_id = ?").await?,
             groups: one("SELECT count(*) FROM channel_group WHERE source_id = ?").await?,
@@ -774,7 +776,9 @@ impl Service {
         let uuid = self.store.source(source_id).await?.uuid;
         self.persist_credentials(&uuid, client.as_ref())?;
         // The channel list is complete and committed: show it now, the guide fills in behind it.
-        self.emit(Event::CatalogUpdated(self.counts(source_id).await?));
+        self.emit(Event::CatalogUpdated(
+            self.counts(source_id, CatalogChange::Channels).await?,
+        ));
         self.progress(source_id, "guide", 2, 4);
         if let Err(e) = self.sync_guide_for(source_id, client.as_ref()).await {
             // The guide is not critical: channels stay usable.
@@ -787,7 +791,9 @@ impl Service {
             tracing::warn!(error = %e, "state sync failed");
         }
         self.progress(source_id, "done", 4, 4);
-        self.emit(Event::CatalogUpdated(self.counts(source_id).await?));
+        self.emit(Event::CatalogUpdated(
+            self.counts(source_id, CatalogChange::SyncComplete).await?,
+        ));
         Ok(())
     }
 
@@ -900,7 +906,9 @@ impl Service {
             },
         )
         .await?;
-        self.emit(Event::CatalogUpdated(self.counts(source_id).await?));
+        self.emit(Event::CatalogUpdated(
+            self.counts(source_id, CatalogChange::Guide).await?,
+        ));
         Ok(r)
     }
 
@@ -1129,20 +1137,9 @@ impl Service {
         )
         .await?;
         let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
-        let progs = epg::window(
-            &self.store,
-            &ids,
-            crate::source::TimeWindow {
-                start_utc: a.start,
-                end_utc: a.end,
-            },
-        )
-        .await?;
-        let mut programmes: Vec<ProgrammeDto> = progs.iter().map(Into::into).collect();
-        self.mark_scheduled(&mut programmes).await?;
         Ok(GuideDto {
             channels: self.to_channel_dtos(&rows).await?,
-            programmes,
+            programmes: self.get_programme_window(&ids, a.start, a.end).await?,
         })
     }
 
@@ -1215,6 +1212,15 @@ impl Service {
             .ok_or_else(|| AppError::local("That channel is no longer in the list."))
     }
 
+    pub async fn find_channel_number(&self, number: i64) -> Result<Option<i64>> {
+        let filter = self.filter().await?;
+        Ok(
+            catalog::channel_by_number(&self.store, &filter, number as f64)
+                .await?
+                .map(|row| row.id),
+        )
+    }
+
     /// Channel totals under the user's catalog filters (adult/radio/DRM hiding).
     pub async fn get_counts(&self) -> Result<CountsDto> {
         let f = self.filter().await?;
@@ -1237,9 +1243,19 @@ impl Service {
         start: i64,
         end: i64,
     ) -> Result<Vec<ProgrammeDto>> {
+        self.get_programme_window(&[channel_id], start, end).await
+    }
+
+    /// Programmes for a page of channel IDs already loaded by the guide.
+    pub async fn get_programme_window(
+        &self,
+        channel_ids: &[i64],
+        start: i64,
+        end: i64,
+    ) -> Result<Vec<ProgrammeDto>> {
         let rows = epg::window(
             &self.store,
-            &[channel_id],
+            channel_ids,
             crate::source::TimeWindow {
                 start_utc: start,
                 end_utc: end,

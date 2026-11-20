@@ -39,6 +39,23 @@ test('channels keyboard: down down Enter plays, number entry, Esc goes back', as
   await expect(page).toHaveURL(/\/channels$/);
 });
 
+test('channels load and play past the old first-page limit', async ({ page }) => {
+  await page.goto('/channels?mock=big');
+  const list = page.locator('[role=list]');
+  await expect(list.locator('[data-index="0"]')).toBeVisible();
+  for (const index of [149, 299, 449, 599]) {
+    const row = list.locator(`[data-index="${index}"]`);
+    await expect(async () => {
+      await list.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+      await expect(row).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 10_000 });
+  }
+  await list.locator('[data-index="599"]').focus();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/player$/);
+  await expect.poll(async () => (await calls(page)).includes('get_channel')).toBe(true);
+});
+
 test('guide: Home goes to now, a past+archive block opens catch-up with a seek bar, End goes live; dwell never plays', async ({ page }) => {
   await page.goto('/guide');
   await settle(page);

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Menu } from '@mantine/core';
 import { IconChevronDown, IconRepeat } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
-import { useCaps, useOffline } from '../../api/queries';
+import { invalidateRecordings, useCaps, useOffline } from '../../api/queries';
 import type { Recording, RecordingRule } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
@@ -123,7 +123,7 @@ export function RecordingsPage() {
     mutationFn: (fn: () => Promise<unknown>) => fn(),
     onSuccess: () => {
       setFailure(null);
-      return qc.invalidateQueries({ queryKey: ['catalog'] });
+      return invalidateRecordings(qc);
     },
     onError: (e) => setFailure(e instanceof Error ? e.message : (e as { message?: string }).message || t('rec.actionFailed')),
   });

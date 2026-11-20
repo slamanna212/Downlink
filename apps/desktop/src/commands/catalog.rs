@@ -138,6 +138,33 @@ pub async fn list_channels(
 }
 
 #[tauri::command]
+pub async fn get_channel(state: State<'_, AppState>, channel_id: i64) -> CmdResult<ChannelDto> {
+    state.svc().await?.get_channel(channel_id).await
+}
+
+#[tauri::command]
+pub async fn find_channel_number(
+    state: State<'_, AppState>,
+    number: i64,
+) -> CmdResult<Option<i64>> {
+    state.svc().await?.find_channel_number(number).await
+}
+
+#[tauri::command]
+pub async fn get_programme_window(
+    state: State<'_, AppState>,
+    channel_ids: Vec<i64>,
+    start: i64,
+    end: i64,
+) -> CmdResult<Vec<ProgrammeDto>> {
+    state
+        .svc()
+        .await?
+        .get_programme_window(&channel_ids, start, end)
+        .await
+}
+
+#[tauri::command]
 pub async fn get_now_next(
     state: State<'_, AppState>,
     channel_ids: Vec<i64>,

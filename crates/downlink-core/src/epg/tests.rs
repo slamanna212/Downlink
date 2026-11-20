@@ -80,6 +80,70 @@ async fn now_next_boundaries() {
 }
 
 #[tokio::test]
+async fn batched_now_next_skips_overlapping_next_and_keeps_empty_channels() {
+    let (store, _, c) = seeded().await;
+    store
+        .upsert_programmes(&[
+            p(c, 0, 100, "current"),
+            p(c, 80, 110, "overlap"),
+            p(c, 120, 140, "next"),
+        ])
+        .await
+        .unwrap();
+
+    let pairs = now_next_many(&store, &[c, c + 1, c], 70).await.unwrap();
+    assert_eq!(pairs.len(), 2);
+    assert_eq!(
+        pairs[&c].now.as_ref().unwrap().title.as_deref(),
+        Some("current")
+    );
+    assert_eq!(
+        pairs[&c].next.as_ref().unwrap().title.as_deref(),
+        Some("next")
+    );
+    assert_eq!(pairs[&(c + 1)], NowNext::default());
+}
+
+#[tokio::test]
+async fn replacing_a_window_keeps_retained_rowids_and_removes_missing_programmes() {
+    let (store, src, c) = seeded().await;
+    let keep = p(c, 0, 100, "keep");
+    store
+        .upsert_programmes(&[
+            keep.clone(),
+            p(c, 100, 200, "obsolete"),
+            p(c, 300, 400, "outside"),
+        ])
+        .await
+        .unwrap();
+    let rowid: i64 = sqlx::query_scalar("SELECT rowid FROM programme WHERE start_utc = 0")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    store
+        .replace_programme_window(
+            src,
+            TimeWindow {
+                start_utc: 0,
+                end_utc: 250,
+            },
+            &[keep, p(c, 200, 250, "new")],
+        )
+        .await
+        .unwrap();
+    let slots: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT rowid, start_utc FROM programme ORDER BY start_utc")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(slots[0], (rowid, 0));
+    assert_eq!(
+        slots.iter().map(|(_, start)| *start).collect::<Vec<_>>(),
+        [0, 200, 300]
+    );
+}
+
+#[tokio::test]
 async fn window_overlap_and_order() {
     let (store, _, c) = seeded().await;
     store

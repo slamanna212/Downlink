@@ -146,6 +146,48 @@ async fn empty_vod_categories_are_hidden() {
 }
 
 #[tokio::test]
+async fn vod_categories_load_before_counts_and_reuse_names_for_pages() {
+    let (server, svc, _, _dir) = dispatcharr().await;
+    let before = server.received_requests().await.unwrap().len();
+    let categories = svc.vod_categories(VodKindArg::Movie, false).await.unwrap();
+    assert!(categories.iter().all(|c| c.count_pending));
+    let after_names = server.received_requests().await.unwrap();
+    assert_eq!(after_names[before..].len(), 1);
+    assert_eq!(after_names[before].url.path(), "/api/vod/categories/");
+
+    let movies = svc
+        .movie_page(
+            VodListArgs {
+                category_id: Some(categories[0].id),
+                ..Default::default()
+            },
+            true,
+        )
+        .await
+        .unwrap();
+    assert!(movies[0].poster.is_some());
+    assert!(movies.iter().all(|m| m.backdrop.is_none()));
+    assert!(
+        svc.get_movie(movies[0].id)
+            .await
+            .unwrap()
+            .backdrop
+            .is_some()
+    );
+    let counts = svc.list_vod_categories(VodKindArg::Movie).await.unwrap();
+    assert!(counts.iter().all(|c| c.count > 0 && !c.count_pending));
+
+    let after = server.received_requests().await.unwrap();
+    assert_eq!(
+        after[before..]
+            .iter()
+            .filter(|r| r.url.path() == "/api/vod/categories/")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn movies_categories_list_detail_and_dto_shape() {
     let (_s, svc, id, _d) = dispatcharr().await;
     let cats = svc.list_vod_categories(VodKindArg::Movie).await.unwrap();

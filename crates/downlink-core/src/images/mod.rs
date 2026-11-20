@@ -4,8 +4,13 @@
 //! disk cache (`sha256(url)`) or fetches with auth, resizes to 160/512 px, stores both sizes and
 //! evicts least-recently-used files beyond the cap (512 MB by default).
 
+use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use tokio::sync::Mutex as AsyncMutex;
 
 use async_trait::async_trait;
 use image::{DynamicImage, ImageFormat};
@@ -115,11 +120,36 @@ pub fn parse_dlimg(u: &str) -> Option<(String, ImageSize)> {
     }
 }
 
+const TOUCH_INTERVAL_SECS: i64 = 60;
+const EVICTION_BATCH: i64 = 64;
+
+struct CacheLocks {
+    // A bounded set of locks coalesces duplicate downloads, including requests for different sizes.
+    fetches: [AsyncMutex<()>; 64],
+    writes: AsyncMutex<()>,
+}
+
+impl CacheLocks {
+    fn new() -> Self {
+        Self {
+            fetches: std::array::from_fn(|_| AsyncMutex::new(())),
+            writes: AsyncMutex::new(()),
+        }
+    }
+
+    fn fetch(&self, hash: &str) -> &AsyncMutex<()> {
+        let mut hasher = DefaultHasher::new();
+        hash.hash(&mut hasher);
+        &self.fetches[(hasher.finish() as usize) % self.fetches.len()]
+    }
+}
+
 #[derive(Clone)]
 pub struct ImageCache {
     dir: PathBuf,
     store: Store,
     max_bytes: u64,
+    locks: Arc<CacheLocks>,
 }
 
 impl ImageCache {
@@ -128,6 +158,7 @@ impl ImageCache {
             dir: dir.into(),
             store,
             max_bytes: DEFAULT_MAX_BYTES,
+            locks: Arc::new(CacheLocks::new()),
         }
     }
 
@@ -148,6 +179,32 @@ impl ImageCache {
         Ok(dlimg_url(&hash, size))
     }
 
+    /// Register one page of artwork in a single write.
+    pub(crate) async fn register_page(
+        &self,
+        images: &[(i64, &str)],
+    ) -> Result<HashMap<String, String>> {
+        if images.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let entries: Vec<_> = images
+            .iter()
+            .map(|&(source, url)| (hash_url(url), source, url))
+            .collect();
+        sqlx::query(
+            "INSERT OR IGNORE INTO image_origin (hash, source_id, url)
+             SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')
+             FROM json_each(?)",
+        )
+        .bind(serde_json::to_string(&entries)?)
+        .execute(self.store.pool())
+        .await?;
+        Ok(entries
+            .into_iter()
+            .map(|(hash, _, url)| (url.to_owned(), dlimg_url(&hash, ImageSize::Detail)))
+            .collect())
+    }
+
     fn key(hash: &str, size: ImageSize) -> String {
         format!("{hash}:{}", size.px())
     }
@@ -161,32 +218,32 @@ impl ImageCache {
     }
 
     async fn cached(&self, hash: &str, size: ImageSize) -> Result<Option<ImageBytes>> {
-        let row: Option<(String,)> = sqlx::query_as("SELECT path FROM image_cache WHERE key = ?")
-            .bind(Self::key(hash, size))
-            .fetch_optional(self.store.pool())
-            .await?;
-        let Some((rel,)) = row else { return Ok(None) };
-        match tokio::fs::read(self.dir.join(&rel)).await {
-            Ok(bytes) => {
-                sqlx::query("UPDATE image_cache SET last_used = ? WHERE key = ?")
-                    .bind(now_utc())
-                    .bind(Self::key(hash, size))
-                    .execute(self.store.pool())
-                    .await?;
-                Ok(Some(ImageBytes {
-                    bytes,
-                    mime: Self::mime_of(&rel),
-                }))
-            }
-            Err(_) => {
-                // File vanished: forget the row and refetch.
-                sqlx::query("DELETE FROM image_cache WHERE key = ?")
-                    .bind(Self::key(hash, size))
-                    .execute(self.store.pool())
-                    .await?;
-                Ok(None)
-            }
+        let key = Self::key(hash, size);
+        let row: Option<(String, i64)> =
+            sqlx::query_as("SELECT path, last_used FROM image_cache WHERE key = ?")
+                .bind(&key)
+                .fetch_optional(self.store.pool())
+                .await?;
+        let Some((rel, last_used)) = row else {
+            return Ok(None);
+        };
+        let Ok(bytes) = tokio::fs::read(self.dir.join(&rel)).await else {
+            // A miss will replace the stale entry after the image is downloaded.
+            return Ok(None);
+        };
+        let now = now_utc();
+        if last_used <= now - TOUCH_INTERVAL_SECS {
+            sqlx::query("UPDATE image_cache SET last_used = ? WHERE key = ? AND last_used <= ?")
+                .bind(now)
+                .bind(&key)
+                .bind(now - TOUCH_INTERVAL_SECS)
+                .execute(self.store.pool())
+                .await?;
         }
+        Ok(Some(ImageBytes {
+            bytes,
+            mime: Self::mime_of(&rel),
+        }))
     }
 
     /// Serve `dlimg://<hash>/<size>`.
@@ -196,6 +253,10 @@ impl ImageCache {
         size: ImageSize,
         fetcher: &dyn ImageFetcher,
     ) -> Result<ImageBytes> {
+        if let Some(hit) = self.cached(hash, size).await? {
+            return Ok(hit);
+        }
+        let _fetch = self.locks.fetch(hash).lock().await;
         if let Some(hit) = self.cached(hash, size).await? {
             return Ok(hit);
         }
@@ -210,7 +271,9 @@ impl ImageCache {
         let encoded = tokio::task::spawn_blocking(move || encode_sizes(&raw.bytes))
             .await
             .map_err(|_| AppError::local("Image processing was interrupted."))??;
+        let _writes = self.locks.writes.lock().await;
         let mut wanted = None;
+        let mut entries = Vec::with_capacity(encoded.len());
         for (sz, bytes, ext) in encoded {
             let rel = format!("{}/{hash}-{}.{ext}", &hash[..2], sz.px());
             let abs = self.dir.join(&rel);
@@ -218,17 +281,11 @@ impl ImageCache {
                 tokio::fs::create_dir_all(parent).await?;
             }
             tokio::fs::write(&abs, &bytes).await?;
-            sqlx::query(
-                "INSERT INTO image_cache (key, path, bytes, last_used) VALUES (?, ?, ?, ?)
-                 ON CONFLICT(key) DO UPDATE SET path = excluded.path, bytes = excluded.bytes,
-                                                last_used = excluded.last_used",
-            )
-            .bind(Self::key(hash, sz))
-            .bind(&rel)
-            .bind(i64::try_from(bytes.len()).unwrap_or(i64::MAX))
-            .bind(now_utc())
-            .execute(self.store.pool())
-            .await?;
+            entries.push((
+                Self::key(hash, sz),
+                rel.clone(),
+                i64::try_from(bytes.len()).unwrap_or(i64::MAX),
+            ));
             if sz == size {
                 wanted = Some(ImageBytes {
                     bytes,
@@ -236,40 +293,71 @@ impl ImageCache {
                 });
             }
         }
-        self.evict().await?;
+        let mut tx = self.store.pool().begin().await?;
+        for (key, rel, bytes) in entries {
+            sqlx::query(
+                "INSERT INTO image_cache (key, path, bytes, last_used) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(key) DO UPDATE SET path = excluded.path, bytes = excluded.bytes,
+                                                last_used = excluded.last_used",
+            )
+            .bind(key)
+            .bind(rel)
+            .bind(bytes)
+            .bind(now_utc())
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        self.evict_locked().await?;
         wanted.ok_or_else(|| AppError::media("The image could not be prepared."))
     }
 
     /// Total cached bytes.
     pub async fn total_bytes(&self) -> Result<u64> {
-        let n: Option<i64> = sqlx::query_scalar("SELECT sum(bytes) FROM image_cache")
+        let bytes: i64 = sqlx::query_scalar("SELECT bytes FROM image_cache_size WHERE id = 1")
             .fetch_one(self.store.pool())
             .await?;
-        Ok(u64::try_from(n.unwrap_or(0)).unwrap_or(0))
+        Ok(u64::try_from(bytes).unwrap_or(0))
     }
 
-    /// Delete least-recently-used files until under the cap.
+    /// Delete least-recently-used files in batches until under the cap.
     pub async fn evict(&self) -> Result<usize> {
+        let _writes = self.locks.writes.lock().await;
+        self.evict_locked().await
+    }
+
+    async fn evict_locked(&self) -> Result<usize> {
         let mut total = self.total_bytes().await?;
-        if total <= self.max_bytes {
-            return Ok(0);
-        }
-        let rows: Vec<(String, String, i64)> =
-            sqlx::query_as("SELECT key, path, bytes FROM image_cache ORDER BY last_used, key")
-                .fetch_all(self.store.pool())
-                .await?;
         let mut removed = 0;
-        for (key, rel, bytes) in rows {
-            if total <= self.max_bytes {
+        while total > self.max_bytes {
+            let mut tx = self.store.pool().begin_with("BEGIN IMMEDIATE").await?;
+            let rows: Vec<(String, String, i64)> = sqlx::query_as(
+                "SELECT key, path, bytes FROM image_cache ORDER BY last_used, key LIMIT ?",
+            )
+            .bind(EVICTION_BATCH)
+            .fetch_all(&mut *tx)
+            .await?;
+            if rows.is_empty() {
                 break;
             }
-            let _ = tokio::fs::remove_file(self.dir.join(&rel)).await;
-            sqlx::query("DELETE FROM image_cache WHERE key = ?")
-                .bind(&key)
-                .execute(self.store.pool())
+            let mut evicted = Vec::new();
+            for (key, rel, bytes) in rows {
+                evicted.push((key, rel));
+                total = total.saturating_sub(u64::try_from(bytes).unwrap_or(0));
+                if total <= self.max_bytes {
+                    break;
+                }
+            }
+            let keys: Vec<_> = evicted.iter().map(|(key, _)| key).collect();
+            sqlx::query("DELETE FROM image_cache WHERE key IN (SELECT value FROM json_each(?))")
+                .bind(serde_json::to_string(&keys)?)
+                .execute(&mut *tx)
                 .await?;
-            total = total.saturating_sub(u64::try_from(bytes).unwrap_or(0));
-            removed += 1;
+            tx.commit().await?;
+            for (_, rel) in evicted {
+                let _ = tokio::fs::remove_file(self.dir.join(rel)).await;
+                removed += 1;
+            }
         }
         Ok(removed)
     }

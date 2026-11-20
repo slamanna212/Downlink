@@ -112,16 +112,28 @@ pub async fn apply_matches(
     let mut by_xmltv: HashMap<String, Vec<i64>> = HashMap::new();
     let matched: HashMap<i64, Method> = matches.iter().map(|m| (m.channel_id, m.method)).collect();
     let mut tx = store.pool().begin().await?;
-    for c in &chans {
-        let v = matched.get(&c.id).map_or("none", |m| m.as_str());
-        sqlx::query("UPDATE channel SET epg_match = ? WHERE id = ?")
-            .bind(v)
-            .bind(c.id)
-            .execute(&mut *tx)
-            .await?;
-        if !matched.contains_key(&c.id) {
-            summary.unmatched.push(c.name.clone());
-        }
+    for batch in chans.chunks(1000) {
+        let updates: Vec<_> = batch
+            .iter()
+            .map(|c| {
+                let method = matched.get(&c.id);
+                if method.is_none() {
+                    summary.unmatched.push(c.name.clone());
+                }
+                (c.id, method.map_or("none", |m| m.as_str()))
+            })
+            .collect();
+        sqlx::query(
+            "WITH matches AS (
+               SELECT json_extract(value, '$[0]') AS id, json_extract(value, '$[1]') AS method
+               FROM json_each(?)
+             )
+             UPDATE channel SET epg_match = matches.method FROM matches
+             WHERE channel.id = matches.id AND channel.epg_match IS NOT matches.method",
+        )
+        .bind(serde_json::to_string(&updates)?)
+        .execute(&mut *tx)
+        .await?;
     }
     tx.commit().await?;
     for m in matches {
@@ -155,28 +167,33 @@ async fn channel_shifts(store: &Store, source_id: i64) -> Result<HashMap<i64, i6
 
 /// Remove stored programmes that sit inside a channel's fed span but were not in the feed.
 async fn replace_within_coverage(store: &Store, cov: &HashMap<i64, Coverage>) -> Result<u64> {
-    let mut removed = 0u64;
-    let mut tx = store.pool().begin().await?;
-    for (channel_id, c) in cov {
-        let have: Vec<(i64,)> = sqlx::query_as(
-            "SELECT start_utc FROM programme WHERE channel_id = ? AND start_utc >= ? AND start_utc < ?",
+    let mut removed = 0;
+    let mut tx = store.pool().begin_with("BEGIN IMMEDIATE").await?;
+    let bounds: Vec<_> = cov
+        .iter()
+        .map(|(&id, c)| (id, c.first_start, c.last_end))
+        .collect();
+    for batch in bounds.chunks(128) {
+        let have: Vec<(i64, i64, i64)> = sqlx::query_as(
+            "WITH bounds AS (
+               SELECT json_extract(value, '$[0]') AS id, json_extract(value, '$[1]') AS first_start,
+                      json_extract(value, '$[2]') AS last_end FROM json_each(?)
+             )
+             SELECT p.rowid, p.channel_id, p.start_utc FROM bounds b JOIN programme p
+               ON p.channel_id = b.id AND p.start_utc >= b.first_start AND p.start_utc < b.last_end",
         )
-        .bind(channel_id)
-        .bind(c.first_start)
-        .bind(c.last_end)
+        .bind(serde_json::to_string(batch)?)
         .fetch_all(&mut *tx)
         .await?;
-        for (start,) in have {
-            if c.starts.contains(&start) {
-                continue;
-            }
-            sqlx::query("DELETE FROM programme WHERE channel_id = ? AND start_utc = ?")
-                .bind(channel_id)
-                .bind(start)
-                .execute(&mut *tx)
-                .await?;
-            removed += 1;
-        }
+        let obsolete: Vec<_> = have
+            .into_iter()
+            .filter_map(|(rowid, channel, start)| {
+                cov.get(&channel)
+                    .is_some_and(|c| !c.starts.contains(&start))
+                    .then_some(rowid)
+            })
+            .collect();
+        removed += Store::delete_programme_rows(&mut tx, &obsolete).await?;
     }
     tx.commit().await?;
     Ok(removed)

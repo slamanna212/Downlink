@@ -13,8 +13,13 @@ use crate::state::AppState;
 pub async fn list_vod_categories(
     state: State<'_, AppState>,
     kind: VodKindArg,
+    with_counts: Option<bool>,
 ) -> CmdResult<Vec<VodCategoryDto>> {
-    state.svc().await?.list_vod_categories(kind).await
+    state
+        .svc()
+        .await?
+        .vod_categories(kind, with_counts.unwrap_or(true))
+        .await
 }
 
 #[tauri::command]
@@ -24,16 +29,20 @@ pub async fn list_movies(
     query: Option<String>,
     offset: Option<i64>,
     limit: Option<i64>,
+    compact: Option<bool>,
 ) -> CmdResult<Vec<MovieDto>> {
     state
         .svc()
         .await?
-        .list_movies(VodListArgs {
-            category_id,
-            query,
-            offset,
-            limit,
-        })
+        .movie_page(
+            VodListArgs {
+                category_id,
+                query,
+                offset,
+                limit,
+            },
+            compact.unwrap_or(false),
+        )
         .await
 }
 
@@ -49,16 +58,20 @@ pub async fn list_series(
     query: Option<String>,
     offset: Option<i64>,
     limit: Option<i64>,
+    compact: Option<bool>,
 ) -> CmdResult<Vec<SeriesDto>> {
     state
         .svc()
         .await?
-        .list_series(VodListArgs {
-            category_id,
-            query,
-            offset,
-            limit,
-        })
+        .series_page(
+            VodListArgs {
+                category_id,
+                query,
+                offset,
+                limit,
+            },
+            compact.unwrap_or(false),
+        )
         .await
 }
 

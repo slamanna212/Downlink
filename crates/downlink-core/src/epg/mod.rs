@@ -42,27 +42,45 @@ pub async fn now_next_many(
     channel_ids: &[i64],
     now: i64,
 ) -> Result<HashMap<i64, NowNext>> {
-    let mut out: HashMap<i64, NowNext> = HashMap::new();
-    for &id in channel_ids {
-        let cur: Option<ProgrammeRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {PCOLS} FROM programme WHERE channel_id = ? AND start_utc <= ? AND end_utc > ?
-             ORDER BY start_utc DESC LIMIT 1"
-        )))
-        .bind(id)
-        .bind(now)
-        .bind(now)
-        .fetch_optional(store.pool())
-        .await?;
-        let after = cur.as_ref().map_or(now, |c| c.end_utc);
-        let next: Option<ProgrammeRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {PCOLS} FROM programme WHERE channel_id = ? AND start_utc >= ?
-             ORDER BY start_utc LIMIT 1"
-        )))
-        .bind(id)
-        .bind(after)
-        .fetch_optional(store.pool())
-        .await?;
-        out.insert(id, NowNext { now: cur, next });
+    if channel_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let ids = serde_json::to_string(channel_ids)?;
+    let rows: Vec<(bool, ProgrammeRow)> = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "WITH current AS MATERIALIZED (
+             SELECT DISTINCT value AS id, (SELECT rowid FROM programme
+                 WHERE channel_id = value AND start_utc <= ?2 AND end_utc > ?2
+                 ORDER BY start_utc DESC LIMIT 1) AS current_row
+             FROM json_each(?1)
+         ), slots AS (
+             SELECT 1 AS is_current, current_row AS programme_row FROM current
+             UNION ALL
+             SELECT 0, (SELECT rowid FROM programme
+                 WHERE channel_id = current.id AND start_utc >= coalesce(p.end_utc, ?2)
+                 ORDER BY start_utc LIMIT 1)
+             FROM current LEFT JOIN programme p ON p.rowid = current_row
+         )
+         SELECT is_current, {PCOLS} FROM slots JOIN programme ON programme.rowid = programme_row"
+    )))
+    .bind(ids)
+    .bind(now)
+    .try_map(|row| {
+        use sqlx::{FromRow, Row};
+        Ok((row.try_get("is_current")?, ProgrammeRow::from_row(&row)?))
+    })
+    .fetch_all(store.pool())
+    .await?;
+    let mut out: HashMap<_, _> = channel_ids
+        .iter()
+        .map(|&id| (id, NowNext::default()))
+        .collect();
+    for (current, programme) in rows {
+        let pair = out.entry(programme.channel_id).or_default();
+        if current {
+            pair.now = Some(programme);
+        } else {
+            pair.next = Some(programme);
+        }
     }
     Ok(out)
 }
@@ -153,10 +171,7 @@ pub async fn sync_guide(
     if unmatched > 0 {
         tracing::debug!(unmatched, "guide rows matched no channel");
     }
-    store
-        .delete_programmes_overlapping(source_id, w.start_utc, w.end_utc)
-        .await?;
-    let n = store.upsert_programmes(&rows).await?;
+    let n = store.replace_programme_window(source_id, w, &rows).await?;
     let now = crate::sync::now_utc();
     store.set_sync_ok(source_id, "guide", now).await?;
     Ok(GuideCounts {

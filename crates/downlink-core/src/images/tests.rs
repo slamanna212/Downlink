@@ -114,6 +114,29 @@ async fn miss_fetches_once_resizes_both_sizes_then_hits_disk() {
 }
 
 #[tokio::test]
+async fn simultaneous_requests_for_two_sizes_share_the_download() {
+    let (cache, sid, _d) = setup(DEFAULT_MAX_BYTES).await;
+    let url = "https://d.test/shared";
+    cache.register(sid, url, ImageSize::Grid).await.unwrap();
+    let hash = hash_url(url);
+    let stub = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(600, 400, true),
+    };
+    let (grid, detail) = tokio::join!(
+        cache.get(&hash, ImageSize::Grid, &stub),
+        cache.get(&hash, ImageSize::Detail, &stub)
+    );
+    let grid = grid.unwrap();
+    let detail = detail.unwrap();
+    assert_eq!(stub.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        cache.total_bytes().await.unwrap(),
+        (grid.bytes.len() + detail.bytes.len()) as u64
+    );
+}
+
+#[tokio::test]
 async fn small_images_are_not_upscaled_and_opaque_becomes_jpeg() {
     let (cache, sid, _d) = setup(DEFAULT_MAX_BYTES).await;
     let dl = cache

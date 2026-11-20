@@ -201,9 +201,21 @@ pub struct NowNextDto {
     pub next: Option<ProgrammeDto>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CatalogChange {
+    Status,
+    Channels,
+    Guide,
+    Recordings,
+    SyncComplete,
+    Sources,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogUpdated {
+    pub scope: CatalogChange,
     pub source_id: i64,
     pub channels: i64,
     pub groups: i64,
@@ -440,6 +452,7 @@ pub struct VodCategoryDto {
     pub id: i64,
     pub name: String,
     pub count: i64,
+    pub count_pending: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]

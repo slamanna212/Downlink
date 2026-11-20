@@ -397,6 +397,10 @@ pub trait Source: Send + Sync {
     async fn vod_categories(&self, _kind: VodKind) -> Result<Vec<VodCategoryInfo>> {
         Err(no_vod())
     }
+    /// Categories suitable for rendering before remote counts are ready.
+    async fn vod_category_names(&self, kind: VodKind) -> Result<Vec<VodCategoryInfo>> {
+        self.vod_categories(kind).await
+    }
     /// One page of movies or series (`kind` is `Movie` or `Series`).
     async fn vod_list(&self, _kind: VodKind, _q: &VodListQuery) -> Result<VodListPage> {
         Err(no_vod())

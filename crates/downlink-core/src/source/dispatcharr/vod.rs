@@ -196,9 +196,24 @@ impl DispatcharrClient {
         Ok(out)
     }
 
+    pub(super) async fn cached_vod_categories(
+        &self,
+        kind: VodKind,
+    ) -> Result<Vec<VodCategoryInfo>> {
+        let mut cache = self.vod_categories.lock().await;
+        if let Some((fetched, categories)) = cache.get(&kind)
+            && fetched.elapsed() < super::VOD_CATEGORY_TTL
+        {
+            return Ok(categories.clone());
+        }
+        let categories = self.vod_category_list(kind).await?;
+        cache.insert(kind, (std::time::Instant::now(), categories.clone()));
+        Ok(categories)
+    }
+
     async fn category_name(&self, kind: VodKind, ext_id: &str) -> Result<Option<String>> {
         Ok(self
-            .vod_category_list(kind)
+            .cached_vod_categories(kind)
             .await?
             .into_iter()
             .find(|c| c.ext_id == ext_id)

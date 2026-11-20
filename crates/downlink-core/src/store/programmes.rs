@@ -1,4 +1,4 @@
-use sqlx::FromRow;
+use sqlx::{FromRow, QueryBuilder, Sqlite, SqliteConnection};
 
 use super::Store;
 use crate::error::Result;
@@ -35,32 +35,105 @@ impl Store {
 
     /// Upsert programmes in one transaction. Returns rows written.
     pub async fn upsert_programmes(&self, rows: &[ProgrammeRow]) -> Result<usize> {
-        let mut tx = self.pool().begin().await?;
-        for p in rows {
-            sqlx::query(
-                "INSERT INTO programme (channel_id, start_utc, end_utc, ext_id, title, subtitle,
-                                        description, season, episode, flags)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(channel_id, start_utc) DO UPDATE SET
-                   end_utc = excluded.end_utc, ext_id = excluded.ext_id, title = excluded.title,
-                   subtitle = excluded.subtitle, description = excluded.description,
-                   season = excluded.season, episode = excluded.episode, flags = excluded.flags",
-            )
-            .bind(p.channel_id)
-            .bind(p.start_utc)
-            .bind(p.end_utc)
-            .bind(&p.ext_id)
-            .bind(&p.title)
-            .bind(&p.subtitle)
-            .bind(&p.description)
-            .bind(p.season)
-            .bind(p.episode)
-            .bind(p.flags)
-            .execute(&mut *tx)
-            .await?;
+        if rows.is_empty() {
+            return Ok(0);
         }
+        let mut tx = self.pool().begin().await?;
+        Self::write_programmes(&mut tx, rows).await?;
         tx.commit().await?;
         Ok(rows.len())
+    }
+
+    async fn write_programmes(db: &mut SqliteConnection, rows: &[ProgrammeRow]) -> Result<()> {
+        let mut changed = 0;
+        for chunk in rows.chunks(90) {
+            let mut query = QueryBuilder::<Sqlite>::new(
+                "INSERT INTO programme (channel_id, start_utc, end_utc, ext_id, title, subtitle,
+                                        description, season, episode, flags) ",
+            );
+            query.push_values(chunk, |mut b, p| {
+                b.push_bind(p.channel_id)
+                    .push_bind(p.start_utc)
+                    .push_bind(p.end_utc)
+                    .push_bind(&p.ext_id)
+                    .push_bind(&p.title)
+                    .push_bind(&p.subtitle)
+                    .push_bind(&p.description)
+                    .push_bind(p.season)
+                    .push_bind(p.episode)
+                    .push_bind(p.flags);
+            });
+            query.push(
+                " ON CONFLICT(channel_id, start_utc) DO UPDATE SET
+                   end_utc = excluded.end_utc, ext_id = excluded.ext_id, title = excluded.title,
+                   subtitle = excluded.subtitle, description = excluded.description,
+                   season = excluded.season, episode = excluded.episode, flags = excluded.flags
+                 WHERE (programme.end_utc, programme.ext_id, programme.title, programme.subtitle,
+                        programme.description, programme.season, programme.episode, programme.flags)
+                    IS NOT (excluded.end_utc, excluded.ext_id, excluded.title, excluded.subtitle,
+                            excluded.description, excluded.season, excluded.episode, excluded.flags)",
+            );
+            changed += query
+                .build()
+                .persistent(chunk.len() == 90)
+                .execute(&mut *db)
+                .await?
+                .rows_affected();
+        }
+        if changed >= 1_000 {
+            // Bulk inserts leave more FTS segments behind. A bounded merge keeps prefix
+            // searches fast without rebuilding the index or delaying small refreshes.
+            sqlx::query("INSERT INTO programme_fts(programme_fts, rank) VALUES ('merge', 64)")
+                .execute(db)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Reconcile one authoritative source window in a single transaction.
+    pub async fn replace_programme_window(
+        &self,
+        source_id: i64,
+        window: crate::source::TimeWindow,
+        rows: &[ProgrammeRow],
+    ) -> Result<usize> {
+        let keys: std::collections::HashSet<_> =
+            rows.iter().map(|p| (p.channel_id, p.start_utc)).collect();
+        let mut tx = self.pool().begin_with("BEGIN IMMEDIATE").await?;
+        let previous: Vec<(i64, i64, i64)> = sqlx::query_as(
+            "SELECT rowid, channel_id, start_utc FROM programme WHERE start_utc < ? AND end_utc > ?
+              AND channel_id IN (SELECT id FROM channel WHERE source_id = ?)",
+        )
+        .bind(window.end_utc)
+        .bind(window.start_utc)
+        .bind(source_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        let obsolete: Vec<_> = previous
+            .into_iter()
+            .filter_map(|(rowid, channel, start)| {
+                (!keys.contains(&(channel, start))).then_some(rowid)
+            })
+            .collect();
+        Self::delete_programme_rows(&mut tx, &obsolete).await?;
+        Self::write_programmes(&mut tx, rows).await?;
+        tx.commit().await?;
+        Ok(rows.len())
+    }
+
+    pub(crate) async fn delete_programme_rows(
+        db: &mut SqliteConnection,
+        rowids: &[i64],
+    ) -> Result<u64> {
+        if rowids.is_empty() {
+            return Ok(0);
+        }
+        let result =
+            sqlx::query("DELETE FROM programme WHERE rowid IN (SELECT value FROM json_each(?))")
+                .bind(serde_json::to_string(rowids)?)
+                .execute(db)
+                .await?;
+        Ok(result.rows_affected())
     }
 
     /// Delete a source's programmes that overlap `[start, end)`; used before re-filling a window

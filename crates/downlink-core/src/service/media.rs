@@ -96,6 +96,14 @@ impl Service {
     }
 
     pub async fn list_vod_categories(&self, kind: VodKindArg) -> Result<Vec<VodCategoryDto>> {
+        self.vod_categories(kind, true).await
+    }
+
+    pub async fn vod_categories(
+        &self,
+        kind: VodKindArg,
+        with_counts: bool,
+    ) -> Result<Vec<VodCategoryDto>> {
         let k = if kind == VodKindArg::Movie {
             VodKind::Movie
         } else {
@@ -105,12 +113,12 @@ impl Service {
         for src in self.caps_sources(Caps::VOD).await? {
             let client = self.client(src.id).await?;
             // Categories the server reports as empty are hidden (unknown counts stay listed).
-            for c in client
-                .vod_categories(k)
-                .await?
-                .into_iter()
-                .filter(|c| c.count != Some(0))
-            {
+            let categories = if with_counts {
+                client.vod_categories(k).await?
+            } else {
+                client.vod_category_names(k).await?
+            };
+            for c in categories.into_iter().filter(|c| c.count != Some(0)) {
                 let id = compose_cat(src.id, &c.ext_id);
                 if let Ok(mut g) = self.vod_cats.lock() {
                     g.insert(id, (src.id, c.ext_id.clone()));
@@ -119,6 +127,7 @@ impl Service {
                     id,
                     name: c.name,
                     count: c.count.unwrap_or(0),
+                    count_pending: !with_counts && c.count.is_none(),
                 });
             }
         }
@@ -179,57 +188,165 @@ impl Service {
         self.store.resume(r.source_id, &r.kind, &r.ext_id).await
     }
 
-    async fn movie_dto(&self, r: &VodRow) -> Result<MovieDto> {
-        let resume = self.resume_of(r).await?;
-        Ok(MovieDto {
+    fn movie_dto(
+        &self,
+        r: &VodRow,
+        resume: Option<&ResumeRow>,
+        poster: Option<String>,
+        backdrop: Option<String>,
+        compact: bool,
+    ) -> MovieDto {
+        MovieDto {
             id: r.id,
             title: r.name.clone(),
             year: r.year,
-            rating: rating_of(r.rating.as_deref()),
+            rating: if compact {
+                None
+            } else {
+                rating_of(r.rating.as_deref())
+            },
             duration_secs: r.duration_secs,
-            poster: self.art(r.source_id, r.art_key.as_deref()).await,
-            backdrop: self.art(r.source_id, r.backdrop_key.as_deref()).await,
-            plot: r.description.clone(),
-            genres: genres_of(r.genre.as_deref()),
+            poster,
+            backdrop,
+            plot: if compact { None } else { r.description.clone() },
+            genres: if compact {
+                Vec::new()
+            } else {
+                genres_of(r.genre.as_deref())
+            },
             category_id: self.category_of(r),
-            resume_secs: resume.as_ref().map(|x| x.position_ms / 1000),
-            watched: resume.as_ref().is_some_and(ResumeRow::finished),
-        })
+            resume_secs: resume.map(|x| x.position_ms / 1000),
+            watched: resume.is_some_and(ResumeRow::finished),
+        }
     }
 
-    async fn series_dto(&self, r: &VodRow) -> Result<SeriesDto> {
-        let eps = self.store.vod_episodes(r.source_id, &r.ext_id).await?;
-        let seasons: HashSet<i64> = eps.iter().map(|e| e.season.unwrap_or(0)).collect();
-        Ok(SeriesDto {
+    fn series_dto(
+        &self,
+        r: &VodRow,
+        season_count: i64,
+        poster: Option<String>,
+        backdrop: Option<String>,
+        compact: bool,
+    ) -> SeriesDto {
+        SeriesDto {
             id: r.id,
             title: r.name.clone(),
             year: r.year,
-            rating: rating_of(r.rating.as_deref()),
-            poster: self.art(r.source_id, r.art_key.as_deref()).await,
-            backdrop: self.art(r.source_id, r.backdrop_key.as_deref()).await,
-            plot: r.description.clone(),
-            genres: genres_of(r.genre.as_deref()),
+            rating: if compact {
+                None
+            } else {
+                rating_of(r.rating.as_deref())
+            },
+            poster,
+            backdrop,
+            plot: if compact { None } else { r.description.clone() },
+            genres: if compact {
+                Vec::new()
+            } else {
+                genres_of(r.genre.as_deref())
+            },
             category_id: self.category_of(r),
-            season_count: i64::try_from(seasons.len()).unwrap_or(0),
-        })
+            season_count,
+        }
+    }
+
+    async fn page_art(&self, rows: &[VodRow], compact: bool) -> HashMap<String, String> {
+        let entries: Vec<_> = rows
+            .iter()
+            .flat_map(|r| {
+                [
+                    r.art_key.as_deref(),
+                    if compact {
+                        None
+                    } else {
+                        r.backdrop_key.as_deref()
+                    },
+                ]
+                .into_iter()
+                .flatten()
+                .map(move |url| (r.source_id, url))
+            })
+            .collect();
+        match self.images.register_page(&entries).await {
+            Ok(art) => art,
+            Err(_) => {
+                let mut art = HashMap::new();
+                for (source_id, url) in entries {
+                    if let Some(registered) = self.art(source_id, Some(url)).await {
+                        art.insert(url.to_owned(), registered);
+                    }
+                }
+                art
+            }
+        }
     }
 
     pub async fn list_movies(&self, a: VodListArgs) -> Result<Vec<MovieDto>> {
+        self.movie_page(a, false).await
+    }
+
+    pub async fn movie_page(&self, a: VodListArgs, compact: bool) -> Result<Vec<MovieDto>> {
         let rows = self.vod_rows(VodKind::Movie, &a).await?;
-        let mut out = Vec::with_capacity(rows.len());
-        for r in &rows {
-            out.push(self.movie_dto(r).await?);
+        if rows.is_empty() {
+            return Ok(Vec::new());
         }
-        Ok(out)
+        let ids: Vec<_> = rows.iter().map(|r| r.id).collect();
+        let (resumes, art) =
+            tokio::join!(self.store.vod_resumes(&ids), self.page_art(&rows, compact));
+        let resumes = resumes?;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                let poster = r.art_key.as_ref().and_then(|url| art.get(url)).cloned();
+                let backdrop = (!compact)
+                    .then(|| {
+                        r.backdrop_key
+                            .as_ref()
+                            .and_then(|url| art.get(url))
+                            .cloned()
+                    })
+                    .flatten();
+                self.movie_dto(r, resumes.get(&r.id), poster, backdrop, compact)
+            })
+            .collect())
     }
 
     pub async fn list_series(&self, a: VodListArgs) -> Result<Vec<SeriesDto>> {
+        self.series_page(a, false).await
+    }
+
+    pub async fn series_page(&self, a: VodListArgs, compact: bool) -> Result<Vec<SeriesDto>> {
         let rows = self.vod_rows(VodKind::Series, &a).await?;
-        let mut out = Vec::with_capacity(rows.len());
-        for r in &rows {
-            out.push(self.series_dto(r).await?);
+        if rows.is_empty() {
+            return Ok(Vec::new());
         }
-        Ok(out)
+        let ids: Vec<_> = rows.iter().map(|r| r.id).collect();
+        let (counts, art) = tokio::join!(
+            self.store.vod_season_counts(&ids),
+            self.page_art(&rows, compact)
+        );
+        let counts = counts?;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                let poster = r.art_key.as_ref().and_then(|url| art.get(url)).cloned();
+                let backdrop = (!compact)
+                    .then(|| {
+                        r.backdrop_key
+                            .as_ref()
+                            .and_then(|url| art.get(url))
+                            .cloned()
+                    })
+                    .flatten();
+                self.series_dto(
+                    r,
+                    counts.get(&r.id).copied().unwrap_or(0),
+                    poster,
+                    backdrop,
+                    compact,
+                )
+            })
+            .collect())
     }
 
     async fn cached_vod(&self, id: i64, kind: VodKind) -> Result<VodRow> {
@@ -271,7 +388,10 @@ impl Service {
                 row = r;
             }
         }
-        self.movie_dto(&row).await
+        let resume = self.resume_of(&row).await?;
+        let poster = self.art(row.source_id, row.art_key.as_deref()).await;
+        let backdrop = self.art(row.source_id, row.backdrop_key.as_deref()).await;
+        Ok(self.movie_dto(&row, resume.as_ref(), poster, backdrop, false))
     }
 
     pub async fn get_series(&self, id: i64) -> Result<SeriesDetailDto> {
@@ -364,8 +484,7 @@ impl Service {
             }
             Some((_, i)) => Some(eps[i].id),
         };
-        let mut series = self.series_dto(&row).await?;
-        series.season_count = i64::try_from(
+        let season_count = i64::try_from(
             seasons
                 .iter()
                 .filter(|s| s.number > 0)
@@ -373,6 +492,9 @@ impl Service {
                 .max(usize::from(!seasons.is_empty())),
         )
         .unwrap_or(0);
+        let poster = self.art(row.source_id, row.art_key.as_deref()).await;
+        let backdrop = self.art(row.source_id, row.backdrop_key.as_deref()).await;
+        let series = self.series_dto(&row, season_count, poster, backdrop, false);
         Ok(SeriesDetailDto {
             series,
             seasons,
@@ -654,7 +776,9 @@ impl Service {
             }
         }
         self.refresh_recordings(ch.source_id).await?;
-        self.emit(Event::CatalogUpdated(self.counts(ch.source_id).await?));
+        self.emit(Event::CatalogUpdated(
+            self.counts(ch.source_id, CatalogChange::Recordings).await?,
+        ));
         Ok(())
     }
 
