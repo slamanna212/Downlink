@@ -13,9 +13,11 @@ export interface ChannelLogoProps {
   src?: string | null;
   /** Defaults to the density setting. */
   density?: keyof typeof dl.density;
+  /** Drop the background plate behind a loaded image (initials fallback keeps its colour). */
+  bare?: boolean;
 }
 
-export function ChannelLogo({ channelId, name, src, density }: ChannelLogoProps) {
+export function ChannelLogo({ channelId, name, src, density, bare }: ChannelLogoProps) {
   const current = useUiStore((s) => s.density);
   const [w, h] = dl.density[density ?? current].logo;
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
@@ -26,6 +28,7 @@ export function ChannelLogo({ channelId, name, src, density }: ChannelLogoProps)
       className={classes.plate}
       style={showImage ? { width: w, height: h } : { width: w, height: h, background: logoColor(channelId) }}
       data-fallback={showImage ? undefined : 'true'}
+      data-bare={bare && showImage ? 'true' : undefined}
     >
       {showImage ? (
         <img className={classes.img} src={resolveImg(src) ?? undefined} alt={t('channel.logoAlt', { name })} loading="lazy" onError={() => setFailedSrc(src)} />

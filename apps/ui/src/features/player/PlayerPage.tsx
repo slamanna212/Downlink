@@ -496,7 +496,7 @@ export function PlayerPage() {
 
           <div className={classes.bar} data-hidden={barHidden || undefined}>
             <div className={classes.nowRow}>
-              {channel && <ChannelLogo channelId={channel.id} name={channel.name} src={channel.logo} density="tv" />}
+              {channel && <ChannelLogo channelId={channel.id} name={channel.name} src={channel.logo} density="tv" bare />}
               <div className={classes.nowText}>
                 <div className={classes.badges}>
                   {live && <StatusBadge kind="live" />}
