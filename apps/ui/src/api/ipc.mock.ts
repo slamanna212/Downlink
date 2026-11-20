@@ -1,6 +1,7 @@
 // Mock backend for browser dev and Storybook. SYNTHETIC data only (CLAUDE rule 16): no real provider
 // names, URLs or EPG. `?mock=empty` in the URL simulates a fresh install with no source;
 // `?mock=offline` simulates a source that is offline.
+import * as vod from './ipc.mock.vod';
 import type { Backend, CommandName, Commands, EventName, Events, Unlisten } from './ipc';
 import {
   Cap,
@@ -122,7 +123,7 @@ export function idleState(): PlayerState {
   return {
     state: 'Idle', mode: null, channelId: null, position: null, duration: null, buffered: null, seekable: false,
     volume: 100, muted: false, hwdecCurrent: null, videoCodec: null, width: null, height: null, waitingOn: null,
-    error: null, transitionedAt: Date.now(), programme: null, resumeAt: null,
+    error: null, transitionedAt: Date.now(), programme: null, title: null, resumeAt: null,
   };
 }
 
@@ -148,6 +149,16 @@ export function createMockBackend(): Backend {
   const transitions: Transition[] = [];
   const handlers = new Map<EventName, Set<(p: never) => void>>();
 
+  const seekableTicker = (mode: 'catchup' | 'vod' | 'recording') => {
+    setTimeout(() => setPlayer({ state: 'Connecting' }), 150);
+    setTimeout(() => {
+      setPlayer({ state: 'Playing', hwdecCurrent: 'vaapi', videoCodec: 'h264', width: 1920, height: 1080, buffered: 30 });
+      if (tick) clearInterval(tick);
+      tick = setInterval(() => {
+        if (player.mode === mode && player.state === 'Playing') setPlayer({ position: Math.min((player.position ?? 0) + 1, player.duration ?? 0), buffered: Math.min((player.position ?? 0) + 40, player.duration ?? 0) });
+      }, 1000);
+    }, 400);
+  };
   const emit = <E extends EventName>(event: E, payload: Events[E]) =>
     handlers.get(event)?.forEach((h) => h(payload as never));
   const setPlayer = (patch: Partial<PlayerState>) => {
@@ -197,14 +208,7 @@ export function createMockBackend(): Backend {
       if (!p) throw appError('stream', 'That programme is not available to play.');
       const dur = p.endUtc - p.startUtc;
       setPlayer({ state: 'Resolving', mode: 'catchup', channelId: p.channelId, programme: p, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: p.channelId % 2 === 0 ? Math.floor(dur / 3) : null, error: null });
-      setTimeout(() => setPlayer({ state: 'Connecting' }), 150);
-      setTimeout(() => {
-        setPlayer({ state: 'Playing', hwdecCurrent: 'vaapi', videoCodec: 'h264', width: 1920, height: 1080, buffered: 30 });
-        if (tick) clearInterval(tick);
-        tick = setInterval(() => {
-          if (player.mode === 'catchup' && player.state === 'Playing') setPlayer({ position: Math.min((player.position ?? 0) + 1, player.duration ?? 0), buffered: Math.min((player.position ?? 0) + 40, player.duration ?? 0) });
-        }, 1000);
-      }, 400);
+      seekableTicker('catchup');
       return null;
     },
     restart_programme: ({ channelId }) => {
@@ -212,8 +216,12 @@ export function createMockBackend(): Backend {
       if (!nn) throw appError('stream', 'There is no programme to restart on this channel.');
       return impl.play_catchup({ programmeId: nn.id });
     },
-    schedule_recording: ({ programmeId }) => {
+    schedule_recording: ({ programmeId, kind }) => {
       scheduled.add(programmeId);
+      const [cid] = programmeId.split(':').map(Number);
+      const p = genProgrammes(cid ?? 0, 0, 4e9, scheduled).find((x) => x.id === programmeId);
+      const ch = channels.find((c) => c.id === cid);
+      if (p && ch) vod.addRecording(nowSec(), { title: p.title ?? ch.name, channelId: ch.id, channelName: ch.name, startUtc: p.startUtc, endUtc: p.endUtc }, kind === 'series');
       emit('catalog://updated', { sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
       return null;
     },
@@ -244,6 +252,58 @@ export function createMockBackend(): Backend {
       });
       const progs = searchIndex.filter((x) => x.hay.includes(q)).slice(0, limit).map(({ programme, channel }) => ({ programme, channel }));
       return { channels: hits.slice(0, limit), programmes: progs };
+    },
+    list_vod_categories: ({ kind }) => vod.vodCategories(kind),
+    list_movies: (a) => vod.listMovies(a),
+    get_movie: ({ id }) => {
+      const m = vod.getMovie(id);
+      if (!m) throw appError('stream', 'That movie is no longer in the library.');
+      return m;
+    },
+    list_series: (a) => vod.listSeries(a),
+    get_series: ({ id }) => {
+      const s = vod.getSeries(id);
+      if (!s) throw appError('stream', 'That series is no longer in the library.');
+      return s;
+    },
+    play_vod: ({ kind, id, resume }) => {
+      const info = vod.vodInfo(kind, id);
+      if (!info) throw appError('stream', 'This title is not available to play right now. Try again later.');
+      const at = resume && info.resumeSecs ? info.resumeSecs : 0;
+      setPlayer({ state: 'Resolving', mode: 'vod', channelId: null, programme: null, title: info.title, position: at, duration: info.durationSecs, buffered: at, seekable: true, resumeAt: null, error: null });
+      seekableTicker('vod');
+      return null;
+    },
+    list_recordings: () => vod.listRecordings(nowSec()),
+    cancel_recording: ({ id }) => {
+      vod.updateRecording(id, () => null);
+      return null;
+    },
+    stop_recording: ({ id }) => {
+      vod.updateRecording(id, (r) => ({ ...r, status: 'completed', endUtc: nowSec(), sizeBytes: 500_000_000 }));
+      return null;
+    },
+    extend_recording: ({ id, minutes }) => {
+      vod.updateRecording(id, (r) => ({ ...r, endUtc: r.endUtc + minutes * 60 }));
+      return null;
+    },
+    delete_recording: ({ id }) => {
+      vod.updateRecording(id, () => null);
+      return null;
+    },
+    list_recording_rules: () => vod.listRules(nowSec()),
+    delete_recording_rule: ({ id }) => {
+      vod.deleteRule(id);
+      return null;
+    },
+    play_recording: ({ id }) => {
+      const r = vod.getRecording(id);
+      if (!r) throw appError('stream', 'That recording is gone. It may have been deleted.');
+      const live = r.status === 'recording';
+      const dur = (live ? nowSec() : r.endUtc) - r.startUtc;
+      setPlayer({ state: 'Resolving', mode: 'recording', channelId: r.channelId, programme: null, title: r.title, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: null, error: null });
+      seekableTicker('recording');
+      return null;
     },
     get_player_state: () => player,
     play_channel: ({ channelId }) => {

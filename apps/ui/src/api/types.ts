@@ -115,6 +115,8 @@ export interface PlayerState {
   channelId: number | null;
   /** Programme being played (live: the current one; catch-up: the archived one). */
   programme: Programme | null;
+  /** Title of VOD / recording media being played (null for live and catch-up, which use `programme`). */
+  title: string | null;
   /** A saved resume point (seconds) the UI may offer; null when none. */
   resumeAt: number | null;
   /** Seconds. Null while not seekable. */
@@ -336,4 +338,115 @@ export interface ProgrammeHit {
 export interface SearchResult {
   channels: Channel[];
   programmes: ProgrammeHit[];
+}
+
+// ---- VOD ----
+export type VodKind = 'movie' | 'series';
+
+export interface VodCategory {
+  id: number;
+  name: string;
+  count: number;
+}
+
+export interface VodListArgs {
+  categoryId?: number | null;
+  query?: string | null;
+  offset?: number;
+  limit?: number;
+}
+
+export interface Movie {
+  id: number;
+  title: string;
+  year: number | null;
+  /** 0..10 or null. */
+  rating: number | null;
+  durationSecs: number | null;
+  /** `dlimg://` URL or null (UI draws a deterministic fallback). */
+  poster: string | null;
+  backdrop: string | null;
+  plot: string | null;
+  genres: string[];
+  categoryId: number | null;
+  /** Saved position in seconds, null when never watched. */
+  resumeSecs: number | null;
+  watched: boolean;
+}
+
+export interface Series {
+  id: number;
+  title: string;
+  year: number | null;
+  rating: number | null;
+  poster: string | null;
+  backdrop: string | null;
+  plot: string | null;
+  genres: string[];
+  categoryId: number | null;
+  seasonCount: number;
+}
+
+export interface Episode {
+  id: number;
+  number: number;
+  title: string;
+  plot: string | null;
+  durationSecs: number | null;
+  still: string | null;
+  resumeSecs: number | null;
+  watched: boolean;
+}
+
+export interface Season {
+  number: number;
+  episodes: Episode[];
+}
+
+export interface SeriesDetail {
+  series: Series;
+  seasons: Season[];
+  /** Episode to continue with (resume or next unwatched), null when none. */
+  nextEpisodeId: number | null;
+}
+
+export interface PlayVodArgs {
+  kind: 'movie' | 'episode';
+  id: number;
+  /** Seek to the saved position. */
+  resume?: boolean;
+}
+
+// ---- DVR ----
+export type RecordingStatus = 'scheduled' | 'recording' | 'completed' | 'failed';
+
+export interface Recording {
+  id: number;
+  title: string;
+  channelId: number | null;
+  channelName: string;
+  startUtc: number;
+  endUtc: number;
+  status: RecordingStatus;
+  ruleId: number | null;
+  /** Human label of the rule that created it (e.g. "Series"), null for one-offs. */
+  ruleLabel: string | null;
+  sizeBytes: number | null;
+  /** Failure reason (one sentence) when status is failed. */
+  error: string | null;
+}
+
+export interface RecordingsData {
+  upcoming: Recording[];
+  inProgress: Recording[];
+  completed: Recording[];
+}
+
+export interface RecordingRule {
+  id: number;
+  title: string;
+  channelName: string;
+  kind: 'series' | 'recurring';
+  /** e.g. "New episodes" or "Weekdays 19:00". */
+  schedule: string;
 }

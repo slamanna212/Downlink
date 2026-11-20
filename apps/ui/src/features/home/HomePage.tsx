@@ -13,7 +13,7 @@ import { useDLFocusable } from '../../lib/spatial';
 import { useNowEpoch } from '../../lib/useNow';
 import { modKeyLabel } from '../../lib/platform';
 import { t } from '../../lib/i18n';
-import { playCatchup, playChannel, restartProgramme } from '../player/actions';
+import { playCatchup, playChannel, playRecording, playVod, restartProgramme } from '../player/actions';
 import classes from './Home.module.css';
 
 function Focusable({ children, className, onPlay }: { children: React.ReactNode; className: string | undefined; onPlay: () => void }) {
@@ -34,6 +34,8 @@ function useActions() {
       if (it.kind === 'live' && it.channel) go(playChannel(it.channel.id));
       else if (it.kind === 'catchup' && it.programme) go(playCatchup(it.programme.id));
       else if (it.kind === 'catchup' && it.channel) go(restartProgramme(it.channel.id));
+      else if (it.kind === 'movie' || it.kind === 'episode') go(playVod(it.kind, Number(it.id.split(':')[1]), true));
+      else if (it.kind === 'recording') go(playRecording(Number(it.id.split(':')[1])));
     },
   };
 }
@@ -58,8 +60,8 @@ function Hero({ item, now }: { item: ContinueItem; now: number }) {
         </div>
       )}
       <div className={classes.heroActions}>
-        <DLButton variant="filled" size="lg" onClick={() => a.open(item)}>{t('guide.watchLive')}</DLButton>
-        {item.channel && (
+        <DLButton variant="filled" size="lg" onClick={() => a.open(item)}>{item.kind === 'live' ? t('guide.watchLive') : t('vod.play')}</DLButton>
+        {item.channel && (item.kind === 'live' || item.kind === 'catchup') && (
           <DLButton variant="default" size="lg" onClick={() => void restartProgramme(item.channel!.id)}>
             {t('guide.fromStart')}
           </DLButton>

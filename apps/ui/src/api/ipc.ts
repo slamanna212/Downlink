@@ -12,6 +12,14 @@ import type {
   HomeData,
   Programme,
   RecordKind,
+  VodCategory,
+  VodListArgs,
+  Movie,
+  Series,
+  SeriesDetail,
+  PlayVodArgs,
+  RecordingsData,
+  RecordingRule,
   SearchResult,
   Counts,
   SessionStats,
@@ -66,6 +74,20 @@ export interface Commands {
   get_update_status: { args: Record<string, never>; result: UpdateStatus };
   set_update_channel: { args: { channel: UpdateChannel }; result: UpdateStatus };
   check_for_updates: { args: Record<string, never>; result: UpdateStatus };
+  list_vod_categories: { args: { kind: 'movie' | 'series' }; result: VodCategory[] };
+  list_movies: { args: VodListArgs; result: Movie[] };
+  get_movie: { args: { id: number }; result: Movie };
+  list_series: { args: VodListArgs; result: Series[] };
+  get_series: { args: { id: number }; result: SeriesDetail };
+  play_vod: { args: PlayVodArgs; result: null };
+  list_recordings: { args: Record<string, never>; result: RecordingsData };
+  cancel_recording: { args: { id: number }; result: null };
+  stop_recording: { args: { id: number }; result: null };
+  extend_recording: { args: { id: number; minutes: number }; result: null };
+  delete_recording: { args: { id: number }; result: null };
+  list_recording_rules: { args: Record<string, never>; result: RecordingRule[] };
+  delete_recording_rule: { args: { id: number }; result: null };
+  play_recording: { args: { id: number }; result: null };
 }
 export type CommandName = keyof Commands;
 

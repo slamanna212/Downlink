@@ -29,3 +29,21 @@ export async function restartProgramme(channelId: number): Promise<AppError | nu
     return toAppError(e);
   }
 }
+
+export async function playVod(kind: 'movie' | 'episode', id: number, resume = false): Promise<AppError | null> {
+  try {
+    await invoke('play_vod', { kind, id, resume });
+    return null;
+  } catch (e) {
+    return toAppError(e);
+  }
+}
+
+export async function playRecording(id: number): Promise<AppError | null> {
+  try {
+    await invoke('play_recording', { id });
+    return null;
+  } catch (e) {
+    return toAppError(e);
+  }
+}

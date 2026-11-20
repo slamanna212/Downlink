@@ -451,7 +451,7 @@ export function GuidePage() {
   const onJump = useStable((t: number) => scrollToTime(t));
   const goNow = useStable(() => scrollToTime(floorToTick(nowEpoch() - 1800)));
   const groupList = useMemo(() => groups.data ?? [], [groups.data]);
-  const jumpDays = useMemo(() => Array.from({ length: backDays + FWD_DAYS }, (_, i) => addDays(geo.rangeStart, i)), [geo.rangeStart]);
+  const jumpDays = useMemo(() => Array.from({ length: backDays + FWD_DAYS }, (_, i) => addDays(geo.rangeStart, i)), [geo.rangeStart, backDays]);
 
   if (loaded && !hasSource) return <EmptySource />;
 

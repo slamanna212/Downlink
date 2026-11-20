@@ -5,13 +5,13 @@ import { AddSourcePage } from '../features/sources/AddSourcePage';
 import { GuidePage } from '../features/guide/GuidePage';
 import { HomePage } from '../features/home/HomePage';
 import { SearchPage } from '../features/search/SearchPage';
+import { MovieDetail, SeriesDetailPage } from '../features/vod/VodDetail';
+import { VodBrowse } from '../features/vod/VodBrowse';
+import { RecordingsPage } from '../features/recordings/RecordingsPage';
 import { PlayerPage } from '../features/player/PlayerPage';
 import { ChannelsPage } from '../features/channels/ChannelsPage';
 import {
-  MoviesPage,
   NotFoundPage,
-  RecordingsPage,
-  SeriesPage,
 } from '../pages/pages';
 
 export const routes: RouteObject[] = [
@@ -22,8 +22,10 @@ export const routes: RouteObject[] = [
       { index: true, element: <HomePage /> },
       { path: 'channels', element: <ChannelsPage /> },
       { path: 'guide', element: <GuidePage /> },
-      { path: 'movies', element: <MoviesPage /> },
-      { path: 'series', element: <SeriesPage /> },
+      { path: 'movies', element: <VodBrowse kind="movie" /> },
+      { path: 'movies/:id', element: <MovieDetail /> },
+      { path: 'series', element: <VodBrowse kind="series" /> },
+      { path: 'series/:id', element: <SeriesDetailPage /> },
       { path: 'recordings', element: <RecordingsPage /> },
       { path: 'settings', element: <SettingsPage /> },
       { path: 'settings/:section', element: <SettingsPage /> },

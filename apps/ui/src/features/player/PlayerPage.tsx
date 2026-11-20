@@ -236,7 +236,7 @@ export function PlayerPage() {
   const seekBy = useCallback(
     (delta: number) => {
       const st = usePlayerStore.getState().player;
-      if (st.mode !== 'catchup' || !st.seekable) return;
+      if (st.mode === 'live' || st.mode === null || !st.seekable) return;
       cmd({ kind: 'seek', seconds: Math.max(0, Math.min((st.position ?? 0) + delta, st.duration ?? 0)) });
     },
     [cmd],
@@ -312,12 +312,13 @@ export function PlayerPage() {
 
   const showStatus = ['Resolving', 'Connecting', 'Buffering'].includes(player.state);
   const catchup = player.mode === 'catchup';
-  const live = !catchup && (player.mode === 'live' || player.mode === null);
+  const timeshift = player.mode === 'catchup' || player.mode === 'vod' || player.mode === 'recording';
+  const live = !timeshift && (player.mode === 'live' || player.mode === null);
   const sourceName = sources.data?.find((s) => s.id === channel?.sourceId)?.name ?? '–';
   const shownProg = catchup ? player.programme : prog;
   const position = player.position ?? 0;
   const duration = player.duration ?? 0;
-  const showResume = catchup && player.resumeAt != null && player.resumeAt > 0 && resumeDismissed !== player.programme?.id;
+  const showResume = timeshift && player.resumeAt != null && player.resumeAt > 0 && resumeDismissed !== player.programme?.id;
 
   return (
     <div ref={rootRef} className={classes.root} data-video-rect data-idle={barHidden || undefined}>
@@ -374,6 +375,7 @@ export function PlayerPage() {
             <div className={classes.badges}>
               {live && <StatusBadge kind="live" />}
               {catchup && <StatusBadge kind="catchup" />}
+              {player.mode === 'recording' && <StatusBadge kind="rec" />}
               {channel && (
                 <span>
                   {catchup && shownProg
@@ -385,10 +387,10 @@ export function PlayerPage() {
               {(channel?.quality === 'HD' || channel?.quality === 'FHD') && <StatusBadge kind="hd" />}
             </div>
             <div className={classes.titleRow}>
-              <h1 className={classes.title}>{shownProg?.title ?? (channel ? t('player.noGuide') : '')}</h1>
+              <h1 className={classes.title}>{player.title ?? shownProg?.title ?? (channel ? t('player.noGuide') : '')}</h1>
               {live && next && <span className={classes.next}>{t('player.next', { time: formatClock(next.startUtc), title: next.title ?? '' })}</span>}
             </div>
-            {catchup && player.seekable && duration > 0 ? (
+            {timeshift && player.seekable && duration > 0 ? (
               <div className={classes.timeline}>
                 <span>{formatDuration(position)}</span>
                 <SeekBar label={t('player.seek')} position={position} duration={duration} buffered={player.buffered ?? 0} onSeek={(s) => cmd({ kind: 'seek', seconds: s })} />
@@ -410,7 +412,7 @@ export function PlayerPage() {
               )
             )}
             <div className={classes.controls}>
-              {catchup && <DLIconButton label={t('player.back10')} icon={IconRewindBackward10} variant="overlay" size="lg" onClick={() => seekBy(-10)} />}
+              {timeshift && <DLIconButton label={t('player.back10')} icon={IconRewindBackward10} variant="overlay" size="lg" onClick={() => seekBy(-10)} />}
               <span className={classes.playPause}>
                 <DLIconButton
                   label={paused ? t('player.play') : t('player.pause')}
@@ -421,7 +423,7 @@ export function PlayerPage() {
                   onClick={togglePause}
                 />
               </span>
-              {catchup && <DLIconButton label={t('player.fwd10')} icon={IconRewindForward10} variant="overlay" size="lg" onClick={() => seekBy(10)} />}
+              {timeshift && <DLIconButton label={t('player.fwd10')} icon={IconRewindForward10} variant="overlay" size="lg" onClick={() => seekBy(10)} />}
               {(live || catchup) && channel && (
                 <DLButton variant="overlay" size="lg" icon={IconHistory} keyHint="S" onClick={restart}>
                   {t('player.restart')}
