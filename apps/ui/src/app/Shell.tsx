@@ -156,6 +156,7 @@ export function Shell() {
   const railPref = useUiStore((s) => s.railPref);
   const setRailPref = useUiStore((s) => s.setRailPref);
   const fullscreen = useUiStore((s) => s.fullscreen);
+  const videoHole = useUiStore((s) => s.videoHole);
   const { loaded, hasSource } = useCaps();
   const { data: sources } = useSources();
   const qc = useQueryClient();
@@ -181,7 +182,7 @@ export function Shell() {
   useHotkeys([['mod+K', () => openPalette(), { preventDefault: true }]], []);
 
   return (
-    <div className={`dl-shell ${classes.shell}`} data-route={route} data-allow-blur={String(dl.allowBlur)}>
+    <div className={`dl-shell ${classes.shell}`} data-route={route} data-video-hole={(videoHole && route !== 'player') || undefined} data-allow-blur={String(dl.allowBlur)}>
       <a href="#main" className={classes.skip}>
         {t('a11y.skipToContent')}
       </a>

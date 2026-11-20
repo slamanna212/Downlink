@@ -4,16 +4,37 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  /* Paints everything below the preview pane. The pane paints itself so its mini player can stay clear
+     while the shell is transparent (Shell data-video-hole). */
+  background: linear-gradient(var(--dl-surface-0), var(--dl-surface-0)) 0 calc(196px * var(--gscale, 1)) / 100% 100% no-repeat;
 }
 
 /* ---------- preview pane (196 px) ---------- */
 .preview {
+  position: relative;
   height: calc(196px * var(--gscale, 1));
   flex: none;
   display: flex;
   gap: var(--mantine-spacing-xl);
   padding: var(--mantine-spacing-xl) var(--mantine-spacing-xl) var(--mantine-spacing-lg);
-  border-bottom: 1px solid var(--dl-hairline);
+  background: var(--dl-surface-0);
+  overflow: hidden;
+}
+/* Hairline drawn inside the pane so the mini player's backdrop sits under it, not a transparent border. */
+.preview::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--dl-hairline);
+  pointer-events: none;
+}
+/* Mini player: the pane stops painting and the box's spread shadow repaints it, leaving only the box clear
+   for the libmpv surface underneath (clipped by the pane's overflow). */
+.preview[data-mini] {
+  background: transparent;
 }
 .art {
   width: calc(264px * var(--gscale, 1));
@@ -29,7 +50,40 @@
   font-size: var(--mantine-font-size-xs);
   color: var(--dl-text-faint);
 }
+.mini {
+  position: relative;
+  width: calc(264px * var(--gscale, 1));
+  height: calc(148px * var(--gscale, 1));
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--mantine-radius-lg);
+  background: transparent;
+  box-shadow: 0 0 0 100vmax var(--dl-surface-0);
+  cursor: pointer;
+}
+/* Keeps the backdrop when focused (the global ring would replace the whole box-shadow). */
+.preview .mini:focus-visible {
+  outline: none;
+  box-shadow: var(--dl-focus-ring), 0 0 0 100vmax var(--dl-surface-0);
+}
+/* Browser dev mode has no libmpv: a stand-in so the box isn't a hole onto nothing. */
+.miniDev {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dl-surface-3);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-xs);
+  color: var(--dl-text-faint);
+}
 .info {
+  /* Above the mini player's spread backdrop (a later flex item paints over earlier ones). */
+  position: relative;
+  z-index: 1;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -68,10 +122,11 @@
   gap: var(--mantine-spacing-sm);
   margin-top: auto;
 }
+/* Sits just left of the preview art, which takes the pane's right edge. */
 .controls {
   position: absolute;
   top: var(--mantine-spacing-xl);
-  right: var(--mantine-spacing-xl);
+  right: calc(var(--mantine-spacing-xl) * 2 + 264px * var(--gscale, 1));
   z-index: 6;
   display: flex;
   flex-direction: column;

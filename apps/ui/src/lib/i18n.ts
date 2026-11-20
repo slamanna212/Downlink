@@ -268,6 +268,7 @@ export const en = {
   'guide.notAvailable': 'Not available to watch',
   'guide.metaLine': '{number} · {channel} · {day} {range}',
   'guide.noSelection': 'Select a programme',
+  'guide.openPlayer': 'Open player',
   'guide.today': 'Today',
   'home.title': 'Home',
   'home.search': 'Search channels, programmes',

@@ -10,6 +10,16 @@
   background: transparent;
 }
 
+/* Mini player on an app route (guide): the shell and main stop painting too; the route paints its own
+   surfaces and leaves only the mini player's rect clear. */
+.shell[data-video-hole],
+.shell[data-video-hole] .main {
+  background: transparent;
+}
+.shell[data-video-hole] .banner {
+  background: var(--dl-surface-0);
+}
+
 .rail {
   flex: none;
   height: 100%;

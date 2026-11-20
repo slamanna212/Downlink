@@ -34,39 +34,15 @@ import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { appendDigit, matchChannelNumber, NUMBER_ENTRY_TIMEOUT_MS } from '../../lib/numberEntry';
 import { dayLabel, formatClock, formatClockSeconds, formatDuration, formatRange, progress } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
-import { createBoundsReporter, toPhysicalBounds } from '../../lib/videoBounds';
+import { useVideoBounds } from '../../lib/useVideoBounds';
 import { useNowEpoch } from '../../lib/useNow';
 import { usePlayerStore } from '../../store/player';
 import { useUiStore } from '../../store/ui';
 import { copyDiagnostics } from '../diagnostics/copyDiagnostics';
 import { resumeUseful } from '../vod/vod';
 import { playChannel, restartProgramme } from './actions';
+import { holdSession, releaseSession } from './session';
 import classes from './Player.module.css';
-
-/** Reports the element's rect in physical pixels (ResizeObserver + one rAF debounce). */
-export function useVideoBounds(ref: React.RefObject<HTMLElement | null>) {
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const reporter = createBoundsReporter({
-      measure: () => toPhysicalBounds(el.getBoundingClientRect(), window.devicePixelRatio || 1),
-      send: (b) => void invoke('set_video_bounds', b).catch(() => undefined),
-    });
-    const ro = new ResizeObserver(() => reporter.schedule());
-    ro.observe(el);
-    // Position can change without a resize (rail collapse transition, window move/zoom).
-    const onChange = () => reporter.schedule();
-    window.addEventListener('resize', onChange);
-    document.addEventListener('transitionend', onChange, true);
-    reporter.schedule();
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', onChange);
-      document.removeEventListener('transitionend', onChange, true);
-      reporter.dispose();
-    };
-  }, [ref]);
-}
 
 function ZapPill({ channel, title, until }: { channel: Channel; title: string | null; until: number | null }) {
   const [visible, setVisible] = useState(true);
@@ -194,7 +170,7 @@ function ErrorOverlay({ error, onRetry }: { error: AppError | null; onRetry: () 
   );
 }
 
-let pendingStop: ReturnType<typeof setTimeout> | null = null;
+let pendingFullscreenReset: ReturnType<typeof setTimeout> | null = null;
 
 export function PlayerPage() {
   const navigate = useNavigate();
@@ -229,17 +205,18 @@ export function PlayerPage() {
   const paused = player.state === 'Paused';
   const barHidden = idle && !paused && !failed && !infoOpen;
 
-  // Sessions are stopped when leaving the player (CLAUDE rule 6). The stop is deferred one tick and
-  // cancelled by a re-mount, so React StrictMode's simulated unmount/mount does not kill playback.
+  // Sessions are stopped when leaving the player (CLAUDE rule 6), unless the guide's mini player takes the
+  // session over (see ./session). Fullscreen always ends with the player; deferred one tick so React
+  // StrictMode's simulated unmount/mount does not drop it.
   useEffect(() => {
-    if (pendingStop) {
-      clearTimeout(pendingStop);
-      pendingStop = null;
-    }
+    holdSession();
+    if (pendingFullscreenReset) clearTimeout(pendingFullscreenReset);
+    pendingFullscreenReset = null;
     return () => {
-      pendingStop = setTimeout(() => {
-        pendingStop = null;
-        void invoke('player_command', { command: { kind: 'stop' } }).catch(() => undefined);
+      releaseSession();
+      pendingFullscreenReset = setTimeout(() => {
+        pendingFullscreenReset = null;
+        if (!useUiStore.getState().fullscreen) return;
         useUiStore.getState().setFullscreen(false);
         void invoke('set_fullscreen', { enabled: false }).catch(() => undefined);
       }, 0);
@@ -280,7 +257,13 @@ export function PlayerPage() {
     if (st.channelId != null) void restartProgramme(st.channelId);
   }, []);
   const goLive = useCallback(() => cmd({ kind: 'goLive' }), [cmd]);
-  const goBack = useCallback(() => void navigate('/channels'), [navigate]);
+  // Back to wherever the player was opened from (the guide keeps playing in its mini player); a player
+  // reached without history (resume on launch, deep link into a fresh window) falls back to the list.
+  const goBack = useCallback(() => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) void navigate(-1);
+    else void navigate('/channels');
+  }, [navigate]);
 
   const clearEntry = useCallback(() => {
     if (entryTimer.current) clearTimeout(entryTimer.current);
@@ -458,6 +441,7 @@ export function PlayerPage() {
               )
             )}
             <div className={classes.controls}>
+              <DLIconButton label={t('player.back')} icon={IconArrowLeft} variant="overlay" size="lg" onClick={goBack} />
               {timeshift && <DLIconButton label={t('player.back10')} icon={IconRewindBackward10} variant="overlay" size="lg" onClick={() => seekBy(-10)} />}
               <span className={classes.playPause}>
                 <DLIconButton
