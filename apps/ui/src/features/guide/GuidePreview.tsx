@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Menu } from '@mantine/core';
 import { IconChevronDown, IconStar } from '@tabler/icons-react';
@@ -44,7 +44,9 @@ function MiniPlayer() {
   const navigate = useNavigate();
   const ref = useRef<HTMLButtonElement | null>(null);
   useVideoBounds(ref);
-  useEffect(() => {
+  // Layout effect: the shell must be clear on the first painted frame, or coming back from the player shows
+  // one opaque frame over the video.
+  useLayoutEffect(() => {
     holdSession();
     useUiStore.getState().setVideoHole(true);
     return () => {

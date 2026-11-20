@@ -137,7 +137,7 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   Hide Movies/Series/Recordings when no source has the cap.
 - **Channels**: group sidebar 220 + virtualised rows (logo 72×36 · number · name + badges · now + 2 px
   progress · next · catch-up days + fav). Playing row: accent wash, accent-text name, speaker icon.
-- **Guide**: preview pane (196 px, updates after 300 ms dwell) · 40 px sticky time header · 180 px sticky
+- **Guide**: preview pane (260 px, 384×216 art / mini player, updates after 300 ms dwell) · 40 px sticky time header · 180 px sticky
   channel column · 64 px rows · red now line + time pill. Blocks: past+archive `--dl-guide-past` + history
   icon · past no archive dashed, disabled text · now `--dl-guide-now` + 10% fill + 2 px bar · future
   `--dl-guide-future` · scheduled red dot · focused ring.

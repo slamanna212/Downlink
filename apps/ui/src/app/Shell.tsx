@@ -33,12 +33,17 @@ function IdleMount({ children, when }: { children: React.ReactNode; when?: boole
 }
 
 /** Remounted per path (via key) so every route change fades in. */
-function RouteTransition({ children }: { children: React.ReactNode }) {
-  const [entered, setEntered] = useState(false);
+/**
+ * `instant` skips the fade: leaving a video route, the native surface jumps straight to its new rect (e.g. the
+ * guide's mini player) and can't fade with the webview, so a fading page would reveal it on an empty window.
+ */
+function RouteTransition({ children, instant }: { children: React.ReactNode; instant: boolean }) {
+  const [entered, setEntered] = useState(instant);
   useEffect(() => {
+    if (instant) return;
     const id = requestAnimationFrame(() => requestAnimationFrame(() => setEntered(true)));
     return () => cancelAnimationFrame(id);
-  }, []);
+  }, [instant]);
   return <div className={`${classes.route} ${entered ? classes.routeIn : ''}`}>{children}</div>;
 }
 
@@ -140,6 +145,8 @@ function useDeepLinks() {
   }, [navigate]);
 }
 
+const isVideoRoute = (path: string) => path.startsWith('/player') || path.startsWith('/multiview');
+
 export function Shell() {
   useResumeOnLaunch();
   const detailOpen = useDetailStore((s) => s.open !== null);
@@ -171,7 +178,15 @@ export function Shell() {
   const mode: RailMode = density === 'tv' ? 'tv' : collapsed ? 'collapsed' : 'expanded';
   const width = mode === 'tv' ? dl.layout.railTv : mode === 'collapsed' ? dl.layout.railCollapsed : dl.layout.railExpanded;
   // Video routes leave the video rects transparent so the native surfaces show through.
-  const route = pathname.startsWith('/player') || pathname.startsWith('/multiview') ? 'player' : 'app';
+  const route = isVideoRoute(pathname) ? 'player' : 'app';
+  // Previous pathname, tracked in state (React's "adjust state on prop change" pattern) so the new route's
+  // first render already knows whether it came from a video route.
+  const [prevPath, setPrevPath] = useState(pathname);
+  const [fromVideo, setFromVideo] = useState(false);
+  if (prevPath !== pathname) {
+    setPrevPath(pathname);
+    setFromVideo(isVideoRoute(prevPath));
+  }
 
   // Keyboard map (PLAN §8.4): G guide, L live list, / search.
   useHotkeys([
@@ -197,7 +212,7 @@ export function Shell() {
         {route !== 'player' && hasSource && sources?.[0] && (
           <StatusBanner source={sources[0]} onRetry={() => retry.mutate(sources[0]!.id)} onSettings={() => void navigate('/settings/sources')} />
         )}
-        <RouteTransition key={pathname}>
+        <RouteTransition key={pathname} instant={fromVideo && route === 'app'}>
           <Outlet />
         </RouteTransition>
       </main>

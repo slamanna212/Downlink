@@ -1,4 +1,8 @@
 .page {
+  /* Preview pane and its art / mini player box (16:9), scaled at tv density. */
+  --gpane: calc(260px * var(--gscale, 1));
+  --gart-w: calc(384px * var(--gscale, 1));
+  --gart-h: calc(216px * var(--gscale, 1));
   position: relative;
   display: flex;
   flex-direction: column;
@@ -6,13 +10,13 @@
   min-height: 0;
   /* Paints everything below the preview pane. The pane paints itself so its mini player can stay clear
      while the shell is transparent (Shell data-video-hole). */
-  background: linear-gradient(var(--dl-surface-0), var(--dl-surface-0)) 0 calc(196px * var(--gscale, 1)) / 100% 100% no-repeat;
+  background: linear-gradient(var(--dl-surface-0), var(--dl-surface-0)) 0 var(--gpane) / 100% 100% no-repeat;
 }
 
-/* ---------- preview pane (196 px) ---------- */
+/* ---------- preview pane (260 px) ---------- */
 .preview {
   position: relative;
-  height: calc(196px * var(--gscale, 1));
+  height: var(--gpane);
   flex: none;
   display: flex;
   gap: var(--mantine-spacing-xl);
@@ -37,8 +41,8 @@
   background: transparent;
 }
 .art {
-  width: calc(264px * var(--gscale, 1));
-  height: calc(148px * var(--gscale, 1));
+  width: var(--gart-w);
+  height: var(--gart-h);
   flex: none;
   border-radius: var(--mantine-radius-lg);
   border: 1px solid var(--dl-hairline);
@@ -52,8 +56,8 @@
 }
 .mini {
   position: relative;
-  width: calc(264px * var(--gscale, 1));
-  height: calc(148px * var(--gscale, 1));
+  width: var(--gart-w);
+  height: var(--gart-h);
   flex: none;
   padding: 0;
   border: 0;
@@ -113,7 +117,7 @@
   line-height: 1.5;
   color: var(--dl-text-dim);
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -126,7 +130,7 @@
 .controls {
   position: absolute;
   top: var(--mantine-spacing-xl);
-  right: calc(var(--mantine-spacing-xl) * 2 + 264px * var(--gscale, 1));
+  right: calc(var(--mantine-spacing-xl) * 2 + var(--gart-w));
   z-index: 6;
   display: flex;
   flex-direction: column;
