@@ -14,7 +14,7 @@ import { DLButton } from '../../components/DLButton/DLButton';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { EmptySource } from '../../pages/EmptySource';
-import { addDays, dayLabel, floorToTick, formatClock, formatDay, nowEpoch, progress, startOfDay } from '../../lib/time';
+import { TICK_SECONDS, guideNowAnchor, addDays, dayLabel, formatClock, formatDay, nowEpoch, progress, startOfDay } from '../../lib/time';
 import { useNowEpoch } from '../../lib/useNow';
 import { useDLFocusable } from '../../lib/spatial';
 import { useInteractive } from '../../lib/perf';
@@ -166,7 +166,7 @@ const GuideTicks = memo(function GuideTicks({ geo, t0, t1 }: { geo: Geometry; t0
   return (
     <>
       {tickMarks(geo, t0, t1).map((m) => (
-        <div key={m.t} className={classes.tick} data-day={m.isDay || undefined} style={{ left: timeToX(geo, m.t), width: 1800 * geo.pps }}>
+        <div key={m.t} className={classes.tick} data-day={m.isDay || undefined} style={{ left: timeToX(geo, m.t), width: TICK_SECONDS * geo.pps }}>
           {m.label}
         </div>
       ))}
@@ -273,7 +273,7 @@ export function GuidePage() {
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const t = lastGeo.current ? xToTime(lastGeo.current, scrollPos.current.left + COL_W) : floorToTick(nowEpoch() - 1800);
+    const t = lastGeo.current ? xToTime(lastGeo.current, scrollPos.current.left + COL_W) : guideNowAnchor();
     el.scrollLeft = Math.max(0, timeToX(geo, t) - COL_W);
     scrollPos.current = { left: el.scrollLeft, top: el.scrollTop };
     lastGeo.current = geo;
@@ -351,7 +351,7 @@ export function GuidePage() {
       const p = i >= 0 ? list?.[i] : undefined;
       const el = scrollRef.current;
       if (el && opts.reveal !== false) {
-        const reveal = scrollToReveal(geo, viewport(), { start: p?.startUtc ?? f.t, end: p?.endUtc ?? f.t + 1800, row: f.row });
+        const reveal = scrollToReveal(geo, viewport(), { start: p?.startUtc ?? f.t, end: p?.endUtc ?? f.t + TICK_SECONDS, row: f.row });
         if (reveal.left !== undefined || reveal.top !== undefined) el.scrollTo({ left: reveal.left ?? el.scrollLeft, top: reveal.top ?? el.scrollTop });
       }
       pendingFocus.current = true;
@@ -392,7 +392,7 @@ export function GuidePage() {
       else moveTo(next);
     } else if (e.key === 'Home') {
       e.preventDefault();
-      scrollToTime(floorToTick(nowEpoch() - 1800));
+      scrollToTime(guideNowAnchor());
       moveTo({ row: focus.row, t: nowEpoch() }, { reveal: false });
     } else if (e.key === 'Enter') {
       e.preventDefault();
@@ -458,7 +458,7 @@ export function GuidePage() {
     scrollRef.current?.scrollTo({ top: 0, left: scrollRef.current.scrollLeft });
   });
   const onJump = useStable((t: number) => scrollToTime(t));
-  const goNow = useStable(() => scrollToTime(floorToTick(nowEpoch() - 1800)));
+  const goNow = useStable(() => scrollToTime(guideNowAnchor()));
   const groupList = useMemo(() => groups.data ?? [], [groups.data]);
   const jumpDays = useMemo(() => Array.from({ length: backDays + FWD_DAYS }, (_, i) => addDays(geo.rangeStart, i)), [geo.rangeStart, backDays]);
 

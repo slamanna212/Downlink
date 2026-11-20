@@ -1,10 +1,10 @@
 // Pure guide geometry and navigation logic: no DOM reads, unit-tested. The view only calls these
 // with numbers it already has (scroll offsets from the scroll event, sizes from ResizeObserver).
 import type { Channel, Programme } from '../../api/types';
-import { floorToTick, formatClock, formatDay, startOfDay } from '../../lib/time';
+import { TICK_SECONDS, archiveWindowStart, floorToTick, formatClock, formatDay, hoursToSeconds, startOfDay } from '../../lib/time';
 
 export const CHANNEL_CHUNK = 40; // channels per get_guide call
-export const TIME_CHUNK = 6 * 3600; // seconds per get_guide call
+export const TIME_CHUNK = hoursToSeconds(6); // seconds per get_guide call
 export const SPANS_HOURS = [3, 6, 12, 24] as const;
 export type SpanHours = (typeof SPANS_HOURS)[number];
 
@@ -26,7 +26,7 @@ export const totalHeight = (g: Geometry, rows: number) => g.headerH + rows * g.r
 export const rowTop = (g: Geometry, row: number) => row * g.rowH;
 
 /** Pixels per second so that `spanHours` fit in the scrollable area right of the channel column. */
-export const ppsFor = (viewW: number, colW: number, spanHours: number) => Math.max(viewW - colW, 100) / (spanHours * 3600);
+export const ppsFor = (viewW: number, colW: number, spanHours: number) => Math.max(viewW - colW, 100) / hoursToSeconds(spanHours);
 
 export interface Viewport {
   scrollLeft: number;
@@ -76,7 +76,7 @@ export function neededChunks(r: RenderRange, rangeStart: number): { c: number[];
 export type BlockState = 'past-archive' | 'past-none' | 'now' | 'future';
 
 export function archiveAvailable(p: Programme, ch: Channel | undefined, now: number): boolean {
-  return !!ch && ch.isCatchup && ch.catchupDays > 0 && p.endUtc <= now && p.startUtc >= now - ch.catchupDays * 86400;
+  return !!ch && ch.isCatchup && ch.catchupDays > 0 && p.endUtc <= now && p.startUtc >= archiveWindowStart(ch.catchupDays, now);
 }
 
 export function blockState(p: Programme, ch: Channel | undefined, now: number): BlockState {
@@ -200,7 +200,7 @@ export interface TickMark {
 /** 30-minute ticks in [t0, t1] clamped to the guide range; a day separator at each local midnight. */
 export function tickMarks(g: Pick<Geometry, 'rangeStart' | 'rangeEnd'>, t0: number, t1: number): TickMark[] {
   const out: TickMark[] = [];
-  for (let t = floorToTick(t0); t <= t1; t += 1800) {
+  for (let t = floorToTick(t0); t <= t1; t += TICK_SECONDS) {
     if (t < g.rangeStart || t > g.rangeEnd) continue;
     const isDay = t === startOfDay(t);
     out.push({ t, isDay, label: isDay ? formatDay(t) : formatClock(t) });

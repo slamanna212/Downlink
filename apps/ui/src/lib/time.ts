@@ -108,3 +108,24 @@ export function dayLabel(epoch: Epoch, now: Epoch = nowEpoch()): string {
   if (diff === -1) return 'Yesterday';
   return formatDay(epoch);
 }
+
+// ---- Epoch arithmetic helpers (rule 11: no other module does date math or owns these constants) ----
+
+/** One guide tick, in seconds. */
+export const TICK_SECONDS = 1800;
+export const hoursToSeconds = (h: number): number => h * 3600;
+export const daysToSeconds = (d: number): number => d * 86400;
+
+/** Guide anchor for "go to now": one tick before now, floored to the tick grid. */
+export const guideNowAnchor = (now: Epoch = nowEpoch()): Epoch => floorToTick(now - TICK_SECONDS);
+
+/** Earliest instant still inside a `days`-day archive window ending at `now`. */
+export const archiveWindowStart = (days: number, now: Epoch): Epoch => now - daysToSeconds(days);
+
+/** `hours` before `now`, floored to the tick grid (start of a "recent schedule" window). */
+export const recentWindowStart = (hours: number, now: Epoch = nowEpoch()): Epoch => floorToTick(now - hoursToSeconds(hours));
+
+/** Whole hours and rounded minutes of a duration in seconds. */
+export function splitHoursMinutes(totalSeconds: number): { h: number; m: number } {
+  return { h: Math.floor(totalSeconds / 3600), m: Math.round((totalSeconds % 3600) / 60) };
+}

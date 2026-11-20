@@ -1,4 +1,4 @@
-import { formatDuration } from '../../lib/time';
+import { formatDuration, splitHoursMinutes } from '../../lib/time';
 import { t } from '../../lib/i18n';
 
 /** A saved position is only worth offering when it is more than 2 s in and more than 2 s from the end. */
@@ -12,8 +12,7 @@ export const progressOf = (resume: number | null, duration: number | null): numb
 
 export function runtimeLabel(secs: number | null): string | null {
   if (!secs) return null;
-  const h = Math.floor(secs / 3600);
-  const m = Math.round((secs % 3600) / 60);
+  const { h, m } = splitHoursMinutes(secs);
   return h ? t('vod.runtimeHm', { h, m }) : t('vod.runtimeM', { m });
 }
 

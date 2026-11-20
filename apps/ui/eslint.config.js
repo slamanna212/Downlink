@@ -21,6 +21,15 @@ const hexRules = [
   },
 ];
 
+// CLAUDE rule 11: all date and epoch arithmetic lives in src/lib/time.ts.
+const timeRules = [
+  { selector: "NewExpression[callee.name='Date']", message: 'No `new Date` outside lib/time.ts. Use the helpers in lib/time.ts.' },
+  { selector: "MemberExpression[object.name='Date'][property.name='now']", message: 'No `Date.now` outside lib/time.ts. Use nowEpoch().' },
+  { selector: "CallExpression[callee.name='dayjs']", message: 'No dayjs outside lib/time.ts.' },
+  { selector: 'Literal[value=86400]', message: 'No 86400 outside lib/time.ts. Use daysToSeconds() or a time.ts helper.' },
+  { selector: 'Literal[value=3600]', message: 'No 3600 outside lib/time.ts. Use hoursToSeconds() or a time.ts helper.' },
+];
+
 export default tseslint.config(
   { ignores: ['dist', 'storybook-static', 'node_modules', 'playwright-report', 'test-results'] },
   js.configs.recommended,
@@ -31,9 +40,14 @@ export default tseslint.config(
     plugins: { 'react-hooks': reactHooks },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      'no-restricted-syntax': ['error', ...hexRules],
+      'no-restricted-syntax': ['error', ...hexRules, ...timeRules],
       '@typescript-eslint/consistent-type-imports': 'error',
     },
+  },
+  {
+    // The only place date and epoch arithmetic is allowed, plus tests, stories and the synthetic mock backend.
+    files: ['src/lib/time.ts', '**/*.test.{ts,tsx}', '**/*.stories.tsx', 'src/api/ipc.mock*.ts', 'tests/**', 'src/test/**'],
+    rules: { 'no-restricted-syntax': ['error', ...hexRules] },
   },
   {
     // The only place hex literals are allowed.

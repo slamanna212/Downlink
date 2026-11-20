@@ -11,7 +11,7 @@ import { DLButton } from '../../components/DLButton/DLButton';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
-import { addDays, dayLabel, formatClock, formatRange, minutesLeft, progress, startOfDay } from '../../lib/time';
+import { recentWindowStart, addDays, dayLabel, formatClock, formatRange, minutesLeft, progress, startOfDay } from '../../lib/time';
 import { useNowEpoch } from '../../lib/useNow';
 import { t } from '../../lib/i18n';
 import { useDetailStore } from '../../store/detail';
@@ -36,7 +36,7 @@ export function ChannelDetail() {
   // Schedule: from the earlier of (archive window start, today) to end of tomorrow.
   const range = useMemo(() => {
     // From 3 h ago (catch-up-able programmes) to the end of tomorrow.
-    return { start: Math.floor((now - 3 * 3600) / 1800) * 1800, end: addDays(startOfDay(now), 2) };
+    return { start: recentWindowStart(3, now), end: addDays(startOfDay(now), 2) };
   }, [now]);
   const schedule = useQuery({
     queryKey: ['catalog', 'programmes', open?.channelId, range.start],
