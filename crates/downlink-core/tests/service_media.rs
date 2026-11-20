@@ -124,6 +124,27 @@ async fn caps_advertise_vod_and_dvr_when_the_account_can_use_them() {
     assert!(caps & 16 != 0, "DVR (bit 4): {caps}");
 }
 
+/// A category the server counts as empty is not offered (61 of 64 on the reference server).
+#[tokio::test]
+async fn empty_vod_categories_are_hidden() {
+    let (s, svc, _id, _d) = dispatcharr().await;
+    Mock::given(method("GET"))
+        .and(path("/api/vod/movies/"))
+        .and(query_param("category", "Comedy"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"count": 0, "next": null, "results": []})),
+        )
+        .with_priority(1)
+        .mount(&s)
+        .await;
+    let cats = svc.list_vod_categories(VodKindArg::Movie).await.unwrap();
+    assert_eq!(
+        cats.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+        ["Action"]
+    );
+}
+
 #[tokio::test]
 async fn movies_categories_list_detail_and_dto_shape() {
     let (_s, svc, id, _d) = dispatcharr().await;

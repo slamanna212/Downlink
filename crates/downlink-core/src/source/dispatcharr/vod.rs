@@ -7,12 +7,17 @@ use reqwest::Method;
 use serde_json::{Value, json};
 
 use super::dto::{flex_i64, flex_string, parse_time};
-use super::{DispatcharrClient, fmt_time};
+use super::{Credentials, DispatcharrClient, fmt_time};
 use crate::auth::SecretString;
 use crate::error::{AppError, Result};
 use crate::redact::RedactionSet;
 use crate::source::vod::*;
 use crate::source::{PlayPlan, PlayProfile, Surface};
+
+/// Page size asked of the VOD list endpoints (the reference server's cap; a smaller cap is detected).
+const VOD_PAGE_SIZE: usize = 100;
+/// Upper bound on server pages fetched for one window (500 items at the smallest sane page size).
+const MAX_VOD_PAGES: usize = 60;
 
 /// The only fields we read from an episode. Anything else (notably `providers[]`) is skipped by
 /// serde without being stored.
@@ -277,33 +282,50 @@ impl DispatcharrClient {
         if let Some(search) = q.search.as_deref().filter(|x| !x.trim().is_empty()) {
             extra.push(("search", search.to_owned()));
         }
-        // The server pages by number: fetch whole pages and slice to the requested window.
-        let limit = q.limit.clamp(1, 500);
-        let offset = q.offset.max(0);
-        let (page, size, skip) = if offset % limit == 0 {
-            (offset / limit + 1, limit, 0)
-        } else {
-            let size = (offset + limit).min(500);
-            (1, size, offset.min(size))
-        };
-        let (items, count, _) = self
-            .page_values(
-                path,
-                &extra,
-                u32::try_from(page).unwrap_or(1),
-                u32::try_from(size).unwrap_or(50),
-                "its library",
-            )
-            .await?;
-        let items: Vec<VodItem> = items
+        // The server pages by number and caps `page_size` (100 on the reference server) without
+        // saying so: walk its pages from the one holding `offset` until `limit` items are in hand.
+        let limit = usize::try_from(q.limit.clamp(1, 500)).unwrap_or(100);
+        let offset = usize::try_from(q.offset.max(0)).unwrap_or(0);
+        let mut size = VOD_PAGE_SIZE;
+        let mut raw: Vec<Value> = Vec::new();
+        let mut total = None;
+        let mut page = offset / size + 1;
+        let mut skip = offset % size;
+        for _ in 0..MAX_VOD_PAGES {
+            let (items, count, has_next) = self
+                .page_values(
+                    path,
+                    &extra,
+                    u32::try_from(page).unwrap_or(1),
+                    u32::try_from(size).unwrap_or(100),
+                    "its library",
+                )
+                .await?;
+            total = count.or(total);
+            if has_next && !items.is_empty() && items.len() < size {
+                // A smaller cap than asked for: restart from the right page at that size.
+                size = items.len();
+                let pos = offset + raw.len();
+                page = pos / size + 1;
+                skip = pos % size;
+                continue;
+            }
+            let got = items.len();
+            raw.extend(items.into_iter().skip(skip));
+            skip = 0;
+            if raw.len() >= limit || !has_next || got == 0 {
+                break;
+            }
+            page += 1;
+        }
+        raw.truncate(limit);
+        let items: Vec<VodItem> = raw
             .iter()
             .filter_map(|v| self.vod_item_from(kind, v))
-            .skip(usize::try_from(skip).unwrap_or(0))
-            .take(usize::try_from(limit).unwrap_or(50))
             .collect();
         Ok(VodListPage {
             items,
-            total: count.map(|c| i64::try_from(c).unwrap_or(0)),
+            total: total.map(|c| i64::try_from(c).unwrap_or(0)),
         })
     }
 
@@ -363,6 +385,11 @@ impl DispatcharrClient {
     }
 
     /// `/proxy/vod/{movie|episode}/{uuid}` plan: built, never requested here.
+    ///
+    /// The VOD proxy does not need credentials. A JWT is not sent: mpv repeats the header on every
+    /// seek and reconnect of a two-hour film, long after the 30-minute access token expired, and the
+    /// server rejects an expired token outright (even where none is required). An API key does not
+    /// expire and is still sent.
     pub async fn vod_plan(&self, item: &VodItem) -> Result<PlayPlan> {
         let kind = match item.kind {
             Some(VodKind::Movie) => "movie",
@@ -373,12 +400,15 @@ impl DispatcharrClient {
             AppError::stream("This title has no stream address yet; refresh the library.")
         })?;
         let url = self.base.join(&format!("proxy/vod/{kind}/{uuid}"))?;
-        let auth = self.auth_header().await?;
         let mut redact: RedactionSet = self.redaction_set();
-        redact.add(auth.1.expose());
+        let mut headers = Vec::new();
+        if let Credentials::ApiKey(k) = &self.creds {
+            redact.add(k.expose());
+            headers.push(("X-API-Key".to_owned(), k.clone()));
+        }
         Ok(PlayPlan {
             url: url.to_string(),
-            headers: vec![auth],
+            headers,
             surface: Surface::Direct,
             profile: PlayProfile::Seekable,
             session: None,

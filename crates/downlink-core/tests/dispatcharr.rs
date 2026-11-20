@@ -520,6 +520,81 @@ async fn jwt_login_and_refresh_on_401() {
     );
 }
 
+/// Synthetic JWTs (header and signature are junk; only `iat`/`exp` are read): 60 s and 30 min lifetimes.
+const JWT_EXPIRED: &str = "e30.eyJpYXQiOjEsImV4cCI6NjF9.sig-one";
+const JWT_FRESH: &str = "e30.eyJpYXQiOjAsImV4cCI6MTgwMH0.sig-two";
+
+fn password_client(server: &MockServer) -> DispatcharrClient {
+    DispatcharrClient::new(
+        SourceId(1),
+        &server.uri(),
+        Credentials::Password {
+            username: "alice".into(),
+            password: SecretString::new("pw-synthetic"),
+        },
+        ClientOptions::default(),
+    )
+    .unwrap()
+}
+
+/// Play plans take the header without an API call in between, so an access token that is about to
+/// expire must be refreshed up front (a stale one is rejected even by open stream endpoints).
+#[tokio::test]
+async fn jwt_near_expiry_is_refreshed_before_it_is_handed_out() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/accounts/token/"))
+        .respond_with(json(
+            serde_json::json!({"access": JWT_EXPIRED, "refresh": "REFRESH.TOKEN.ONE"}),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/accounts/token/refresh/"))
+        .and(body_json(
+            serde_json::json!({"refresh": "REFRESH.TOKEN.ONE"}),
+        ))
+        .respond_with(json(serde_json::json!({"access": JWT_FRESH})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let c = password_client(&server);
+    // The login's token is handed out as received (one refresh per call at most)...
+    let (name, first) = c.auth_header().await.unwrap();
+    assert_eq!(name, "Authorization");
+    assert_eq!(first.expose(), format!("Bearer {JWT_EXPIRED}"));
+    // ...and a cached one that is about to expire is refreshed before reuse; then kept.
+    for _ in 0..2 {
+        let (_, v) = c.auth_header().await.unwrap();
+        assert_eq!(v.expose(), format!("Bearer {JWT_FRESH}"));
+    }
+}
+
+#[tokio::test]
+async fn jwt_with_time_left_is_not_refreshed() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/accounts/token/"))
+        .respond_with(json(
+            serde_json::json!({"access": JWT_FRESH, "refresh": "REFRESH.TOKEN.ONE"}),
+        ))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/accounts/token/refresh/"))
+        .respond_with(json(serde_json::json!({"access": JWT_EXPIRED})))
+        .expect(0)
+        .mount(&server)
+        .await;
+    let c = password_client(&server);
+    for _ in 0..2 {
+        let (_, v) = c.auth_header().await.unwrap();
+        assert_eq!(v.expose(), format!("Bearer {JWT_FRESH}"));
+    }
+}
+
 #[tokio::test]
 async fn jwt_bad_password_is_auth_error() {
     let server = MockServer::start().await;

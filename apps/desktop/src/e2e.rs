@@ -44,6 +44,7 @@ pub fn spawn(app: AppHandle, mode: String) {
             "launch" => launch(&st).await,
             "degraded" => degraded(&st).await,
             "hls" => hls(&st, &db).await,
+            "vod" => vod(&st).await,
             _ => full(&st, &db).await,
         };
         if let Err(e) = r {
@@ -843,5 +844,148 @@ async fn hls(st: &AppState, db: &str) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.message)?;
+    Ok(())
+}
+
+/// `DOWNLINK_E2E=vod`: against a server with a VOD library (user/password in
+/// DOWNLINK_E2E_USER / DOWNLINK_E2E_PASS, never printed): category counts, paging past the server's
+/// page size, then play two movies and a live channel through the real player path.
+async fn vod(st: &AppState) -> Result<(), String> {
+    use downlink_core::service::{VodKindArg, VodListArgs};
+    let svc = st.service_now();
+    if svc.list_sources().await.map_err(|e| e.message)?.is_empty() {
+        let url = std::env::var("DOWNLINK_E2E_URL").map_err(|_| "DOWNLINK_E2E_URL missing")?;
+        svc.add_source(AddSourceInput {
+            kind: "dispatcharr".into(),
+            name: "E2E".into(),
+            url,
+            api_key: None,
+            username: std::env::var("DOWNLINK_E2E_USER").ok(),
+            password: std::env::var("DOWNLINK_E2E_PASS").ok(),
+            xmltv_url: None,
+            allow_self_signed: false,
+        })
+        .await
+        .map_err(|e| e.message)?;
+    }
+    let cats = svc
+        .list_vod_categories(VodKindArg::Movie)
+        .await
+        .map_err(|e| e.message)?;
+    say(
+        json!({ "step": "categories", "count": cats.len(), "empty": cats.iter().filter(|c| c.count == 0).count() }),
+    );
+    let big = cats.iter().max_by_key(|c| c.count);
+    let t0 = Instant::now();
+    let page = svc
+        .list_movies(VodListArgs {
+            category_id: big.map(|c| c.id),
+            offset: Some(0),
+            limit: Some(300),
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| e.message)?;
+    let page2 = svc
+        .list_movies(VodListArgs {
+            category_id: big.map(|c| c.id),
+            offset: Some(150),
+            limit: Some(10),
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| e.message)?;
+    say(json!({
+        "step": "list", "category": big.map(|c| c.count), "got": page.len(), "ms": t0.elapsed().as_millis(),
+        "offsetMatches": page.get(150).map(|m| m.id) == page2.first().map(|m| m.id),
+    }));
+    let pb = st.playback().await.map_err(|e| e.message)?;
+    for m in page.iter().take(2) {
+        let t0 = Instant::now();
+        let r = pb.play_vod("movie", m.id, false).await;
+        let snap = pb.snapshot_wait(
+            |s| matches!(s, SessionState::Playing | SessionState::Failed),
+            Duration::from_secs(30),
+        );
+        let dto = pb.snapshot_dto();
+        say(json!({
+            "step": "play_vod", "id": m.id, "ok": r.is_ok(), "state": snap.state, "wallMs": t0.elapsed().as_millis(),
+            "durationSecs": snap.duration_secs, "error": dto.error.as_ref().map(|e| e.message.clone()),
+        }));
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        say(
+            json!({ "step": "vod_after", "state": pb.snapshot().state, "position": pb.snapshot().position_secs }),
+        );
+        pb.command(PlayerCommand::SeekAbsolute { secs: 900.0 })
+            .map_err(|e| e.message)?;
+        tokio::time::sleep(Duration::from_secs(6)).await;
+        let s = pb.snapshot_dto();
+        say(
+            json!({ "step": "vod_seek", "state": s.state, "position": s.position, "error": s.error.map(|e| e.message) }),
+        );
+        let t1 = Instant::now();
+        let r = pb.stop().await;
+        say(
+            json!({ "step": "vod_stop", "ok": r.is_ok(), "ms": t1.elapsed().as_millis(), "state": pb.snapshot().state }),
+        );
+    }
+    // Resume path (start= option) on the first movie.
+    if let Some(m) = page.first() {
+        let r = pb.play_vod("movie", m.id, true).await;
+        let snap = pb.snapshot_wait(
+            |s| matches!(s, SessionState::Playing | SessionState::Failed),
+            Duration::from_secs(30),
+        );
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        say(
+            json!({ "step": "vod_resume", "ok": r.is_ok(), "state": snap.state, "position": pb.snapshot().position_secs }),
+        );
+    }
+    // Series: detail (provider info + episode list), then play the first episode.
+    let series = svc
+        .list_series(VodListArgs {
+            limit: Some(5),
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| e.message)?;
+    if let Some(sr) = series.first() {
+        let d = svc.get_series(sr.id).await.map_err(|e| e.message)?;
+        let ep = d
+            .seasons
+            .iter()
+            .flat_map(|s| s.episodes.iter())
+            .next()
+            .map(|e| e.id);
+        say(json!({ "step": "series", "seasons": d.seasons.len(), "firstEpisode": ep }));
+        if let Some(eid) = ep {
+            let r = pb.play_vod("episode", eid, false).await;
+            let snap = pb.snapshot_wait(
+                |s| matches!(s, SessionState::Playing | SessionState::Failed),
+                Duration::from_secs(30),
+            );
+            say(
+                json!({ "step": "play_episode", "ok": r.as_ref().err().map(|e| e.message.clone()), "state": snap.state, "durationSecs": snap.duration_secs, "error": pb.snapshot_dto().error.map(|e| e.message) }),
+            );
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+    }
+    let chans = svc
+        .list_channels(ListChannelsArgs {
+            limit: Some(5),
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| e.message)?;
+    if let Some(c) = chans.first() {
+        let r = pb.play_channel(c.id).await;
+        let snap = pb.snapshot_wait(
+            |s| matches!(s, SessionState::Playing | SessionState::Failed),
+            Duration::from_secs(30),
+        );
+        say(
+            json!({ "step": "live_after_vod", "ok": r.is_ok(), "state": snap.state, "error": pb.snapshot_dto().error.map(|e| e.message) }),
+        );
+    }
     Ok(())
 }

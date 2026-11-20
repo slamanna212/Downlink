@@ -77,7 +77,30 @@ impl Default for ClientOptions {
 #[derive(Default)]
 struct Tokens {
     access: Option<SecretString>,
+    /// When the access token expires, on the local clock (UTC seconds), when it could be read.
+    access_exp: Option<i64>,
     refresh: Option<SecretString>,
+}
+
+/// Refresh the access token this long before it expires: play plans hand it to mpv, and no API
+/// call (whose 401 would trigger a refresh) happens on the way.
+const ACCESS_REFRESH_MARGIN_SECS: i64 = 120;
+
+/// When a just-received JWT expires on the local clock: now plus its lifetime (`exp - iat`), so a
+/// skewed client clock does not matter; `exp` itself when there is no `iat`. Read without verifying
+/// (the server does that). Never logged.
+fn jwt_exp(token: &str) -> Option<i64> {
+    use base64::Engine as _;
+    let payload = token.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload.trim_end_matches('='))
+        .ok()?;
+    let claims = serde_json::from_slice::<Value>(&bytes).ok()?;
+    let exp = claims.get("exp").and_then(Value::as_i64)?;
+    Some(match claims.get("iat").and_then(Value::as_i64) {
+        Some(iat) => OffsetDateTime::now_utc().unix_timestamp() + (exp - iat),
+        None => exp,
+    })
 }
 
 #[derive(Debug, Clone, Default)]
@@ -296,6 +319,7 @@ impl DispatcharrClient {
             .access
             .ok_or_else(|| AppError::server("The server did not return a token."))?;
         self.remember_secret(&access);
+        tokens.access_exp = jwt_exp(&access);
         tokens.access = Some(SecretString::new(access));
         if let Some(r) = t.refresh {
             self.remember_secret(&r);
@@ -317,6 +341,7 @@ impl DispatcharrClient {
                 let t: TokenDto = resp.json().await?;
                 if let Some(a) = t.access {
                     self.remember_secret(&a);
+                    tokens.access_exp = jwt_exp(&a);
                     tokens.access = Some(SecretString::new(a));
                     if let Some(r) = t.refresh {
                         self.remember_secret(&r);
@@ -337,6 +362,10 @@ impl DispatcharrClient {
                 let mut t = self.tokens.lock().await;
                 if t.access.is_none() {
                     self.login(&mut t).await?;
+                } else if t.access_exp.is_some_and(|exp| {
+                    exp - OffsetDateTime::now_utc().unix_timestamp() < ACCESS_REFRESH_MARGIN_SECS
+                }) {
+                    self.refresh(&mut t).await?;
                 }
                 let a = t
                     .access

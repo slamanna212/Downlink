@@ -95,7 +95,7 @@ async fn endpoint_movies_list_paging_category_search_and_tolerant_fields() {
     Mock::given(method("GET"))
         .and(path("/api/vod/movies/"))
         .and(query_param("page", "1"))
-        .and(query_param("page_size", "50"))
+        .and(query_param("page_size", "100"))
         .and(query_param("category", "Action"))
         .and(query_param("search", "night"))
         .and(header("X-API-Key", KEY))
@@ -148,7 +148,7 @@ async fn movies_unaligned_offset_slices_a_larger_page() {
     Mock::given(method("GET"))
         .and(path("/api/vod/movies/"))
         .and(query_param("page", "1"))
-        .and(query_param("page_size", "3"))
+        .and(query_param("page_size", "100"))
         .respond_with(ResponseTemplate::new(200).set_body_json(fx("vod_movies_page1.json")))
         .mount(&server)
         .await;
@@ -169,6 +169,113 @@ async fn movies_unaligned_offset_slices_a_larger_page() {
             .map(|i| i.ext_id.as_str())
             .collect::<Vec<_>>(),
         ["12", "13"]
+    );
+}
+
+fn movie_rows(ids: std::ops::Range<u32>) -> Vec<Value> {
+    ids.map(|i| json!({"id": i, "name": format!("Film {i}"), "uuid": format!("00000000-0000-4000-8000-{i:012}")}))
+        .collect()
+}
+
+/// The server caps `page_size` below what we ask for (here 2) and says so only through `next`:
+/// the window is assembled from as many server pages as it spans.
+#[tokio::test]
+async fn movies_window_spans_pages_when_the_server_caps_page_size() {
+    let server = MockServer::start().await;
+    for page in 1..=4u32 {
+        let start = (page - 1) * 2 + 1;
+        let end = (start + 2).min(8);
+        let next =
+            (page < 4).then(|| format!("{}/api/vod/movies/?page={}", server.uri(), page + 1));
+        Mock::given(method("GET"))
+            .and(path("/api/vod/movies/"))
+            .and(query_param("page", page.to_string()))
+            .and(query_param("page_size", "2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(
+                json!({"count": 7, "next": next, "results": movie_rows(start..end)}),
+            ))
+            .mount(&server)
+            .await;
+    }
+    // The first request asks for 100 and gets 2 back with a `next`.
+    Mock::given(method("GET"))
+        .and(path("/api/vod/movies/"))
+        .and(query_param("page", "1"))
+        .and(query_param("page_size", "100"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "count": 7, "next": format!("{}/api/vod/movies/?page=2", server.uri()), "results": movie_rows(1..3)
+        })))
+        .mount(&server)
+        .await;
+    let ids = |p: &downlink_core::source::VodListPage| {
+        p.items.iter().map(|i| i.ext_id.clone()).collect::<Vec<_>>()
+    };
+    let c = client(&server);
+    let all = c
+        .vod_list(
+            VodKind::Movie,
+            &VodListQuery {
+                offset: 0,
+                limit: 50,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(ids(&all), ["1", "2", "3", "4", "5", "6", "7"]);
+    assert_eq!(all.total, Some(7));
+    let mid = c
+        .vod_list(
+            VodKind::Movie,
+            &VodListQuery {
+                offset: 3,
+                limit: 3,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(ids(&mid), ["4", "5", "6"]);
+}
+
+/// A JWT is never handed to mpv for `/proxy/vod/`: it would be replayed on every seek after it
+/// expired. The proxy needs no credentials.
+#[tokio::test]
+async fn vod_plan_carries_no_jwt() {
+    let server = MockServer::start().await;
+    let c = DispatcharrClient::new(
+        SourceId(1),
+        &server.uri(),
+        Credentials::Password {
+            username: "alice".into(),
+            password: SecretString::new("pw-synthetic"),
+        },
+        ClientOptions::default(),
+    )
+    .unwrap();
+    let item = VodItem {
+        kind: Some(VodKind::Movie),
+        ext_id: "11".into(),
+        uuid: Some("11111111-0000-4000-8000-000000000011".into()),
+        ..Default::default()
+    };
+    let plan = c.vod_plan(&item).await.unwrap();
+    assert!(
+        plan.url
+            .ends_with("/proxy/vod/movie/11111111-0000-4000-8000-000000000011")
+    );
+    assert!(
+        plan.headers.is_empty(),
+        "{:?}",
+        plan.headers.iter().map(|h| &h.0).collect::<Vec<_>>()
+    );
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty(),
+        "no login, no request"
     );
 }
 

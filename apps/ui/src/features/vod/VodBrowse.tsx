@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { TextInput, UnstyledButton } from '@mantine/core';
 import { IconSearch } from '@tabler/icons-react';
@@ -21,7 +21,8 @@ const MIN_TILE = 160;
 const TV_SCALE = 1.25;
 const GAP = 16; // matches --mantine-spacing-lg
 const TEXT_H = 52;
-const LIMIT = 5000;
+/** Titles fetched per request; the next page loads as the grid nears the end. */
+const PAGE = 200;
 
 const movieTile = (m: Movie): Tile => ({ id: m.id, title: m.title, poster: m.poster, sub: m.year ? String(m.year) : null, progress: progressOf(m.resumeSecs, m.durationSecs), watched: m.watched });
 const seriesTile = (s: Series): Tile => ({
@@ -42,15 +43,22 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
   const activeCat = useRef<HTMLButtonElement | null>(null);
 
   const cats = useQuery({ queryKey: ['catalog', 'vodCats', kind], queryFn: () => invoke('list_vod_categories', { kind }) });
-  const list = useQuery({
+  const list = useInfiniteQuery({
     queryKey: ['catalog', 'vod', kind, categoryId, deferred],
-    queryFn: async (): Promise<Tile[]> => {
-      const args = { categoryId, query: deferred || null, offset: 0, limit: LIMIT };
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }): Promise<Tile[]> => {
+      const args = { categoryId, query: deferred || null, offset: pageParam, limit: PAGE };
       return kind === 'movie' ? (await invoke('list_movies', args)).map(movieTile) : (await invoke('list_series', args)).map(seriesTile);
     },
+    getNextPageParam: (last, pages) => (last.length < PAGE ? undefined : pages.length * PAGE),
     placeholderData: (prev) => prev,
   });
-  const tiles = useMemo(() => list.data ?? [], [list.data]);
+  const tiles = useMemo(() => {
+    // Pages can overlap when the library changes between requests: keep the first copy of an id.
+    const seen = new Set<number>();
+    return (list.data?.pages ?? []).flat().filter((x) => !seen.has(x.id) && (seen.add(x.id), true));
+  }, [list.data]);
+  const { hasNextPage, isFetchingNextPage, fetchNextPage } = list;
 
   useEffect(() => {
     if (!innerEl) return;
@@ -69,6 +77,12 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({ count: rows, getScrollElement: () => scrollerRef.current, estimateSize: () => rowH, overscan: 3 });
   useEffect(() => virtualizer.measure(), [rowH, virtualizer]);
+  // Load the next page when the last rendered row (or the keyboard cursor) is within a few rows of the end.
+  const lastRow = virtualizer.getVirtualItems().at(-1)?.index ?? 0;
+  const activeRow = cols > 0 ? Math.floor(active / cols) : 0;
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage && rows > 0 && Math.max(lastRow, activeRow) >= rows - 4) void fetchNextPage();
+  }, [lastRow, activeRow, rows, hasNextPage, isFetchingNextPage, fetchNextPage]);
   useEffect(() => setActive(0), [categoryId, deferred, kind]);
 
   const open = (i: number) => {
@@ -105,6 +119,9 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
   if (loaded && !hasSource) return <EmptySource />;
   const label = kind === 'movie' ? t('vod.grid.movies') : t('vod.grid.series');
   const total = (cats.data ?? []).reduce((n, c) => n + c.count, 0);
+  // While pages remain, the heading shows the category's server count (exact unless searching).
+  const known = deferred ? null : categoryId == null ? total : cats.data?.find((c) => c.id === categoryId)?.count;
+  const shown = !hasNextPage ? String(tiles.length) : known ? String(known) : `${tiles.length}+`;
 
   return (
     <div className={classes.page}>
@@ -134,7 +151,7 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
         <header className={classes.header}>
           <h1 className={classes.h1}>
             {label}
-            {list.data && <span className={classes.count}>{tiles.length}</span>}
+            {list.data && <span className={classes.count}>{shown}</span>}
           </h1>
           <TextInput
             className={classes.search}

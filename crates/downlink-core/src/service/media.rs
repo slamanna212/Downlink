@@ -104,7 +104,13 @@ impl Service {
         let mut out = Vec::new();
         for src in self.caps_sources(Caps::VOD).await? {
             let client = self.client(src.id).await?;
-            for c in client.vod_categories(k).await? {
+            // Categories the server reports as empty are hidden (unknown counts stay listed).
+            for c in client
+                .vod_categories(k)
+                .await?
+                .into_iter()
+                .filter(|c| c.count != Some(0))
+            {
                 let id = compose_cat(src.id, &c.ext_id);
                 if let Ok(mut g) = self.vod_cats.lock() {
                     g.insert(id, (src.id, c.ext_id.clone()));
