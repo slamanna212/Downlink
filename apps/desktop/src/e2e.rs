@@ -36,6 +36,7 @@ pub fn spawn(app: AppHandle, mode: String) {
         let r = match mode.as_str() {
             "offline" => offline(&st, &db).await,
             "zap" => zap(&st).await,
+            "failover" => failover(&st).await,
             _ => full(&st, &db).await,
         };
         if let Err(e) = r {
@@ -285,5 +286,37 @@ async fn zap(st: &AppState) -> Result<(), String> {
         "commandMs": { "p50": percentile(&cmd_ms, 0.5), "p95": percentile(&cmd_ms, 0.95) },
         "firstFrameMs": { "p50": percentile(&first_ms, 0.5), "p95": percentile(&first_ms, 0.95) },
     }));
+    Ok(())
+}
+
+/// `DOWNLINK_E2E=failover`: play a channel whose stream cannot start (stop the stream server first)
+/// and watch the §4.5 sequence: reconnect, server next-stream attempts, then a plain failure.
+async fn failover(st: &AppState) -> Result<(), String> {
+    let id = channel_id(st, "Channel One").await?;
+    let pb = st.playback().map_err(|e| e.message)?;
+    let t0 = Instant::now();
+    pb.play_channel(id).await.map_err(|e| e.message)?;
+    // Wait until the machine settles in Failed with no pending failover (state flips through
+    // Resolving/Connecting between attempts), or give up after 90 s.
+    let mut last = None;
+    while t0.elapsed() < Duration::from_secs(90) {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let dto = pb.snapshot_dto();
+        if last != Some(dto.state) {
+            say(
+                json!({ "step": "state", "t": t0.elapsed().as_secs(), "state": dto.state, "error": dto.error.as_ref().map(|e| e.message.clone()) }),
+            );
+            last = Some(dto.state);
+        }
+        if dto.state == "Failed" && dto.error.is_some() && t0.elapsed() > Duration::from_secs(20) {
+            tokio::time::sleep(Duration::from_secs(6)).await;
+            if pb.snapshot_dto().state == "Failed" {
+                break;
+            }
+        }
+    }
+    say(
+        json!({ "step": "failover_done", "state": pb.snapshot_dto().state, "sourceStats": st.service.source_position(id).await.ok() }),
+    );
     Ok(())
 }

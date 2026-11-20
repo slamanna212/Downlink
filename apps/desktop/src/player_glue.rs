@@ -36,6 +36,11 @@ struct Active {
     last_phase: Option<SessionState>,
     /// Bumped on every new playback so background reporters of old ones exit.
     generation: u64,
+    /// Server-side failover attempts since the user's last play (PLAN §4.5).
+    failover_count: u32,
+    /// 1-based provider stream in use and how many the channel has (0 = unknown).
+    source_index: u32,
+    source_count: u32,
 }
 
 pub struct Playback {
@@ -48,6 +53,25 @@ fn lock(a: &Mutex<Active>) -> MutexGuard<'_, Active> {
     match a.lock() {
         Ok(g) => g,
         Err(p) => p.into_inner(),
+    }
+}
+
+fn plan_request(plan: &PlayPlan, mode: PlayMode, failover: bool) -> PlayRequest {
+    PlayRequest {
+        url: plan.url.clone(),
+        headers: plan
+            .headers
+            .iter()
+            .map(|(k, v)| (k.clone(), v.expose().to_owned()))
+            .collect(),
+        profile: match plan.profile {
+            PlayProfile::Live => Profile::Live,
+            PlayProfile::Seekable => Profile::Seekable,
+        },
+        start_secs: None,
+        failover_capable: failover,
+        mode,
+        source_index: 0,
     }
 }
 
@@ -75,6 +99,8 @@ fn player_err(e: downlink_player::PlayerError) -> AppError {
 pub struct Extras {
     pub inhibitor: PlaybackInhibitor,
     pub media: OnceLock<MediaSession>,
+    /// Set once the player exists; the failover loop needs it from the event sink.
+    pub player: OnceLock<Arc<Player>>,
     last_title: Mutex<String>,
 }
 
@@ -82,16 +108,78 @@ pub struct Extras {
 pub struct SinkContext {
     active: Arc<Mutex<Active>>,
     app: AppHandle,
+    service: Arc<Service>,
     pub extras: Arc<Extras>,
 }
 
 impl SinkContext {
-    pub fn new(app: AppHandle) -> Self {
+    pub fn new(app: AppHandle, service: Arc<Service>) -> Self {
         Self {
             active: Arc::new(Mutex::new(Active::default())),
             app,
+            service,
             extras: Arc::new(Extras::default()),
         }
+    }
+
+    /// PLAN §4.5, after the player's own same-URL reconnect failed: ask the core for the next
+    /// provider stream (attempts 2 and 3), play it, and surface a plain failure after that.
+    /// The state stays visible throughout (Resolving, then Connecting).
+    async fn run_failover(&self) {
+        let Some(player) = self.extras.player.get().cloned() else {
+            return;
+        };
+        let (channel, attempt, live) = {
+            let mut a = lock(&self.active);
+            a.failover_count += 1;
+            (
+                a.info.channel_id,
+                a.failover_count + 1,
+                a.info.mode == Some(PlayMode::Live),
+            )
+        };
+        let Some(channel) = channel.filter(|_| live) else {
+            self.publish_failure(
+                &player,
+                AppError::new(ErrorCode::Stream, "Source unavailable. Try again."),
+            );
+            return;
+        };
+        lock(&self.active).info.failure = None;
+        player.begin_resolving();
+        match self.service.failover_next(channel, attempt).await {
+            Ok(step) => {
+                {
+                    let mut a = lock(&self.active);
+                    a.source_index = u32::try_from(step.source_index).unwrap_or(0);
+                    a.source_count = u32::try_from(step.source_count).unwrap_or(0);
+                }
+                tracing::info!(
+                    "failover attempt {attempt}: stream {}/{}{}",
+                    step.source_index,
+                    step.source_count,
+                    if step.switched {
+                        " (server switched)"
+                    } else {
+                        ""
+                    }
+                );
+                if let Err(e) = player.play(plan_request(&step.plan, PlayMode::Live, true)) {
+                    self.publish_failure(&player, AppError::new(ErrorCode::Media, e.to_string()));
+                }
+            }
+            Err(e) => self.publish_failure(&player, e),
+        }
+    }
+
+    fn publish_failure(&self, player: &Player, e: AppError) {
+        lock(&self.active).info.failure = Some(e.clone());
+        player.mark_failed(e.message);
+        let dto = {
+            let a = lock(&self.active);
+            player_state(&player.snapshot(), &a.info)
+        };
+        let _ = self.app.emit("player://state", dto);
     }
 
     /// The event sink: `player://state` (already throttled by the player), `session://stats`.
@@ -114,6 +202,9 @@ impl SinkContext {
                     (player_state(&snap, &a.info), title)
                 };
                 let phase = snap.state.unwrap_or(SessionState::Idle);
+                if phase == SessionState::Playing {
+                    lock(&ctx.active).failover_count = 0;
+                }
                 ctx.extras
                     .inhibitor
                     .set_active(phase == SessionState::Playing);
@@ -137,6 +228,11 @@ impl SinkContext {
                 let _ = ctx.app.emit("player://state", dto);
             }
             PlayerEvent::Stats(s) => {
+                let (idx, count) = {
+                    let a = lock(&ctx.active);
+                    let nz = |n: u32| (n > 0).then_some(n);
+                    (nz(a.source_index), nz(a.source_count))
+                };
                 let _ = ctx.app.emit(
                     "session://stats",
                     serde_json::json!({
@@ -148,20 +244,15 @@ impl SinkContext {
                         "bufferSecs": s.buffer_secs,
                         "deinterlace": s.deinterlace,
                         "hwdecCurrent": s.hwdec_current,
-                        "sourceIndex": s.source_index + 1,
-                        "sourceCount": null,
+                        "sourceIndex": idx,
+                        "sourceCount": count,
                     }),
                 );
             }
             PlayerEvent::FailoverNeeded { last_error, .. } => {
-                // PLAN §4.5: the channel's alternate streams are a server-side concern for
-                // Dispatcharr; the client surfaces the failure with the last error.
                 tracing::warn!("playback failed after a reconnect: {last_error}");
-                let mut a = lock(&ctx.active);
-                a.info.failure = Some(AppError::new(
-                    ErrorCode::Stream,
-                    "Source unavailable. Try again.",
-                ));
+                let c = ctx.clone();
+                tauri::async_runtime::spawn(async move { c.run_failover().await });
             }
             PlayerEvent::Log { level, text } => match level.as_str() {
                 "debug" | "v" | "trace" => tracing::debug!(target: "mpv", "{text}"),
@@ -205,22 +296,7 @@ impl Playback {
     }
 
     fn to_request(&self, plan: &PlayPlan, mode: PlayMode, failover: bool) -> PlayRequest {
-        PlayRequest {
-            url: plan.url.clone(),
-            headers: plan
-                .headers
-                .iter()
-                .map(|(k, v)| (k.clone(), v.expose().to_owned()))
-                .collect(),
-            profile: match plan.profile {
-                PlayProfile::Live => Profile::Live,
-                PlayProfile::Seekable => Profile::Seekable,
-            },
-            start_secs: None,
-            failover_capable: failover,
-            mode,
-            source_index: 0,
-        }
+        plan_request(plan, mode, failover)
     }
 
     async fn failover_capable(&self, source_id: i64) -> bool {
@@ -253,6 +329,9 @@ impl Playback {
         self.stop_previous_catchup();
         let mut a = lock(&self.active);
         a.generation += 1;
+        a.failover_count = 0;
+        a.source_index = 0;
+        a.source_count = 0;
         a.info = SessionInfo {
             channel_id: Some(channel_id),
             mode: Some(mode),
@@ -310,6 +389,11 @@ impl Playback {
             .and_then(|v| v.into_iter().next())
             .and_then(|nn| nn.now);
         lock(&self.active).info.programme = programme;
+        if let Ok((i, c)) = self.service.source_position(channel_id).await {
+            let mut a = lock(&self.active);
+            a.source_index = u32::try_from(i).unwrap_or(0);
+            a.source_count = u32::try_from(c).unwrap_or(0);
+        }
         Ok(())
     }
 

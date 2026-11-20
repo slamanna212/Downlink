@@ -119,8 +119,19 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         });
     }
 
+    // Reachability probe for every source (offline sources keep their cache); emits
+    // `catalog://updated` per source through the event forwarder above.
+    {
+        let s = service.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = s.probe_sources().await {
+                tracing::warn!("source probe failed: {}", e.message);
+            }
+        });
+    }
+
     // Engine, surface, playback glue.
-    let sink_ctx = SinkContext::new(handle.clone());
+    let sink_ctx = SinkContext::new(handle.clone(), service.clone());
 
     // OS media controls / media keys (MPRIS, SMTC, Now Playing).
     {
@@ -215,6 +226,7 @@ fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                             engine_error = Some(e);
                         }
                     }
+                    let _ = sink_ctx.extras.player.set(p.clone());
                     playback = Some(Playback::new(service.clone(), p.clone(), &sink_ctx));
                     player = Some(p);
                 }
@@ -313,6 +325,17 @@ macro_rules! handlers {
     };
 }
 
+/// `--tv`: the UI reads `window.__DL_TV__` before it starts (10-foot mode). The init script runs
+/// in every page before any page script.
+fn tv_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    let tv = std::env::args().any(|a| a == "--tv");
+    let mut b = tauri::plugin::Builder::new("dl-tv");
+    if tv {
+        b = b.js_init_script("window.__DL_TV__ = true;".to_owned());
+    }
+    b.build()
+}
+
 fn main() {
     if std::env::args().any(|a| a == "--self-test") {
         std::process::exit(selftest::run());
@@ -338,6 +361,7 @@ fn main() {
         }))
     };
     let builder = builder
+        .plugin(tv_plugin())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
