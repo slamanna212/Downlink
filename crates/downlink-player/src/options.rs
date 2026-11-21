@@ -277,6 +277,9 @@ impl Preferences {
         o.extend(subtitle_options(&self.subtitle));
         if cfg!(target_os = "windows") {
             o.push(colorspace_hint(self.hdr_output));
+        } else {
+            // Render-API surfaces (Linux, macOS) never signal HDR through mpv.
+            o.push(kv("target-colorspace-hint", "no"));
         }
         o
     }
@@ -312,7 +315,13 @@ pub const AUDIO_OUTPUTS: &str = "";
 pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
     let mut o: Opts = Vec::new();
     match backend {
-        RenderBackend::RenderApi => o.push(kv("vo", "libmpv")),
+        RenderBackend::RenderApi => {
+            o.push(kv("vo", "libmpv"));
+            // The surface (not mpv) owns HDR signalling: mpv must tone-map to SDR unless the
+            // Linux HDR surface overrides target-trc/prim/peak at run time. `yes`/`no` are valid
+            // on every mpv we support (0.40 takes a flag, 0.41+ a choice).
+            o.push(kv("target-colorspace-hint", "no"));
+        }
         RenderBackend::WidWindow => {
             o.push(kv("vo", "gpu-next"));
             o.push(kv(
@@ -498,9 +507,11 @@ mod tests {
         };
         let o = base_options(&off, RenderBackend::WidWindow);
         assert!(has(&o, "target-colorspace-hint", "no"));
-        // The render API path never sets it: on Linux the surface owns HDR signalling.
+        // The render API path always tone-maps unless the surface overrides it, even on Auto.
         let o = base_options(&Preferences::default(), RenderBackend::RenderApi);
-        assert!(!o.iter().any(|(k, _)| k == "target-colorspace-hint"));
+        assert!(has(&o, "target-colorspace-hint", "no"));
+        let live = Preferences::default().live_options();
+        assert!(live.iter().any(|(k, _)| k == "target-colorspace-hint"));
     }
 
     #[test]

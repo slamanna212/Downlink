@@ -177,6 +177,25 @@ pub struct StatsSnapshot {
     pub container: Option<String>,
 }
 
+/// Parse `mpv-version` ("mpv v0.42.0-...", "mpv 0.40.0") into (major, minor).
+fn parse_mpv_version(v: &str) -> Option<(u32, u32)> {
+    let t = v.split_whitespace().nth(1)?.trim_start_matches('v');
+    let mut it = t.split(['.', '-']);
+    Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+}
+
+/// Log which libmpv really runs; older than the 0.42 bundle means a system fallback or a stale
+/// `DOWNLINK_MPV_PATH`, where colour handling differs.
+fn log_mpv_version(engine: &Engine, source: &LoadSource) {
+    let version = engine.get_property("mpv-version").unwrap_or_default();
+    tracing::info!(%version, source = ?source, "mpv engine version");
+    if parse_mpv_version(&version).is_some_and(|v| v < (0, 42)) {
+        tracing::warn!(
+            "mpv {version} is older than the supported 0.42; HDR/colour behaviour may differ"
+        );
+    }
+}
+
 fn is_hdr_transfer(gamma: &str) -> bool {
     matches!(gamma, "pq" | "hlg")
 }
@@ -534,6 +553,7 @@ impl Player {
             opts.push(("vo".to_owned(), vo));
         }
         let engine = Arc::new(Engine::new(loaded, &opts)?);
+        log_mpv_version(&engine, &loaded.source);
         let recipe = (loaded.clone(), opts.clone());
         if let Err(e) = engine.request_log_messages("warn") {
             tracing::warn!("could not request mpv log messages: {e}");
@@ -1403,6 +1423,13 @@ fn rebuild_engine(inner: &Arc<Inner>) -> Result<(), PlayerError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mpv_version_parses() {
+        assert_eq!(parse_mpv_version("mpv v0.42.0-dirty"), Some((0, 42)));
+        assert_eq!(parse_mpv_version("mpv 0.40.0"), Some((0, 40)));
+        assert_eq!(parse_mpv_version(""), None);
+    }
 
     #[test]
     fn hdr_and_bit_depth_from_video_params() {

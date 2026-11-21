@@ -249,6 +249,11 @@ impl VideoSurface for LinuxSurface {
         };
 
         let (wl, x11, wayland) = display_pointers();
+        tracing::info!(
+            wayland,
+            hdr_auto = super::hdr_output_auto(),
+            "video surface: choosing path"
+        );
         if wayland && !wl.is_null() && super::hdr_output_auto() {
             let toplevel = vbox.toplevel();
             if let Some(parent) = toplevel.as_ref().and_then(toplevel_wl_surface) {
@@ -282,6 +287,7 @@ impl VideoSurface for LinuxSurface {
             }
         }
 
+        tracing::info!("video surface: GtkGLArea (SDR, tone-mapped)");
         let glarea = gtk::GLArea::new();
         glarea.set_halign(gtk::Align::Start);
         glarea.set_valign(gtk::Align::Start);
