@@ -16,7 +16,10 @@ if [ -z "$SRC" ]; then
     [ -e "$c" ] && SRC="$c" && break
   done
 fi
-[ -n "$SRC" ] && [ -e "$SRC" ] || { echo "libmpv.so.2 not found (install libmpv2 or set LIBMPV_SRC)" >&2; exit 1; }
+if [ -z "$SRC" ] || [ ! -e "$SRC" ]; then
+  echo "libmpv.so.2 not found (install libmpv2 or set LIBMPV_SRC)" >&2
+  exit 1
+fi
 SRC="$(readlink -f "$SRC")"
 
 # Libraries that must come from the user's system: glibc, GPU/windowing/audio stacks and anything
