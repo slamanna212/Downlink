@@ -4,6 +4,7 @@
 //! (PLAN §4.10). Only the client API and the render API (OpenGL) are declared.
 
 use std::ffi::{c_char, c_double, c_int, c_void};
+use std::mem::ManuallyDrop;
 
 use libloading::Library;
 
@@ -134,8 +135,13 @@ pub type UpdateCallbackFn = unsafe extern "C" fn(ctx: *mut c_void);
 macro_rules! api {
     ($( $field:ident : $name:literal => fn($($arg:ty),*) $(-> $ret:ty)? ),* $(,)?) => {
         /// Resolved libmpv entry points. Holds the [`Library`] so the pointers stay valid.
+        ///
+        /// The library is never unloaded (`ManuallyDrop`): libmpv and its dependencies leave
+        /// detached threads running after `mpv_terminate_destroy`, and `dlclose`/`FreeLibrary`
+        /// under them makes them jump into unmapped code (SIGSEGV, seen in CI and reproducible
+        /// under parallel load). One libmpv per process lifetime is the intended model anyway.
         pub struct MpvApi {
-            _lib: Library,
+            _lib: ManuallyDrop<Library>,
             $( pub $field: unsafe extern "C" fn($($arg),*) $(-> $ret)?, )*
         }
 
@@ -148,7 +154,7 @@ macro_rules! api {
                     let $field: unsafe extern "C" fn($($arg),*) $(-> $ret)? =
                         *unsafe { lib.get(concat!($name, "\0").as_bytes())? };
                 )*
-                Ok(Self { _lib: lib, $( $field, )* })
+                Ok(Self { _lib: ManuallyDrop::new(lib), $( $field, )* })
             }
         }
     };
