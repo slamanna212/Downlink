@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router';
 import { Box, Group, NavLink, Stack, Text, Tooltip } from '@mantine/core';
-import { IconArrowBarLeft, IconDownload } from '@tabler/icons-react';
+import { IconArrowBarLeft } from '@tabler/icons-react';
 import { FocusContext } from '@noriginmedia/norigin-spatial-navigation';
 import { useCaps, useSources, useUpdateWaiting } from '../api/queries';
 import type { Source, SourceStatus } from '../api/types';
@@ -12,6 +12,7 @@ import { t } from '../lib/i18n';
 import { modKeyLabel } from '../lib/platform';
 import { SETTINGS_NAV, visibleNav, type NavEntry } from './nav';
 import classes from './Rail.module.css';
+import logoUrl from '../assets/logo.svg';
 
 export type RailMode = 'expanded' | 'collapsed' | 'tv';
 
@@ -122,7 +123,7 @@ export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void 
               onClick={mode === 'collapsed' ? onToggle : undefined}
               onKeyDown={mode === 'collapsed' ? (e) => (e.key === 'Enter' || e.key === ' ') && onToggle() : undefined}
             >
-              <Icon icon={IconDownload} size={16} />
+              <img src={logoUrl} alt="" width={24} height={24} draggable={false} />
             </span>
             {mode === 'expanded' && <span className={classes.brandName}>{t('app.name')}</span>}
           </Group>
