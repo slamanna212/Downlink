@@ -526,6 +526,7 @@ impl Player {
         backend: RenderBackend,
         sink: EventSink,
     ) -> Result<Self, PlayerError> {
+        crate::surface::set_hdr_output(prefs.hdr_output);
         let mut opts = options::base_options(&prefs, backend);
         // Developer-only override used by the M0 spike to probe `gpu-next` via the render API.
         if let Ok(vo) = std::env::var("DOWNLINK_MPV_VO") {
@@ -617,6 +618,7 @@ impl Player {
     /// (hwdec, deinterlace, languages, audio device and mode, subtitle style); the live buffer
     /// applies from the next `play`.
     pub fn set_preferences(&self, prefs: Preferences) {
+        crate::surface::set_hdr_output(prefs.hdr_output);
         for (k, v) in prefs.live_options() {
             if let Err(e) = self.inner.eng().set_property(&k, &v) {
                 tracing::warn!("preference `{k}` not applied: {e}");

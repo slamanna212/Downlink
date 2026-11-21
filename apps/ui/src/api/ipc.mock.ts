@@ -164,7 +164,7 @@ export function createMockBackend(): Backend {
   const groups = mockGroups();
   let settings: AppSettings = {
     liveBufferSecs: 2, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
-    deinterlace: 'auto', subtitleSize: 100, subtitleBackground: true, resumeLastChannel: false,
+    deinterlace: 'auto', hdrOutput: 'auto', subtitleSize: 100, subtitleBackground: true, resumeLastChannel: false,
   };
   let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, notes: null, lastChecked: null, ready: false };
   let searchIndex: { programme: Programme; channel: Channel; hay: string }[] | null = null;

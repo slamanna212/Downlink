@@ -2,7 +2,18 @@
   "bundle": {
     "linux": {
       "appimage": { "files": { "usr/lib": "../../tools/mpv/out/linux/lib" } },
-      "deb": { "files": { "/usr/lib/downlink/mpv": "../../tools/mpv/out/linux/lib" }, "depends": [] }
+      "deb": {
+        "files": { "/usr/lib/downlink/mpv": "../../tools/mpv/out/linux/lib" },
+        "depends": [
+          "libasound2t64", "libpulse0", "libpipewire-0.3-0t64",
+          "libdrm2", "libgbm1", "libegl1", "libvulkan1",
+          "libva2", "libva-drm2", "libva-wayland2", "libva-x11-2", "libvdpau1",
+          "libwayland-client0", "libwayland-cursor0", "libwayland-egl1", "libxkbcommon0",
+          "libx11-6", "libxcb1", "libxcb-render0", "libxcb-shm0", "libxext6", "libxfixes3",
+          "libxrandr2", "libxrender1", "libxss1", "libxv1",
+          "libfontconfig1", "libfreetype6"
+        ]
+      }
     }
   }
 }

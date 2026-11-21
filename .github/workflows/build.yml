@@ -119,27 +119,28 @@ jobs:
   build-linux:
     name: Build (Linux AppImage, deb)
     needs: prepare
-    # Ubuntu 24.04 is the oldest GitHub image that ships libmpv.so.2 (libmpv2), so it sets the glibc baseline
-    # (2.39). Override with repo variable LINUX_RUNNER (e.g. a self-hosted runner label).
+    # Built in the libmpv pin's image (MPV_LINUX_IMAGE, tools/mpv/pins.env): Debian 13 sets the floor
+    # (glibc 2.41, Wayland 1.23), the same image CI tests in. LINUX_RUNNER picks the host (needs Docker).
     runs-on: ${{ inputs.linux-runner }}
+    container: debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6
     permissions:
       contents: write
+    env:
+      # linuxdeploy/appimagetool are AppImages themselves; there is no FUSE in a container.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
     steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git jq zstd xz-utils file patchelf pkg-config build-essential gh \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
       - uses: actions/checkout@v7
 
-      - name: Install build dependencies
-        if: runner.environment == 'github-hosted'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libmpv-dev pkg-config build-essential patchelf file
-
-      - name: Stage libmpv (tools/mpv/linux.sh -> tools/mpv/out/linux/lib)
-        env:
-          # Optional repo variable LIBMPV_SRC pins the exact libmpv.so.2 to bundle (see tools/mpv/PINNED.md).
-          LIBMPV_SRC: ${{ vars.LIBMPV_SRC }}
-        run: ./tools/mpv/linux.sh tools/mpv/out/linux/lib
+      - uses: ./.github/actions/libmpv-linux
+        with:
+          image: debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6
 
       - uses: ./.github/actions/setup-build
         with:
@@ -156,7 +157,8 @@ jobs:
         with:
           projectPath: apps/desktop
           tauriScript: cargo tauri
-          args: --bundles appimage,deb --config ${{ github.workspace }}/release-config.json
+          # Relative to projectPath: inside a container github.workspace is the host path, not ours.
+          args: --bundles appimage,deb --config ../../release-config.json
           releaseId: ${{ needs.prepare.outputs.release_id }}
           uploadUpdaterJson: false
 

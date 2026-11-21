@@ -448,11 +448,26 @@ impl RenderContext {
         flip_y: bool,
         block: bool,
     ) -> Result<(), PlayerError> {
+        // GL_RGBA8: GtkGLArea FBOs are RGBA8.
+        self.render_with_format(fbo, w, h, 0x8058, flip_y, block)
+    }
+
+    /// [`Self::render`] into a framebuffer of the given GL internal format (`GL_RGB10_A2` for the
+    /// 10-bit HDR surface), so mpv dithers to the real depth.
+    pub fn render_with_format(
+        &self,
+        fbo: i32,
+        w: i32,
+        h: i32,
+        internal_format: c_int,
+        flip_y: bool,
+        block: bool,
+    ) -> Result<(), PlayerError> {
         let mut f = ffi::MpvOpenGlFbo {
             fbo,
             w,
             h,
-            internal_format: 0x8058, // GL_RGBA8: GtkGLArea FBOs are RGBA8
+            internal_format,
         };
         let mut flip: c_int = c_int::from(flip_y);
         let mut block: c_int = c_int::from(block);

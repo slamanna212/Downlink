@@ -74,9 +74,12 @@ the installed one.
 Stable releases also get fixed-name copies for website links (`/releases/latest/download/<name>`):
 `Downlink_x64-setup.exe`, `Downlink_amd64.AppImage`, `Downlink_amd64.deb`.
 
-Linux builds on `ubuntu-24.04`, the oldest GitHub image with `libmpv.so.2`, so the glibc baseline is 2.39
-(Debian 13, Ubuntu 24.04, Fedora 40 and newer). libmpv and its non-system dependencies are bundled by
-`tools/mpv/linux.sh`; Windows libmpv is pinned in `tools/mpv/pins.env`.
+Every platform ships the same mpv release, pinned in `tools/mpv/pins.env` (currently 0.42.0). Windows uses
+mpv's official libmpv zip. Linux builds libplacebo + mpv from verified source inside the pinned Debian 13
+container (`tools/mpv/build-linux.sh`), and the Linux CI and release jobs run in that same container, so the
+floor is glibc 2.41 / Wayland 1.23 (Debian 13, Ubuntu 25.04, Fedora 42 and newer). CI caches the libmpv build
+keyed on the pins and scripts. Dev machines get the identical bundle with `tools/mpv/linux-docker.sh`, then
+`export DOWNLINK_MPV_PATH=$PWD/tools/mpv/out/linux/lib/libmpv.so.2`.
 
 If a build fails, the half-filled draft and its tag are deleted.
 
@@ -86,9 +89,8 @@ If a build fails, the half-filled draft and its tag are deleted.
 |---|---|---|
 | `TAURI_SIGNING_PRIVATE_KEY` | secret | minisign private key (contents of the key file) for updater `.sig` files |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret | its password |
-| `LINUX_RUNNER` | variable (optional) | Linux runner label for build and CI (default `ubuntu-24.04`); a self-hosted runner must have the build deps installed |
+| `LINUX_RUNNER` | variable (optional) | Linux runner label for build and CI (default `ubuntu-24.04`); the Linux jobs run in a container, so a self-hosted runner needs Docker |
 | `CI_RUNNER` | variable (optional) | runner for PR CI from trusted actors; unset = GitHub-hosted |
-| `LIBMPV_SRC` | variable (optional) | absolute path of the `libmpv.so.2` to bundle on Linux |
 
 Without `TAURI_SIGNING_PRIVATE_KEY`, builds still publish the installers (with a warning), but without `.sig`
 files or `latest.json`, so in-app updates don't work until the key is added.
@@ -101,8 +103,8 @@ files or `latest.json`, so in-app updates don't work until the key is added.
 
 ## Not in the pipeline (yet)
 
-- **macOS.** The staging script (`tools/mpv/macos.sh`) and overlay (`apps/desktop/tauri.release.macos.conf.json`)
-  are kept. Adding it means a macOS build job (universal libmpv, Developer ID signing and notarisation, PLAN §10.5)
-  and passing `--macos` to `make-latest-json.py`.
+- **macOS.** The overlay (`apps/desktop/tauri.release.macos.conf.json`) is kept. Adding it means a macOS build job
+  that builds the pinned mpv from source (no Homebrew libmpv; universal via `lipo`), Developer ID signing and
+  notarisation, and passing `--macos` to `make-latest-json.py`.
 - rpm, build-provenance attestation, smoke-testing installers on clean runners (`--self-test` still exists in the
   app for manual checks), Windows code signing.

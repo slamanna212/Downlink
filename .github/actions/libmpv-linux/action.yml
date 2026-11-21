@@ -1,0 +1,34 @@
+name: Pinned libmpv (Linux)
+description: >-
+  Restore (or build, on a cache miss) the pinned libmpv bundle into tools/mpv/out/linux/lib. Must run as root
+  inside the MPV_LINUX_IMAGE container from tools/mpv/pins.env, the same image dev machines use through
+  tools/mpv/linux-docker.sh, so CI tests and release builds load identical bits.
+inputs:
+  image:
+    description: The job's container image. Checked against MPV_LINUX_IMAGE so the two cannot drift.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Check the job container matches the libmpv pin
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+      run: |
+        # shellcheck disable=SC1091
+        . tools/mpv/pins.env
+        if [[ "$IMAGE" != "$MPV_LINUX_IMAGE" ]]; then
+          echo "::error::job container $IMAGE != MPV_LINUX_IMAGE $MPV_LINUX_IMAGE (tools/mpv/pins.env)"
+          exit 1
+        fi
+
+    - id: cache
+      uses: actions/cache@v6
+      with:
+        path: tools/mpv/out/linux/lib
+        key: libmpv-linux-${{ hashFiles('tools/mpv/pins.env', 'tools/mpv/build-linux.sh', 'tools/mpv/linux.sh', 'tools/mpv/patches/**') }}
+
+    - name: Build libmpv (cache miss)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: ./tools/mpv/build-linux.sh tools/mpv/out/linux/lib
