@@ -788,6 +788,13 @@ impl Service {
         self.emit(Event::CatalogUpdated(
             self.counts(source_id, CatalogChange::Channels).await?,
         ));
+        // Which VOD categories have titles is recomputed here, not per view.
+        if crate::source::Caps::from_db(self.store.source(source_id).await?.caps)
+            .contains(crate::source::Caps::VOD)
+            && let Err(e) = self.refresh_vod_categories(source_id).await
+        {
+            tracing::warn!(error = %e, "vod category sync failed");
+        }
         self.progress(source_id, "guide", 2, 4);
         if let Err(e) = self.sync_guide_for(source_id, client.as_ref()).await {
             // The guide is not critical: channels stay usable.

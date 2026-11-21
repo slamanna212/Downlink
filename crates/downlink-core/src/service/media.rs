@@ -9,6 +9,7 @@ use crate::source::{
 use crate::store::{RecordingRow, ResumeRow, VodRow};
 
 const CAT_STRIDE: i64 = 1_000_000;
+const VOD_CATS_ENTITY: &str = "vod_categories";
 
 /// What `play_vod` hands the desktop.
 #[derive(Debug)]
@@ -101,10 +102,12 @@ impl Service {
         self.vod_categories(kind, true).await
     }
 
+    /// Categories with items, read from the cache the catalog sync fills (no provider requests).
+    /// `with_counts` is kept for the command signature: counts are always known from the cache.
     pub async fn vod_categories(
         &self,
         kind: VodKindArg,
-        with_counts: bool,
+        _with_counts: bool,
     ) -> Result<Vec<VodCategoryDto>> {
         let k = if kind == VodKindArg::Movie {
             VodKind::Movie
@@ -113,14 +116,24 @@ impl Service {
         };
         let mut out = Vec::new();
         for src in self.caps_sources(Caps::VOD).await? {
-            let client = self.client(src.id).await?;
+            // A source that has never completed a VOD category sync (e.g. upgraded install) gets
+            // one now; afterwards only the catalog sync refreshes it.
+            let synced = self
+                .store
+                .sync_state(src.id, VOD_CATS_ENTITY)
+                .await?
+                .is_some_and(|(ok, _)| ok.is_some());
+            if !synced && let Err(e) = self.refresh_vod_categories(src.id).await {
+                tracing::warn!(error = %e, "vod category refresh failed");
+            }
             // Categories the server reports as empty are hidden (unknown counts stay listed).
-            let categories = if with_counts {
-                client.vod_categories(k).await?
-            } else {
-                client.vod_category_names(k).await?
-            };
-            for c in categories.into_iter().filter(|c| c.count != Some(0)) {
+            for c in self
+                .store
+                .vod_categories(src.id, k)
+                .await?
+                .into_iter()
+                .filter(|c| c.count != Some(0))
+            {
                 let id = compose_cat(src.id, &c.ext_id);
                 if let Ok(mut g) = self.vod_cats.lock() {
                     g.insert(id, (src.id, c.ext_id.clone()));
@@ -129,11 +142,40 @@ impl Service {
                     id,
                     name: c.name,
                     count: c.count.unwrap_or(0),
-                    count_pending: !with_counts && c.count.is_none(),
+                    count_pending: false,
                 });
             }
         }
         Ok(out)
+    }
+
+    /// Recompute and persist a source's non-empty VOD categories (movies and series). Called by
+    /// the catalog sync; on failure the previous cache is kept and the error recorded.
+    pub(super) async fn refresh_vod_categories(&self, source_id: i64) -> Result<()> {
+        let r = async {
+            let client = self.client(source_id).await?;
+            for k in [VodKind::Movie, VodKind::Series] {
+                let categories = client.vod_categories(k).await?;
+                self.store
+                    .replace_vod_categories(source_id, k, &categories)
+                    .await?;
+            }
+            Ok::<(), crate::AppError>(())
+        }
+        .await;
+        match &r {
+            Ok(()) => {
+                self.store
+                    .set_sync_ok(source_id, VOD_CATS_ENTITY, now_utc())
+                    .await?
+            }
+            Err(e) => {
+                self.store
+                    .set_sync_error(source_id, VOD_CATS_ENTITY, &e.message)
+                    .await?
+            }
+        }
+        r
     }
 
     fn decode_cat(&self, id: i64) -> (i64, String) {

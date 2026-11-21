@@ -6,7 +6,7 @@ use sqlx::FromRow;
 
 use super::Store;
 use crate::error::Result;
-use crate::source::{RecStatus, RecordingInfo, RuleInfo, VodItem, VodKind};
+use crate::source::{RecStatus, RecordingInfo, RuleInfo, VodCategoryInfo, VodItem, VodKind};
 
 #[derive(Debug, Clone, PartialEq, FromRow)]
 pub struct VodRow {
@@ -192,6 +192,61 @@ impl Store {
         .fetch_all(self.pool())
         .await?;
         Ok(rows.into_iter().collect())
+    }
+
+    /// Replace one source's cached VOD categories of a kind (one transaction).
+    pub async fn replace_vod_categories(
+        &self,
+        source_id: i64,
+        kind: VodKind,
+        categories: &[VodCategoryInfo],
+    ) -> Result<()> {
+        let kind = kind.as_str();
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM vod_category WHERE source_id = ? AND kind = ?")
+            .bind(source_id)
+            .bind(kind)
+            .execute(&mut *tx)
+            .await?;
+        for c in categories {
+            sqlx::query(
+                "INSERT OR REPLACE INTO vod_category (source_id, kind, ext_id, name, item_count)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(source_id)
+            .bind(kind)
+            .bind(&c.ext_id)
+            .bind(&c.name)
+            .bind(c.count)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Cached VOD categories of a kind, in provider order.
+    pub async fn vod_categories(
+        &self,
+        source_id: i64,
+        kind: VodKind,
+    ) -> Result<Vec<VodCategoryInfo>> {
+        let rows: Vec<(String, String, Option<i64>)> = sqlx::query_as(
+            "SELECT ext_id, name, item_count FROM vod_category
+             WHERE source_id = ? AND kind = ? ORDER BY rowid",
+        )
+        .bind(source_id)
+        .bind(kind.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(ext_id, name, count)| VodCategoryInfo {
+                ext_id,
+                name,
+                count,
+            })
+            .collect())
     }
 
     pub async fn vod_item(&self, id: i64) -> Result<Option<VodRow>> {
