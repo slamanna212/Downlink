@@ -1193,3 +1193,30 @@ async fn stream_picker_is_hidden_and_refused_for_non_admins() {
         .count();
     assert_eq!(switched, 0);
 }
+
+#[tokio::test]
+async fn live_source_position_reads_the_server_stream_list_and_status() {
+    let (server, e, _) = added().await;
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    let one = chans[0].id; // Channel One: streams [12, 11] on the server
+    get(
+        &server,
+        "/api/channels/channels/1/streams/",
+        fixture!("channel_streams.json"),
+    )
+    .await;
+    get(
+        &server,
+        &format!("/proxy/ts/status/{UUID1}"),
+        json!({"state": "active", "stream_id": 11}),
+    )
+    .await;
+    e.svc.play_channel(one).await.unwrap();
+    // the server is on its second stream, not the first
+    assert_eq!(e.svc.live_source_position(one).await.unwrap(), (2, 2));
+    assert_eq!(e.svc.source_position(one).await.unwrap().0, 2);
+}

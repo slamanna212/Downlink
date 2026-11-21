@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AltStream } from '../../api/types';
-import { streamDetails } from './PlayerMenus';
+import { streamDetails, streamPosition } from './PlayerMenus';
 
 const base: AltStream = {
   index: 0, streamId: '1', name: 'Primary', provider: null, resolution: null, fps: null, videoCodec: null,
@@ -21,5 +21,17 @@ describe('streamDetails', () => {
   it('flags stale streams and says when nothing is known', () => {
     expect(streamDetails({ ...base, stale: true })).toBe('Stale');
     expect(streamDetails(base)).toBe('No stream info yet');
+  });
+});
+
+describe('streamPosition', () => {
+  it('shows the real 1-based index and total', () => {
+    expect(streamPosition({ sourceIndex: 2, sourceCount: 5 })).toBe('2 of 5');
+  });
+  it('hides the line when unknown or inconsistent', () => {
+    expect(streamPosition(null)).toBeNull();
+    expect(streamPosition({ sourceIndex: null, sourceCount: 3 })).toBeNull();
+    expect(streamPosition({ sourceIndex: 1, sourceCount: null })).toBeNull();
+    expect(streamPosition({ sourceIndex: 4, sourceCount: 3 })).toBeNull();
   });
 });

@@ -492,7 +492,7 @@ impl Playback {
             .and_then(|v| v.into_iter().next())
             .and_then(|nn| nn.now);
         lock(&self.active).info.programme = programme;
-        if let Ok((i, c)) = self.service.source_position(channel_id).await {
+        if let Ok((i, c)) = self.service.live_source_position(channel_id).await {
             let mut a = lock(&self.active);
             a.source_index = u32::try_from(i).unwrap_or(0);
             a.source_count = u32::try_from(c).unwrap_or(0);

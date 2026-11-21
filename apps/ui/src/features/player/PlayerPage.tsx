@@ -46,7 +46,7 @@ import { copyDiagnostics } from '../diagnostics/copyDiagnostics';
 import { resumeUseful } from '../vod/vod';
 import { decodeCaps } from '../../lib/caps';
 import { playChannel, restartProgramme } from './actions';
-import { AudioMenu, StreamMenu, SubtitleMenu } from './PlayerMenus';
+import { AudioMenu, StreamMenu, SubtitleMenu, streamPosition } from './PlayerMenus';
 import { useMultiviewAvailable } from '../multiview/available';
 import { holdSession, releaseSession } from './session';
 import classes from './Player.module.css';
@@ -115,7 +115,7 @@ function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerSta
   const rows: [string, string][] = [
     [t('player.info.source'), sourceName],
     [t('player.info.channel'), channel ? `${channel.number ?? ''} ${channel.name}`.trim() : dash],
-    [t('player.info.stream'), stats?.sourceIndex != null ? t('player.info.streamOf', { n: stats.sourceIndex, total: stats.sourceCount ?? stats.sourceIndex }) : dash],
+    ...(streamPosition(stats) ? [[t('player.info.stream'), streamPosition(stats) as string] as [string, string]] : []),
     [t('player.info.video'), video],
     [t('player.info.hdr'), hdr],
     [t('player.info.colour'), join([upper(stats?.primaries), stats?.bitDepth != null ? t('player.info.bitDepth', { n: stats.bitDepth }) : null])],

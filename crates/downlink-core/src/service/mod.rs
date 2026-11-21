@@ -1713,6 +1713,39 @@ impl Service {
         Ok((cur.min(count - 1) + 1, count))
     }
 
+    /// `(1-based index in use, count)` for a channel that is playing now, from the server: the
+    /// live stream list gives the count and the status endpoint the stream in use. Falls back to
+    /// the locally tracked position when the server can't say. Never touches a stream endpoint.
+    pub async fn live_source_position(&self, channel_id: i64) -> Result<(usize, usize)> {
+        let (local_idx, local_count) = self.source_position(channel_id).await?;
+        let Some(ch) = self.store.channel(channel_id).await? else {
+            return Ok((local_idx, local_count));
+        };
+        let client = self.client(ch.source_id).await?;
+        let streams = client
+            .channel_stream_info(&ch.ext_id)
+            .await
+            .unwrap_or_default();
+        let count = if streams.is_empty() {
+            local_count
+        } else {
+            streams.len()
+        };
+        let active = client
+            .active_stream_id(&ChannelKey::from_row(&ch))
+            .await
+            .ok()
+            .flatten();
+        let idx0 = active
+            .and_then(|id| streams.iter().position(|s| s.id == id))
+            .unwrap_or(local_idx - 1)
+            .min(count - 1);
+        if let Ok(mut g) = self.current_stream.lock() {
+            g.insert(channel_id, idx0);
+        }
+        Ok((idx0 + 1, count))
+    }
+
     /// Next step after a playback failure (PLAN §4.5). `attempt` is the number of retries already
     /// made, starting at 1 for the first retry:
     /// 1. reconnect the same URL (no server change);

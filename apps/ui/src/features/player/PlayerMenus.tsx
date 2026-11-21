@@ -149,3 +149,11 @@ export function StreamMenu({ channelId, opened, onChange, onDenied }: MenuProps 
     </Menu>
   );
 }
+
+/** "2 of 3" for the stream in use; null (row hidden) when the position or total is unknown. */
+export function streamPosition(stats: { sourceIndex: number | null; sourceCount: number | null } | null | undefined): string | null {
+  const n = stats?.sourceIndex;
+  const total = stats?.sourceCount;
+  if (n == null || total == null || total < 1 || n < 1 || n > total) return null;
+  return t('player.info.streamOf', { n, total });
+}

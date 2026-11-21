@@ -388,6 +388,11 @@ pub trait Source: Send + Sync {
     async fn change_stream(&self, _ch: &ChannelKey, _stream_id: &str) -> Result<bool> {
         Ok(false)
     }
+    /// The provider stream id the server is currently feeding this channel from (a status
+    /// endpoint, never a stream endpoint). `None` when unknown or the channel is not active.
+    async fn active_stream_id(&self, _ch: &ChannelKey) -> Result<Option<String>> {
+        Ok(None)
+    }
     /// A channel's provider streams in failover order (names and stats only; provider URLs are
     /// never returned).
     async fn channel_stream_info(&self, _ch_ext_id: &str) -> Result<Vec<StreamInfo>> {

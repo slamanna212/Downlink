@@ -1241,6 +1241,15 @@ fn check_app_data_key(key: &str) -> Result<()> {
     }
 }
 
+/// The active provider stream id in a `/proxy/ts/status` payload (number or string).
+fn status_stream_id(v: &Value) -> Option<String> {
+    match v.get("stream_id")? {
+        Value::Number(n) => Some(n.to_string()),
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    }
+}
+
 /// Mask every `url` value (provider URLs) in a status payload, recursively.
 fn mask_urls(v: &mut Value) {
     match v {
@@ -1479,6 +1488,13 @@ impl Source for DispatcharrClient {
             Some(u) => DispatcharrClient::change_stream(self, u, stream_id).await,
             None => Ok(false),
         }
+    }
+
+    async fn active_stream_id(&self, ch: &ChannelKey) -> Result<Option<String>> {
+        let Some(u) = ch.uuid.as_deref() else {
+            return Ok(None);
+        };
+        Ok(self.ts_status(u).await?.as_ref().and_then(status_stream_id))
     }
 
     async fn channel_stream_info(&self, ch_ext_id: &str) -> Result<Vec<StreamInfo>> {
