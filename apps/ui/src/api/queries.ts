@@ -51,6 +51,15 @@ export async function startUpdateBridge(qc: QueryClient): Promise<() => void> {
 export const useUpdateStatus = () =>
   useQuery({ queryKey: ['update'], queryFn: () => invoke('get_update_status', {}), staleTime: Infinity });
 
+/** Release notes for a version: the GitHub release body, falling back to latest.json notes (done in Rust). */
+export const useReleaseNotes = (version: string | null | undefined) =>
+  useQuery({
+    queryKey: ['release-notes', version],
+    queryFn: () => invoke('get_release_notes', { version: version ?? '' }),
+    enabled: !!version,
+    staleTime: 10 * 60_000,
+  });
+
 /** True while a newer version is waiting (found, downloading or downloaded). */
 export function useUpdateWaiting(): boolean {
   return !!useUpdateStatus().data?.available;

@@ -10,11 +10,11 @@ import { DLButton } from '../../components/DLButton/DLButton';
 import { Icon, type TablerIcon } from '../../components/Icon/Icon';
 import { SettingRow } from '../../components/SettingRow/SettingRow';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
-import { parseReleaseNotes } from '../../lib/releaseNotes';
 import { formatUpdated, nowEpoch } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
 import { useTasksStore } from '../../store/tasks';
 import { useUiStore } from '../../store/ui';
+import { ReleaseNotes } from './ReleaseNotes';
 import { copyDiagnostics } from '../diagnostics/copyDiagnostics';
 import { notifyError } from '../../components/Notify/notify';
 import classes from './Settings.module.css';
@@ -305,7 +305,7 @@ function UpdatesSection() {
               {t('settings.updates.install')}
             </DLButton>
           </div>
-          {s.notes && <ReleaseNotes version={s.available} notes={s.notes} />}
+          <ReleaseNotes version={s.available} fallback={s.notes} />
         </div>
       )}
       <SettingRow label={t('settings.updates.channel')} help={t('settings.updates.channel.help')} wide>
@@ -325,27 +325,6 @@ function UpdatesSection() {
         </DLButton>
       </SettingRow>
     </Section>
-  );
-}
-
-function ReleaseNotes({ version, notes }: { version: string; notes: string }) {
-  const blocks = parseReleaseNotes(notes);
-  if (blocks.length === 0) return null;
-  return (
-    <div className={classes.notes}>
-      <h3 className={classes.notesTitle}>{t('settings.updates.whatsNew', { available: version })}</h3>
-      {blocks.map((b, i) =>
-        b.kind === 'heading' ? (
-          <h4 key={i} className={classes.notesHeading}>{b.text}</h4>
-        ) : b.kind === 'list' ? (
-          <ul key={i} className={classes.notesList}>
-            {b.items.map((item, j) => <li key={j}>{item}</li>)}
-          </ul>
-        ) : (
-          <p key={i} className={classes.notesPara}>{b.text}</p>
-        ),
-      )}
-    </div>
   );
 }
 

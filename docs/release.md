@@ -19,7 +19,7 @@ dev builds are a button.
 |---|---|---|
 | `release.yml` | every push to `main` (or manual retry) | Linux tests, then Windows + Linux build into a **draft** release `vX.Y.Z` (version from the root `package.json`). Skipped if that release exists. A `-suffix` version is marked pre-release. |
 | `dev-build.yml` | manual only: Actions -> Dev build -> Run workflow, pick the branch (normally `dev`) | Linux tests, then Windows + Linux build, published straight away as pre-release `vX.Y.Z-dev.N`. Points the in-app dev channel at it and keeps only the 5 newest dev builds. |
-| `release-notes.yml` | you publish or edit a release | Copies the release text into that release's `latest.json`, so the in-app "What's new" matches GitHub. |
+| `release-notes.yml` | you publish or edit a release | Copies the release text into that release's `latest.json` as an offline fallback. The app itself reads the GitHub release body (see "Release notes in the app"). |
 | `ci.yml` | called by the above; manual | Quality gates on Linux only: fmt, clippy, deny, nextest, UI lint/typecheck/test/build. |
 | `pr-ci.yml` | pull requests to `dev` | `ci.yml`. |
 | `build.yml` | called by `release.yml` and `dev-build.yml` | The shared build and publish pipeline. |
@@ -36,8 +36,19 @@ git commit -am "chore: release v0.8.0"
 ```
 
 Then on GitHub: open the draft, rewrite the notes (git-cliff's Conventional Commits list is the starting point;
-put the user-visible "What's new" first) and press Publish. Publishing runs `release-notes.yml`, which puts your
-final text into `latest.json`. Fixing a typo later works the same way: edit the release.
+put the user-visible "What's new" first) and press Publish. Fixing a typo later works the same way: edit the release.
+
+### Release notes in the app
+
+The release body on GitHub is what users see under Settings -> Updates -> "What's new". It is Markdown
+(GitHub-flavoured: lists, tables, links, **images**), so drag pictures into the release editor and they
+show up in the app. The app asks Rust to fetch `GET https://api.github.com/repos/<owner>/<repo>/releases/tags/v<version>`
+(unauthenticated, owner/repo taken from the updater endpoint) when an update is available. Edits are live
+without touching any artefact; the result is cached for 10 minutes. If GitHub is unreachable, rate-limited
+or the body is empty, the app shows the `notes` copied into `latest.json` by `release-notes.yml` instead.
+Raw HTML in the body is not rendered, links open in the system browser, and the webview CSP allows images
+from `github.com` and `*.githubusercontent.com` only. Drafts have no public API entry, so notes appear once
+the release is published (the dev-channel pre-releases are public immediately).
 
 **The root `package.json` `version` is the single source of truth.** `tauri.conf.json`, the workspace
 `Cargo.toml` and `apps/ui/package.json` are synced from it by `bump-version.sh` (so local builds report the right

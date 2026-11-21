@@ -68,17 +68,6 @@
   font-weight: 600;
   color: var(--dl-text);
 }
-.notesHeading {
-  margin: var(--mantine-spacing-sm) 0 var(--mantine-spacing-xs);
-  font-size: var(--mantine-font-size-sm);
-  font-weight: 600;
-  color: var(--dl-text);
-}
-.notesList {
-  margin: 0;
-  padding-left: var(--mantine-spacing-lg);
-}
-.notesPara { margin: var(--mantine-spacing-xs) 0; }
 
 .end { justify-content: flex-end; }
 .actions {

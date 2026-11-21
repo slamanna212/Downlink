@@ -334,6 +334,14 @@ export interface UpdateStatus {
   ready?: boolean;
 }
 
+export interface ReleaseNotes {
+  version: string;
+  /** Markdown; null when there is nothing to show. */
+  body: string | null;
+  /** `github` = the release body, `manifest` = the notes in latest.json. */
+  source: 'github' | 'manifest';
+}
+
 export interface AddSourceInput {
   kind: SourceKind;
   name: string;

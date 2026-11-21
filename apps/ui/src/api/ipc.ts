@@ -26,6 +26,7 @@ import type {
   SessionStats,
   UpdateChannel,
   UpdateStatus,
+  ReleaseNotes,
   CatalogUpdated,
   DeepLink,
   Diagnostics,
@@ -133,6 +134,10 @@ export interface Commands {
   media_server_match: { args: { target: MediaTarget }; result: MediaMatch | null };
   /** Opens a page from `media_server_match` in the browser. */
   media_server_open: { args: { url: string }; result: null };
+  /** GitHub release body for a version (Markdown), or the latest.json notes if GitHub is unreachable. */
+  get_release_notes: { args: { version: string }; result: ReleaseNotes };
+  /** Opens a web link from release notes in the system browser. */
+  open_external_link: { args: { url: string }; result: null };
 }
 export type CommandName = keyof Commands;
 

@@ -540,6 +540,8 @@ export function createMockBackend(): Backend {
     },
     list_audio_devices: () => [{ id: 'default', name: 'System default' }, { id: 'hdmi-1', name: 'Demo TV (HDMI)' }, { id: 'usb-1', name: 'Demo headset (USB)' }],
     get_update_status: () => update,
+    get_release_notes: ({ version }) => ({ version, body: update.notes ?? null, source: 'manifest' as const }),
+    open_external_link: () => null,
     set_update_channel: ({ channel }) => {
       update = { ...update, channel, available: null, notes: null, ready: false };
       emit('update://status', update);

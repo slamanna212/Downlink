@@ -32,8 +32,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' dlimg: http://dlimg.localhost https://dlimg.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
-      "devCsp": "default-src 'self'; img-src 'self' dlimg: http://dlimg.localhost https://dlimg.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420; script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+      "csp": "default-src 'self'; img-src 'self' dlimg: http://dlimg.localhost https://dlimg.localhost data: https://github.com https://*.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost",
+      "devCsp": "default-src 'self'; img-src 'self' dlimg: http://dlimg.localhost https://dlimg.localhost data: https://github.com https://*.githubusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420 http://localhost:1420; script-src 'self' 'unsafe-inline' 'unsafe-eval'"
     }
   },
   "bundle": {
