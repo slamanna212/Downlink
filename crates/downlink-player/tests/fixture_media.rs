@@ -110,7 +110,7 @@ fn clip(name: &str) -> Option<Vec<u8>> {
 }
 
 fn player() -> Option<Player> {
-    let loaded = match load(None) {
+    let loaded = match load(&[]) {
         Ok(l) => l,
         Err(e) if std::env::var("DOWNLINK_REQUIRE_MPV").is_ok_and(|v| v == "1") => {
             panic!("DOWNLINK_REQUIRE_MPV=1 but libmpv failed to load: {e}")

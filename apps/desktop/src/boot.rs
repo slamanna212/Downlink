@@ -139,7 +139,7 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
     let mut error = None;
     let h2 = handle.clone();
     let loaded = tokio::task::spawn_blocking(move || {
-        downlink_player::load_from_env(selftest::bundled_mpv_dir(&h2).as_deref())
+        downlink_player::load_from_env(&selftest::bundled_mpv_dirs(Some(&h2)))
     })
     .await;
     phase("libmpv loaded");

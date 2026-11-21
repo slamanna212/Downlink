@@ -5,38 +5,27 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
 
-pub fn bundled_mpv_dir(app: &AppHandle) -> Option<PathBuf> {
-    app.path().resource_dir().ok().map(|d| d.join("mpv"))
-}
-
-/// Where the engine lives relative to the executable when there is no Tauri resource dir yet
-/// (`--self-test` runs before the app is built): Windows `mpv\`, AppImage `usr/lib`, deb/rpm
-/// private dir, or `DOWNLINK_MPV_DIR` for CI staging.
-fn exe_relative_mpv_dir() -> Option<PathBuf> {
+/// Every directory a packaged install may keep libmpv in (Tauri resource dir, exe-relative
+/// deb/AppImage/Windows/macOS layouts, `DOWNLINK_MPV_DIR` for CI staging).
+pub fn bundled_mpv_dirs(app: Option<&AppHandle>) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = Vec::new();
     if let Some(d) = std::env::var_os("DOWNLINK_MPV_DIR") {
-        return Some(PathBuf::from(d));
+        v.push(PathBuf::from(d));
     }
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    let candidates = [
-        dir.join("mpv"),
-        dir.join("resources").join("mpv"),
-        dir.join("../lib/downlink/mpv"),
-        dir.join("../lib"),
-        dir.join("../Frameworks"),
-        dir.join("../../Frameworks"),
-    ];
-    let names = downlink_player::loader::library_file_names();
-    candidates
-        .into_iter()
-        .find(|c| names.iter().any(|n| c.join(n).is_file()))
+    let res = app.and_then(|a| a.path().resource_dir().ok());
+    let exe = std::env::current_exe().ok();
+    v.extend(downlink_player::loader::bundled_search_dirs(
+        res.as_deref(),
+        exe.as_deref(),
+    ));
+    v
 }
 
 fn run_inner() -> Result<(String, String), String> {
     use downlink_player::LoadSource;
     use downlink_player::engine::{Engine, EngineEvent};
-    let loaded = downlink_player::load_from_env(exe_relative_mpv_dir().as_deref())
-        .map_err(|e| e.to_string())?;
+    let loaded =
+        downlink_player::load_from_env(&bundled_mpv_dirs(None)).map_err(|e| e.to_string())?;
     let path = match &loaded.source {
         LoadSource::Bundled(p) => p.display().to_string(),
         other if std::env::var("DOWNLINK_SELF_TEST_ALLOW_DEV").is_ok_and(|v| v == "1") => {

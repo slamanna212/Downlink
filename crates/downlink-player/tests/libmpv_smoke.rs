@@ -8,7 +8,7 @@ use downlink_player::{LoadedMpv, Player, PlayerEvent, Preferences, RenderBackend
 
 /// The libmpv under test, or `None` to skip. Panics instead of skipping when CI requires it.
 fn engine() -> Option<LoadedMpv> {
-    match load(None) {
+    match load(&[]) {
         Ok(l) => Some(l),
         Err(e) if std::env::var("DOWNLINK_REQUIRE_MPV").is_ok_and(|v| v == "1") => {
             panic!("DOWNLINK_REQUIRE_MPV=1 but libmpv failed to load: {e}")
