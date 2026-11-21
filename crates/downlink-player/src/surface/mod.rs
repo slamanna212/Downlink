@@ -1,13 +1,17 @@
 //! Native video surfaces ordered **under** the transparent webview (PLAN §2.2).
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::PlayerError;
+use crate::options::HdrOutput;
 
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(target_os = "linux")]
+mod wayland_hdr;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
@@ -48,4 +52,18 @@ pub trait VideoSurface {
     fn set_visible(&self, visible: bool);
     /// Tear down the surface and free the render context.
     fn detach(&mut self);
+}
+
+/// The user's HDR output setting, for surfaces that pick their rendering path when attached (Linux).
+/// Updated by [`crate::Player::new`] and [`crate::Player::set_preferences`]; read at attach time, so a
+/// change applies the next time a video surface is created.
+static HDR_AUTO: AtomicBool = AtomicBool::new(true);
+
+pub(crate) fn set_hdr_output(h: HdrOutput) {
+    HDR_AUTO.store(h == HdrOutput::Auto, Ordering::Relaxed);
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub(crate) fn hdr_output_auto() -> bool {
+    HDR_AUTO.load(Ordering::Relaxed)
 }

@@ -252,6 +252,8 @@ export type HwdecSetting = 'auto-safe' | 'auto' | 'no' | 'vaapi' | 'nvdec' | 'd3
 /** Machine-local playback/diagnostic settings owned by Rust. */
 export type AudioOutput = 'stereo' | 'surround' | 'passthrough';
 export type Deinterlace = 'auto' | 'yes' | 'no';
+/** `auto`: HDR content is shown as HDR when the display and desktop support it; `off`: always SDR. */
+export type HdrOutput = 'auto' | 'off';
 
 export interface AppSettings {
   /** 1..10 seconds. */
@@ -262,6 +264,8 @@ export interface AppSettings {
   audioDevice: string | null;
   audioOutput: AudioOutput;
   deinterlace: Deinterlace;
+  /** Missing in settings saved before it existed; treat as `auto`. */
+  hdrOutput?: HdrOutput;
   /** Percent, 50..150. */
   subtitleSize: number;
   subtitleBackground: boolean;

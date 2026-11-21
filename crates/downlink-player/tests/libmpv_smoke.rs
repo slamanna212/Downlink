@@ -1,13 +1,28 @@
-//! Needs a real libmpv; skipped (passes) when none can be loaded. Set DOWNLINK_MPV_PATH in dev.
+//! Needs a real libmpv. Skipped (passes) when none can be loaded, unless `DOWNLINK_REQUIRE_MPV=1`
+//! (CI sets it, with `DOWNLINK_MPV_PATH` pointing at the same staged libmpv the release bundles).
+//! Set DOWNLINK_MPV_PATH in dev.
 
 use std::sync::Arc;
 
-use downlink_player::{Player, PlayerEvent, Preferences, RenderBackend, load};
+use downlink_player::{LoadedMpv, Player, PlayerEvent, Preferences, RenderBackend, load};
+
+/// The libmpv under test, or `None` to skip. Panics instead of skipping when CI requires it.
+fn engine() -> Option<LoadedMpv> {
+    match load(None) {
+        Ok(l) => Some(l),
+        Err(e) if std::env::var("DOWNLINK_REQUIRE_MPV").is_ok_and(|v| v == "1") => {
+            panic!("DOWNLINK_REQUIRE_MPV=1 but libmpv failed to load: {e}")
+        }
+        Err(_) => {
+            eprintln!("skipping: no libmpv available");
+            None
+        }
+    }
+}
 
 #[test]
 fn engine_initialises_and_reports_version() {
-    let Ok(loaded) = load(None) else {
-        eprintln!("skipping: no libmpv available");
+    let Some(loaded) = engine() else {
         return;
     };
     let sink: downlink_player::EventSink = Arc::new(|_e: PlayerEvent| {});
@@ -31,11 +46,11 @@ mod failover {
 
     use downlink_player::{
         PlayMode, PlayRequest, Player, PlayerEvent, Preferences, Profile, RenderBackend,
-        SessionState, load,
+        SessionState,
     };
 
     fn run(failover: bool) -> Option<(SessionState, Vec<String>, u32)> {
-        let loaded = load(None).ok()?;
+        let loaded = super::engine()?;
         let events: Arc<Mutex<Vec<String>>> = Arc::default();
         let ev = events.clone();
         let sink: downlink_player::EventSink = Arc::new(move |e| {
@@ -45,13 +60,15 @@ mod failover {
                 v.push(last_error);
             }
         });
-        let p = Player::new(
+        let p = match Player::new(
             &loaded,
             Preferences::default(),
             RenderBackend::RenderApi,
             sink,
-        )
-        .ok()?;
+        ) {
+            Ok(p) => p,
+            Err(e) => panic!("player init failed: {e}"),
+        };
         // Nothing listens on port 1: connection refused, fast and offline.
         p.play(PlayRequest {
             url: "http://127.0.0.1:1/x.ts".into(),
@@ -62,7 +79,7 @@ mod failover {
             mode: PlayMode::Live,
             source_index: 0,
         })
-        .ok()?;
+        .unwrap_or_else(|e| panic!("play failed: {e}"));
         let snap = p.wait_for(|s| s == SessionState::Failed, Duration::from_secs(20));
         std::thread::sleep(Duration::from_millis(300));
         let v = events.lock().ok()?.clone();
@@ -72,7 +89,6 @@ mod failover {
     #[test]
     fn failover_source_retries_once_then_asks_for_stream_list() {
         let Some((state, asks, attempts)) = run(true) else {
-            eprintln!("skipping: no libmpv");
             return;
         };
         assert_eq!(state, SessionState::Failed);
@@ -83,7 +99,6 @@ mod failover {
     #[test]
     fn plain_source_gives_up_after_two_attempts_without_asking() {
         let Some((state, asks, attempts)) = run(false) else {
-            eprintln!("skipping: no libmpv");
             return;
         };
         assert_eq!(state, SessionState::Failed);
@@ -99,7 +114,7 @@ mod supervisor {
 
     use downlink_player::{
         FailureKind, PlayMode, PlayRequest, Player, Preferences, Profile, RenderBackend,
-        SessionState, load,
+        SessionState,
     };
 
     fn wait(mut f: impl FnMut() -> bool, secs: u64) -> bool {
@@ -115,19 +130,18 @@ mod supervisor {
 
     #[test]
     fn engine_death_restarts_once_then_fails_with_a_crash_id() {
-        let Ok(loaded) = load(None) else {
-            eprintln!("skipping: no libmpv");
+        let Some(loaded) = super::engine() else {
             return;
         };
         let sink: downlink_player::EventSink = Arc::new(|_| {});
-        let Ok(p) = Player::new(
+        let p = match Player::new(
             &loaded,
             Preferences::default(),
             RenderBackend::RenderApi,
             sink,
-        ) else {
-            eprintln!("skipping: player init failed");
-            return;
+        ) {
+            Ok(p) => p,
+            Err(e) => panic!("player init failed: {e}"),
         };
         let replaced = Arc::new(AtomicU32::new(0));
         let r2 = replaced.clone();
@@ -143,7 +157,9 @@ mod supervisor {
             mode: PlayMode::Live,
             source_index: 0,
         };
-        assert!(p.play(req).is_ok());
+        if let Err(e) = p.play(req) {
+            panic!("play failed: {e}");
+        }
         // First death: the supervisor restarts the engine and tells the surface.
         let _ = p.engine().command(&["quit"]);
         assert!(

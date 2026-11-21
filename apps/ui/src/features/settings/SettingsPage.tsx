@@ -5,7 +5,7 @@ import { Modal, NavLink, SegmentedControl, Select, Slider, Switch, Text } from '
 import { IconPalette, IconPlayerPlay, IconPlugConnected, IconRefresh, IconStethoscope } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
 import { useSettings, useSources, useUpdateStatus, useUpdateWaiting } from '../../api/queries';
-import type { AudioOutput, Deinterlace, DensitySetting, HwdecSetting, Source, UpdateChannel } from '../../api/types';
+import type { AudioOutput, Deinterlace, DensitySetting, HdrOutput, HwdecSetting, Source, UpdateChannel } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { Icon, type TablerIcon } from '../../components/Icon/Icon';
 import { SettingRow } from '../../components/SettingRow/SettingRow';
@@ -214,6 +214,17 @@ function PlaybackSection() {
             { value: 'auto', label: t('settings.deinterlace.auto') },
             { value: 'yes', label: t('settings.deinterlace.yes') },
             { value: 'no', label: t('settings.deinterlace.no') },
+          ]}
+        />
+      </SettingRow>
+      <SettingRow label={t('settings.hdrOutput')} help={t('settings.hdrOutput.help')} wide>
+        <SegmentedControl
+          aria-label={t('settings.hdrOutput')}
+          value={data.hdrOutput ?? 'auto'}
+          onChange={(v) => patch.mutate({ hdrOutput: v as HdrOutput })}
+          data={[
+            { value: 'auto', label: t('settings.hdrOutput.auto') },
+            { value: 'off', label: t('settings.hdrOutput.off') },
           ]}
         />
       </SettingRow>

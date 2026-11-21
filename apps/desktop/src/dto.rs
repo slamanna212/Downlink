@@ -5,8 +5,8 @@ use downlink_core::service::ProgrammeDto;
 use downlink_core::{AppError, ErrorCode};
 use downlink_player::options::{SubtitleBackground, SubtitleSize};
 use downlink_player::{
-    AudioMode, Deinterlace, FailureInfo, FailureKind, PlayMode, PlayerSnapshot, Preferences,
-    SessionState, WaitingOn,
+    AudioMode, Deinterlace, FailureInfo, FailureKind, HdrOutput, PlayMode, PlayerSnapshot,
+    Preferences, SessionState, WaitingOn,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -209,6 +209,10 @@ pub fn preferences_from_settings(v: &Value) -> Preferences {
         Some("no") => Deinterlace::Off,
         _ => Deinterlace::Auto,
     };
+    p.hdr_output = match v.get("hdrOutput").and_then(Value::as_str) {
+        Some("off") => HdrOutput::Off,
+        _ => HdrOutput::Auto,
+    };
     if let Some(pct) = v.get("subtitleSize").and_then(Value::as_f64) {
         p.subtitle.size = if pct < 85.0 {
             SubtitleSize::Small
@@ -236,13 +240,20 @@ mod tests {
     fn settings_map_to_preferences() {
         let v = serde_json::json!({
             "liveBufferSecs": 20, "hwdec": "vaapi", "audioOutput": "passthrough",
-            "audioDevice": "alsa/hdmi:X", "deinterlace": "no", "subtitleSize": 150, "subtitleBackground": false
+            "audioDevice": "alsa/hdmi:X", "deinterlace": "no", "subtitleSize": 150, "subtitleBackground": false,
+            "hdrOutput": "off"
         });
         let p = preferences_from_settings(&v);
         assert_eq!(p.live_buffer_secs, 10);
         assert_eq!(p.hwdec, "vaapi");
         assert_eq!(p.audio_mode, AudioMode::Passthrough);
         assert_eq!(p.deinterlace, Deinterlace::Off);
+        assert_eq!(p.hdr_output, HdrOutput::Off);
+        // Settings saved before the option existed keep HDR on Auto.
+        assert_eq!(
+            preferences_from_settings(&serde_json::json!({})).hdr_output,
+            HdrOutput::Auto
+        );
         assert_eq!(p.subtitle.size, SubtitleSize::Large);
         assert_eq!(p.subtitle.background, SubtitleBackground::None);
         assert_eq!(p.audio_device.as_deref(), Some("alsa/hdmi:X"));

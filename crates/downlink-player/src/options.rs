@@ -61,6 +61,17 @@ impl Deinterlace {
     }
 }
 
+/// HDR output: `Auto` sends HDR content to the display as HDR when the platform supports it
+/// (Windows `target-colorspace-hint`; Linux Wayland colour-management subsurface). `Off` always
+/// tone-maps to SDR.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum HdrOutput {
+    #[default]
+    Auto,
+    Off,
+}
+
 /// Audio output mode (PLAN §4.8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -211,6 +222,7 @@ pub struct Preferences {
     /// mpv `user-agent` for every request (not a secret, so set globally). Empty = mpv default.
     /// A per-file `User-Agent` header from the play plan still wins.
     pub user_agent: String,
+    pub hdr_output: HdrOutput,
 }
 
 impl Default for Preferences {
@@ -225,6 +237,7 @@ impl Default for Preferences {
             audio_device: None,
             subtitle: SubtitleStyle::default(),
             user_agent: String::new(),
+            hdr_output: HdrOutput::Auto,
         }
     }
 }
@@ -262,8 +275,19 @@ impl Preferences {
         ];
         o.extend(audio_mode_options(self.audio_mode_effective()));
         o.extend(subtitle_options(&self.subtitle));
+        if cfg!(target_os = "windows") {
+            o.push(colorspace_hint(self.hdr_output));
+        }
         o
     }
+}
+
+/// `--wid` (Windows) renders with mpv's own swapchain, so mpv signals HDR to the OS itself.
+fn colorspace_hint(hdr: HdrOutput) -> (String, String) {
+    kv(
+        "target-colorspace-hint",
+        if hdr == HdrOutput::Auto { "yes" } else { "no" },
+    )
 }
 
 type Opts = Vec<(String, String)>;
@@ -299,6 +323,7 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
                     "auto"
                 },
             ));
+            o.push(colorspace_hint(prefs.hdr_output));
         }
     }
     o.push(kv("hwdec", prefs.hwdec_effective()));
@@ -366,7 +391,7 @@ pub fn quote(value: &str) -> String {
     format!("%{}%{}", value.len(), value)
 }
 
-/// Build the `options` argument of `loadfile <url> replace -1 <options>`.
+/// Build the `options` named argument of `loadfile` (see `Engine::command_named`).
 ///
 /// Auth headers are attached **per file only** (CLAUDE.md rule 5), never as a global option.
 pub fn loadfile_options(
@@ -457,6 +482,16 @@ mod tests {
         let o = base_options(&Preferences::default(), RenderBackend::WidWindow);
         assert!(has(&o, "vo", "gpu-next"));
         assert!(o.iter().any(|(k, _)| k == "gpu-api"));
+        assert!(has(&o, "target-colorspace-hint", "yes"));
+        let off = Preferences {
+            hdr_output: HdrOutput::Off,
+            ..Preferences::default()
+        };
+        let o = base_options(&off, RenderBackend::WidWindow);
+        assert!(has(&o, "target-colorspace-hint", "no"));
+        // The render API path never sets it: on Linux the surface owns HDR signalling.
+        let o = base_options(&Preferences::default(), RenderBackend::RenderApi);
+        assert!(!o.iter().any(|(k, _)| k == "target-colorspace-hint"));
     }
 
     #[test]

@@ -286,6 +286,11 @@ export const en = {
   'settings.deinterlace.auto': 'Auto',
   'settings.deinterlace.yes': 'On',
   'settings.deinterlace.no': 'Off',
+  'settings.hdrOutput': 'HDR output',
+  'settings.hdrOutput.help':
+    'Auto shows HDR channels in HDR when your display and desktop have HDR turned on. Off always tone-maps to SDR. Applies the next time the player opens.',
+  'settings.hdrOutput.auto': 'Auto',
+  'settings.hdrOutput.off': 'Off',
   'settings.subtitleSize': 'Subtitle size',
   'settings.subtitleSize.help': 'Applies to text subtitles.',
   'settings.subtitleBackground': 'Subtitle background',

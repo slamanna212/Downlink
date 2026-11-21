@@ -18,7 +18,9 @@ pub use error::PlayerError;
 pub use loader::{
     ENV_MPV_PATH, ENV_REQUIRE_BUNDLED, LoadSource, LoadedMpv, load, load_from_env, load_with,
 };
-pub use options::{AudioMode, Deinterlace, Preferences, Profile, RenderBackend, SubtitleStyle};
+pub use options::{
+    AudioMode, Deinterlace, HdrOutput, Preferences, Profile, RenderBackend, SubtitleStyle,
+};
 pub use player::{
     AudioDevice, EventSink, FailureInfo, FailureKind, PlayMode, PlayRequest, Player, PlayerCommand,
     PlayerEvent, PlayerSnapshot, StatsSnapshot, Track, WaitingOn,

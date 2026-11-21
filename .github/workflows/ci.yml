@@ -28,16 +28,24 @@ jobs:
   rust:
     name: Rust
     runs-on: ${{ inputs.linux-runner || 'ubuntu-24.04' }}
+    # Same image as the libmpv build (MPV_LINUX_IMAGE in tools/mpv/pins.env; the libmpv-linux action checks
+    # they match), so the tests load exactly the libmpv the release bundles.
+    container: debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6
     steps:
+      - name: Install Linux build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git jq zstd xz-utils file patchelf pkg-config build-essential \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev ffmpeg xvfb \
+            libpipewire-0.3-0t64 libva-wayland2
+          # ^ the bundle takes these from the user's desktop (see tools/mpv/linux.sh); a bare container lacks them.
+
       - uses: actions/checkout@v7
 
-      - name: Install Linux build dependencies (PLAN §13.2)
-        if: runner.environment == 'github-hosted'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
-            librsvg2-dev libmpv-dev ffmpeg pkg-config build-essential xvfb
+      - uses: ./.github/actions/libmpv-linux
+        with:
+          image: debian:13@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6
 
       # Reads rust-toolchain.toml (pinned channel, clippy, rustfmt) and caches cargo via Swatinem/rust-cache.
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -63,7 +71,13 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo deny check
       - name: cargo nextest
-        run: cargo nextest run --workspace --no-tests=warn
+        env:
+          # libmpv tests fail (not skip) when the staged engine cannot be loaded.
+          DOWNLINK_REQUIRE_MPV: "1"
+        run: |
+          # $GITHUB_WORKSPACE, not github.workspace: inside a container only the former is the real path.
+          export DOWNLINK_MPV_PATH="$GITHUB_WORKSPACE/tools/mpv/out/linux/lib/libmpv.so.2"
+          cargo nextest run --workspace --no-tests=warn
 
   ui:
     name: UI
@@ -92,5 +106,5 @@ jobs:
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
           ./actionlint -color
-      - name: shellcheck release scripts
-        run: shellcheck tools/release/*.sh
+      - name: shellcheck release and libmpv scripts
+        run: shellcheck tools/release/*.sh tools/mpv/*.sh
