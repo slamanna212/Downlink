@@ -15,9 +15,6 @@
 .brandMark {
   width: 24px;
   height: 24px;
-  border-radius: var(--mantine-radius-md);
-  background: var(--dl-accent);
-  color: var(--dl-on-accent);
   display: flex;
   align-items: center;
   justify-content: center;

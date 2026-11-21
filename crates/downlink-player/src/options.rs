@@ -28,7 +28,7 @@ impl Profile {
 pub enum RenderBackend {
     /// libmpv render API into a surface we own (macOS, Linux).
     RenderApi,
-    /// mpv's own `--wid` child window (Windows).
+    /// mpv renders into our own `--wid` window (Windows).
     WidWindow,
 }
 

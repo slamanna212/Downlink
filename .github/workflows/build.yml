@@ -76,11 +76,13 @@ jobs:
         run: |
           # The callers already checked that the release does not exist; clear any stale draft from a failed run.
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          flags=(--draft --target "$(git rev-parse HEAD)" --title "$TAG" --notes-file notes.md)
-          [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
-          gh release create "$TAG" "${flags[@]}"
-          id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
-                 --jq ".[] | select(.tag_name==\"$TAG\") | .id" | head -n1)"
+          # Take the id from the create response. Looking the new draft up by tag in the releases list returns
+          # nothing for drafts, which left releaseId blank and made tauri-action skip every upload.
+          id="$(gh api -X POST "repos/$GITHUB_REPOSITORY/releases" \
+                 -f tag_name="$TAG" -f target_commitish="$(git rev-parse HEAD)" -f name="$TAG" \
+                 -F body=@notes.md -F draft=true -F prerelease="$PRERELEASE" --jq .id)"
+          if [[ -z "$id" ]]; then echo "::error::release create returned no id"; exit 1; fi
+          echo "Created draft release $TAG (id $id)"
           echo "release_id=$id" >> "$GITHUB_OUTPUT"
 
   # ---------------------------------------------------------------------------
@@ -113,7 +115,7 @@ jobs:
           tauriScript: cargo tauri
           args: --bundles nsis --config ${{ github.workspace }}/release-config.json
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          uploadUpdaterJson: false
+          includeUpdaterJson: false # publish writes the one latest.json; two jobs uploading their own race
 
   # ---------------------------------------------------------------------------
   build-linux:
@@ -134,7 +136,12 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates curl git jq zstd xz-utils file patchelf pkg-config build-essential gh \
-            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev \
+            libva2 libva-drm2 libva-wayland2 libva-x11-2 libvdpau1 libpipewire-0.3-0t64 libxss1 libxv1 \
+            libasound2t64 libpulse0 libvulkan1
+          # ^ host-stack libs the bundled libmpv links against but tools/mpv/linux.sh leaves out (the user's
+          #   desktop provides them). linuxdeploy ldd-walks usr/lib and aborts on any unresolved dependency, and
+          #   on a libmpv cache hit build-linux.sh never runs, so nothing else installs them.
 
       - uses: actions/checkout@v7
 
@@ -160,7 +167,7 @@ jobs:
           # Relative to projectPath: inside a container github.workspace is the host path, not ours.
           args: --bundles appimage,deb --config ../../release-config.json
           releaseId: ${{ needs.prepare.outputs.release_id }}
-          uploadUpdaterJson: false
+          includeUpdaterJson: false # publish writes the one latest.json; two jobs uploading their own race
 
       # Tauri signs only the AppImage on Linux. The updater installs deb updates for deb users, so the deb needs
       # its own .sig too.
@@ -168,13 +175,16 @@ jobs:
         if: needs.prepare.outputs.signed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          # Inside the container git may refuse the checkout (dubious ownership), so do not let gh infer the repo.
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           cd target/release/bundle/deb
           for f in *.deb; do cargo tauri signer sign "$f"; done
-          gh release upload "$TAG" -- *.deb.sig --clobber
+          # Flags before `--`: everything after it is taken as a file name.
+          gh release upload "$TAG" --clobber -- *.deb.sig
 
   # ---------------------------------------------------------------------------
   publish:
@@ -185,6 +195,7 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
       TAG: ${{ inputs.tag }}
       VERSION: ${{ inputs.version }}
       CHANNEL: ${{ inputs.channel }}
@@ -264,7 +275,7 @@ jobs:
   cleanup:
     name: Delete incomplete release
     needs: [prepare, build-windows, build-linux, publish]
-    if: ${{ always() && needs.prepare.result == 'success' && (needs.build-windows.result == 'failure' || needs.build-linux.result == 'failure' || needs.publish.result == 'failure') }}
+    if: ${{ always() && needs.prepare.result == 'success' && (contains(fromJSON('["failure","cancelled"]'), needs.build-windows.result) || contains(fromJSON('["failure","cancelled"]'), needs.build-linux.result) || contains(fromJSON('["failure","cancelled"]'), needs.publish.result)) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -277,7 +288,8 @@ jobs:
           # Only ever delete a release that is still a draft.
           draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft 2>/dev/null || echo unknown)"
           if [[ "$draft" == true ]]; then
-            gh release delete "$TAG" --cleanup-tag --yes --repo "$GITHUB_REPOSITORY"
+            # Drafts have no git tag yet, so no --cleanup-tag (it 422s after deleting the release).
+            gh release delete "$TAG" --yes --repo "$GITHUB_REPOSITORY"
           fi
           echo "::error::A platform build or publish failed; removed incomplete draft release $TAG"
           exit 1
