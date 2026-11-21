@@ -14,12 +14,7 @@
 .mark {
   width: 36px;
   height: 36px;
-  border-radius: var(--mantine-radius-lg);
-  background: var(--dl-accent);
-  color: var(--dl-on-accent);
   display: flex;
-  align-items: center;
-  justify-content: center;
   margin-bottom: var(--mantine-spacing-lg);
 }
 

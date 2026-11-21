@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Collapse, PasswordInput, Stack, Switch, Tabs, TextInput } from '@mantine/core';
-import { IconAlertTriangle, IconArrowRight, IconCircleCheck, IconDownload } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowRight, IconCircleCheck } from '@tabler/icons-react';
 import { toAppError, invoke } from '../../api/ipc';
 import { useCaps } from '../../api/queries';
 import type { AddSourceInput, AppError, SourceKind, TestSourceResult } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { Icon } from '../../components/Icon/Icon';
+import logoUrl from '../../assets/logo.svg';
 import { t } from '../../lib/i18n';
 import classes from './AddSource.module.css';
 
@@ -103,7 +104,7 @@ export function AddSourcePage() {
         }}
       >
         <div className={classes.mark}>
-          <Icon icon={IconDownload} size={20} />
+          <img src={logoUrl} alt="" width={36} height={36} draggable={false} />
         </div>
         <h1 className={classes.title}>{t('add.title')}</h1>
         <p className={classes.intro}>{t('add.intro')}</p>
