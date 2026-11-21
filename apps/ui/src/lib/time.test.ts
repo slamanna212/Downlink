@@ -80,3 +80,22 @@ describe('time', () => {
     expect(dayLabel(T + 3 * 86400, T)).toBe('Sun 22 Nov');
   });
 });
+
+describe('memoised formatting', () => {
+  it('startOfDay and formatClock stay correct across a zone change', async () => {
+    const { setDisplayZone, getDisplayZone, startOfDay, formatClock } = await import('./time');
+    const prev = getDisplayZone();
+    try {
+      const e = 1_700_000_000; // 2023-11-14 22:13:20 UTC
+      setDisplayZone('UTC');
+      expect(formatClock(e)).toBe('22:13');
+      expect(startOfDay(e)).toBe(1_699_920_000);
+      expect(startOfDay(e + 60)).toBe(1_699_920_000);
+      setDisplayZone('Asia/Tokyo');
+      expect(formatClock(e)).toBe('07:13');
+      expect(startOfDay(e)).toBe(1_699_974_000);
+    } finally {
+      setDisplayZone(prev);
+    }
+  });
+});

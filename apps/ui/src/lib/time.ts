@@ -28,7 +28,11 @@ export function isValidZone(tz: string): boolean {
 
 /** Display zone (defaults to the system zone; the user may override later). */
 export function setDisplayZone(tz: string): void {
-  if (isValidZone(tz)) zone = tz;
+  if (isValidZone(tz)) {
+    zone = tz;
+    clockCache.clear();
+    dayCache = null;
+  }
 }
 export function getDisplayZone(): string {
   return zone;
@@ -43,7 +47,18 @@ function at(epoch: Epoch) {
 export const nowEpoch = (): Epoch => dayjs().unix();
 
 /** 14:05 */
-export const formatClock = (epoch: Epoch): string => at(epoch).format('HH:mm');
+// dayjs.tz is slow (it builds an Intl formatter per call) and the guide formats thousands of block times,
+// so clock strings are memoised per epoch (cleared when the display zone changes, bounded in size).
+const clockCache = new Map<Epoch, string>();
+const CLOCK_CACHE_MAX = 20_000;
+export const formatClock = (epoch: Epoch): string => {
+  const hit = clockCache.get(epoch);
+  if (hit !== undefined) return hit;
+  if (clockCache.size >= CLOCK_CACHE_MAX) clockCache.clear();
+  const s = at(epoch).format('HH:mm');
+  clockCache.set(epoch, s);
+  return s;
+};
 /** Thu 19 Nov */
 export const formatDay = (epoch: Epoch): string => at(epoch).format('ddd D MMM');
 /** Thu 19 Nov, 14:05 */
@@ -73,9 +88,15 @@ export const isLiveNow = (start: Epoch, end: Epoch, now: Epoch = nowEpoch()): bo
 export const minutesLeft = (end: Epoch, now: Epoch = nowEpoch()): number => Math.max(0, Math.ceil((end - now) / 60));
 
 /** Epoch of local midnight (display zone) for the day containing `epoch`. */
-export const startOfDay = (epoch: Epoch): Epoch =>
+export const startOfDay = (epoch: Epoch): Epoch => {
+  // The scroll handler calls this every frame; remember the last local day as [start, end) to skip dayjs.
+  if (dayCache && epoch >= dayCache.start && epoch < dayCache.end) return dayCache.start;
   // dayjs.tz().startOf('day') mis-resolves times on a clock-change day; build the local midnight explicitly.
-  dayjs.tz(`${at(epoch).format('YYYY-MM-DD')}T00:00:00`, zone).unix();
+  const start = dayjs.tz(`${at(epoch).format('YYYY-MM-DD')}T00:00:00`, zone).unix();
+  dayCache = { start, end: addDays(start, 1) };
+  return start;
+};
+let dayCache: { start: Epoch; end: Epoch } | null = null;
 
 /** Floor to a guide tick (default 30 min) in the display zone. */
 export function floorToTick(epoch: Epoch, minutes = 30): Epoch {
