@@ -530,7 +530,7 @@ const OBSERVED: &[(&str, i32)] = &[
     ("dwidth", ffi::FORMAT_INT64),
     ("dheight", ffi::FORMAT_INT64),
     ("estimated-vf-fps", ffi::FORMAT_DOUBLE),
-    ("vo-drop-frame-count", ffi::FORMAT_INT64),
+    ("frame-drop-count", ffi::FORMAT_INT64),
     ("demuxer-cache-time", ffi::FORMAT_DOUBLE),
     ("volume", ffi::FORMAT_DOUBLE),
     ("mute", ffi::FORMAT_FLAG),
@@ -835,7 +835,7 @@ impl Player {
             "video-params/primaries",
             "estimated-vf-fps",
             "container-fps",
-            "vo-drop-frame-count",
+            "frame-drop-count",
             "decoder-frame-drop-count",
             "avsync",
             "audio-codec-name",
@@ -1202,7 +1202,7 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
             };
             s.throttle.mark_dirty();
         }
-        ("vo-drop-frame-count", v) => {
+        ("frame-drop-count", v) => {
             s.stats.dropped = if let PropValue::Int(i) = v {
                 Some(i)
             } else {
@@ -1269,6 +1269,15 @@ fn note(inner: &Inner, msg: String) {
     }
 }
 
+/// Dropped frames shown in the info panel: VO drops (`frame-drop-count`) plus decoder drops
+/// (`decoder-frame-drop-count`). `None` only when mpv exposes neither.
+fn total_dropped(vo: Option<i64>, decoder: Option<i64>) -> Option<i64> {
+    match (vo, decoder) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(0).saturating_add(b.unwrap_or(0))),
+    }
+}
+
 fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
     let eng = inner.eng();
     let e = &eng;
@@ -1291,7 +1300,12 @@ fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
         video_codec: s.stats.codec.clone(),
         audio_codec: e.get_property("audio-codec-name"),
         bitrate_kbps: bitrate,
-        dropped_frames: s.stats.dropped,
+        dropped_frames: total_dropped(
+            num("frame-drop-count")
+                .map(|v| v as i64)
+                .or(s.stats.dropped),
+            num("decoder-frame-drop-count").map(|v| v as i64),
+        ),
         buffer_secs: num("demuxer-cache-duration"),
         deinterlace: e.get_property("deinterlace"),
         hwdec_current: s.stats.hwdec.clone(),
@@ -1422,6 +1436,17 @@ fn rebuild_engine(inner: &Arc<Inner>) -> Result<(), PlayerError> {
 
 #[cfg(test)]
 mod tests {
+    use super::total_dropped;
+
+    #[test]
+    fn dropped_frames_combine_vo_and_decoder() {
+        assert_eq!(total_dropped(None, None), None);
+        assert_eq!(total_dropped(Some(0), Some(0)), Some(0));
+        assert_eq!(total_dropped(Some(3), None), Some(3));
+        assert_eq!(total_dropped(None, Some(4)), Some(4));
+        assert_eq!(total_dropped(Some(3), Some(4)), Some(7));
+    }
+
     use super::*;
 
     #[test]
