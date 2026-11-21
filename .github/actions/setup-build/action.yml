@@ -35,9 +35,12 @@ runs:
       shell: bash
       run: node tools/release/set-version.mjs "${{ inputs.channel-version }}"
 
+    # Prebuilt binary (cargo-binstall from tauri's GitHub releases). `cargo install` compiled it from source on
+    # every run: ~10.5 min on windows-latest, ~5 min on Linux.
     - name: Install tauri-cli
-      shell: bash
-      run: cargo install tauri-cli --version "^2" --locked
+      uses: taiki-e/install-action@v2
+      with:
+        tool: tauri-cli@2
 
     - name: Build UI
       shell: bash
