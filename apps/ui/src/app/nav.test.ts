@@ -15,8 +15,8 @@ describe('rail nav', () => {
     expect(ids(Cap.Dvr)).toContain('recordings');
     expect(ids(Cap.Dvr)).not.toContain('movies');
   });
-  it('collapses on guide and player routes only', () => {
-    expect(isCollapsedRoute('/guide')).toBe(true);
+  it('collapses on video routes only, never on guide', () => {
+    expect(isCollapsedRoute('/guide')).toBe(false);
     expect(isCollapsedRoute('/player')).toBe(true);
     expect(isCollapsedRoute('/channels')).toBe(false);
     expect(isCollapsedRoute('/guidelines')).toBe(false);
