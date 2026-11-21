@@ -162,20 +162,27 @@ In 1.0 (PLAN §1.5, §4.11, D17).
   The canvas covers the whole view except the rects of tiles showing video (one SVG path with holes), so
   gaps, centred short rows and loading tiles never show the desktop through the transparent window.
 - One tile audible: AUDIO badge (accent tint) top-right; others show a muted icon. "Audio follows focus" on.
-- Focused tile: **inset** 3 px accent ring (an outer ring would be clipped) + accent wash.
-- Tile label pill top-left (`--dl-glass`, logo 48×24, number, name). Programme + progress on scrim at bottom.
+- Focused tile: **inset** 3 px accent ring (an outer ring would be clipped) + accent wash, shown only while
+  the pointer is on that tile; otherwise nothing sits on the picture.
+- Tile label pill top-left (`--dl-glass`, bare logo 48×24 with no plate, number, name). Programme + progress on scrim at bottom.
 - Hover / keyboard-focus actions centred: listen, make main, full screen, replace, remove (remove in live-text).
   Buttons sit on `--dl-tile-btn` (hover `--dl-tile-btn-hover`, pressed `--dl-tile-btn-pressed`) with a hairline.
 - Idle chrome: after `controlsIdleMs` without input the focus ring, audio indicator, tile actions and toolbar
   fade out and the cursor hides; any mouse/key input brings them back. The toolbar stays while the pointer
   is on it or a picker is open.
-- Stream budget: toolbar (hidden with the rest of the idle chrome) "3 of 3 streams" with pips, picker footer "Uses 1 stream · 3 of 4 in use".
+- Stream budget: picker footer only, "Uses 1 stream · 3 of 4 in use". The toolbar shows no count.
 - Stream-limit tile: amber gauge icon, "Your server is at its stream limit", one sentence, Replace channel / Remove tile.
-- Picker: popover anchored to the toolbar "Add channel" button (or the single empty slot when nothing
-  plays); the new channel takes the first free slot. Search + Favourites / Recent / All; on-screen
-  channels disabled with "Already in slot N". Each row shows the programme on now under the name (12 px, dim).
+- Add picker: popover anchored to the toolbar "Add channel" button (or the single empty slot when nothing
+  plays). Each row has a checkbox on the right, checked for channels on screen; checking adds the channel
+  to the first free slot, unchecking removes its tile (the main player's channel is checked and locked).
+  The popover stays open across picks and closes on an outside click, Esc, or the Add channel button.
+  Unchecked rows disable when the budget is used up. Search + Favourites / Recent / All; bare logos (no
+  plate). Each row shows the programme on now under the name (12 px, dim).
+- Replace picker (tile action / stream-limit tile): same list, single pick, closes on pick; on-screen
+  channels disabled with "Already in slot N".
+- Tiles never show subtitles or captions (the tile profile sets `sid=no`); make main to use them.
 - Floating toolbar bottom centre: Add channel (N), layout segmented (icons; only when the count has more than
-  one layout), audio-follows-focus switch, budget, Exit (Esc).
+  one layout), audio-follows-focus switch, Exit (Esc).
 - Keys: 1–9 focus · A audio · Enter make main · F full screen · Del remove · N add channel · L cycle layout · Esc exit.
 - Entry: grid icon in the player control bar; "Add to multiview" in the channel context menu.
 

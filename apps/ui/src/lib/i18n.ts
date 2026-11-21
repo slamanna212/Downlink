@@ -93,7 +93,6 @@ export const en = {
   'multiview.noChannels': 'No channels match.',
   'multiview.alreadyIn': 'Already in slot {n}',
   'multiview.pickerBudget': 'Uses 1 stream · {used} of {total} in use',
-  'multiview.budget': '{used} of {total} streams',
   'multiview.tileLabel': 'Slot {n}: {name}',
   'multiview.emptySlot': 'Slot {n}: empty',
   'multiview.audio': 'Audio',

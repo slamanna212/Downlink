@@ -364,9 +364,15 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
 /// Profile options, applied per file via `loadfile`.
 pub fn profile_options(profile: Profile, prefs: &Preferences) -> Opts {
     match profile {
-        Profile::Multiview => profile_options(Profile::Live, prefs),
-        Profile::MultiviewDense => {
+        // Tiles never show subtitles or closed captions: they have no subtitle menu, and a caption
+        // track matching `slang` (or EIA-608 in the video) would otherwise be picked on its own.
+        Profile::Multiview => {
             let mut o = profile_options(Profile::Live, prefs);
+            o.push(kv("sid", "no"));
+            o
+        }
+        Profile::MultiviewDense => {
+            let mut o = profile_options(Profile::Multiview, prefs);
             o.push(kv("vd-lavc-skiploopfilter", "nonkey"));
             o
         }
@@ -453,9 +459,12 @@ mod tests {
     fn multiview_profiles() {
         let p = Preferences::default();
         let mv = profile_options(Profile::Multiview, &p);
-        assert_eq!(mv, profile_options(Profile::Live, &p));
+        assert_eq!(mv[..mv.len() - 1], profile_options(Profile::Live, &p)[..]);
+        assert!(has(&mv, "sid", "no"));
+        assert!(!has(&profile_options(Profile::Live, &p), "sid", "no"));
         let dense = profile_options(Profile::MultiviewDense, &p);
         assert!(has(&dense, "vd-lavc-skiploopfilter", "nonkey"));
+        assert!(has(&dense, "sid", "no"));
         assert!(Profile::MultiviewDense.is_live() && !Profile::Seekable.is_live());
     }
 

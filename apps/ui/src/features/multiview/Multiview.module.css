@@ -39,7 +39,8 @@
 .tile[data-empty],
 .tile[data-failed] { background: var(--dl-multiview-canvas); }
 
-/* inset ring: an outer ring would be clipped by the neighbouring tile */
+/* Inset ring (an outer ring would be clipped by the neighbouring tile), shown only while the pointer
+   is on the focused tile so nothing sits on the picture otherwise. */
 .tile[data-focused]::after {
   content: '';
   position: absolute;
@@ -47,8 +48,11 @@
   pointer-events: none;
   box-shadow: inset 0 0 0 3px var(--dl-accent);
   background: var(--dl-accent-wash);
-  transition: opacity 240ms ease;
+  opacity: 0;
+  transition: opacity 160ms ease;
 }
+
+.tile[data-focused]:hover::after { opacity: 1; }
 
 /* Idle: the focus ring and audio indicator fade so they don't sit on the picture. */
 .root[data-idle] .tile[data-focused]::after,
@@ -91,7 +95,7 @@
   align-items: center;
   gap: var(--mantine-spacing-xs);
   max-width: calc(100% - 96px);
-  padding: 0.25rem var(--mantine-spacing-sm) 0.25rem 0.25rem;
+  padding: 0.25rem var(--mantine-spacing-sm);
   border-radius: var(--mantine-radius-lg);
   font-size: var(--mantine-font-size-sm);
 }
@@ -245,30 +249,6 @@
   opacity: 0;
   pointer-events: none;
 }
-
-.budget {
-  display: flex;
-  align-items: center;
-  gap: var(--mantine-spacing-xs);
-  font-size: var(--mantine-font-size-sm);
-  font-variant-numeric: tabular-nums;
-  color: var(--dl-text-2);
-  white-space: nowrap;
-}
-
-.pips {
-  display: flex;
-  gap: 0.1875rem;
-}
-
-.pip {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--dl-hairline-strong);
-}
-
-.pip[data-on] { background: var(--dl-accent); }
 
 .picker {
   display: flex;
