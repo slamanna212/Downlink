@@ -1,6 +1,7 @@
 //! `dlimg://<hash>/<size>` custom protocol: images come from the core cache/fetcher, never from
 //! remote origins (PLAN §3.6). On Windows and Android the webview reaches custom protocols as
-//! `http://dlimg.localhost/<hash>/<size>`; both forms are accepted.
+//! `http://dlimg.localhost/<hash>/<size>`, and wry hands that to the handler rewritten as
+//! `dlimg://localhost/<hash>/<size>`; all three forms are accepted.
 
 use std::sync::Arc;
 
@@ -15,6 +16,10 @@ pub fn normalise_uri(uri: &str) -> Option<String> {
     let u = url::Url::parse(uri).ok()?;
     let host = u.host_str()?;
     if host == "dlimg.localhost" {
+        let path = u.path().trim_start_matches('/');
+        Some(format!("dlimg://{path}"))
+    } else if u.scheme() == "dlimg" && host == "localhost" {
+        // wry's Windows/Android workaround reverts `http://dlimg.localhost/x` to `dlimg://localhost/x`.
         let path = u.path().trim_start_matches('/');
         Some(format!("dlimg://{path}"))
     } else if u.scheme() == "dlimg" {
@@ -74,6 +79,10 @@ mod tests {
         );
         assert_eq!(
             normalise_uri(&format!("http://dlimg.localhost/{h}/160")),
+            Some(format!("dlimg://{h}/160"))
+        );
+        assert_eq!(
+            normalise_uri(&format!("dlimg://localhost/{h}/160")),
             Some(format!("dlimg://{h}/160"))
         );
         assert_eq!(normalise_uri("https://evil.example/x/y"), None);
