@@ -6,7 +6,7 @@ import {
   IconArrowsMaximize,
   IconDeviceTv,
   IconHome,
-  IconLayoutNavbar,
+  IconCalendarTime,
   IconListDetails,
   IconMovie,
   IconCircle,
@@ -64,13 +64,13 @@ export function CommandPalette() {
       mk(`c${c.id}`, `${c.number ?? ''} ${c.name}`.trim(), () => void playChannel(c.id).then((err) => (err ? undefined : navigate('/player'))), IconPlayerPlay),
     );
     const progActions = (q ? results.data?.programmes ?? [] : []).map(({ programme: p, channel }) =>
-      mk(`p${p.id}`, p.title ?? '', () => activateProgramme(p, channel, navigate, showDetail), IconLayoutNavbar, `${channel.name} · ${dayLabel(p.startUtc)} ${formatClock(p.startUtc)}`),
+      mk(`p${p.id}`, p.title ?? '', () => activateProgramme(p, channel, navigate, showDetail), IconCalendarTime, `${channel.name} · ${dayLabel(p.startUtc)} ${formatClock(p.startUtc)}`),
     );
 
     const goActions = [
       mk('go-home', t('nav.home'), go('/'), IconHome),
       mk('go-channels', t('nav.channels'), go('/channels'), IconListDetails),
-      mk('go-guide', t('nav.guide'), go('/guide'), IconLayoutNavbar),
+      mk('go-guide', t('nav.guide'), go('/guide'), IconCalendarTime),
       ...(caps.vod ? [mk('go-movies', t('nav.movies'), go('/movies'), IconMovie), mk('go-series', t('nav.series'), go('/series'), IconDeviceTv)] : []),
       ...(caps.dvr ? [mk('go-rec', t('nav.recordings'), go('/recordings'), IconCircle)] : []),
     ].filter((a) => match(a.label ?? ''));

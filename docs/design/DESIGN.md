@@ -138,7 +138,7 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 
 ## 8. Screens (see reference/screens.html)
 - **Rail** 224 expanded / 68 collapsed / 96 10-foot. Same size on every route for a given density; it collapses only when the user toggles it. Order:
-  Search ⌘K, Home, Channels, Guide, Movies, Series, Recordings · Settings · source status dot.
+  Search ⌘K, Home, Guide, Channels, Movies, Series, Recordings · Settings · source status dot.
   Hide Movies/Series/Recordings when no source has the cap.
 - **Channels**: group sidebar 220 + virtualised rows (logo 72×36 · number · name + badges · now + 2 px
   progress · next · catch-up days + fav). Playing row: accent wash, accent-text name, speaker icon.
