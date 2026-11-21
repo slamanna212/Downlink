@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { buildInput, defaultName, validate, type AddForm } from './AddSourcePage';
 
-const base: AddForm = { url: ' http://demo.invalid:9191 ', apiKey: ' key ', username: ' u ', password: 'p', xmltvUrl: '', name: '', allowSelfSigned: true, useLogin: false };
+const base: AddForm = { name: 'My source', url: ' http://demo.invalid:9191 ', apiKey: ' key ', username: ' u ', password: 'p', xmltvUrl: '', allowSelfSigned: true, useLogin: false };
 
 describe('add source form', () => {
-  it('builds a Dispatcharr API-key input, trimmed, with a default name', () => {
-    expect(buildInput('dispatcharr', base)).toEqual({ kind: 'dispatcharr', name: 'demo.invalid', url: 'http://demo.invalid:9191', apiKey: 'key', allowSelfSigned: true });
+  it('builds a Dispatcharr API-key input, trimmed, with its name', () => {
+    expect(buildInput('dispatcharr', base)).toEqual({ kind: 'dispatcharr', name: 'My source', url: 'http://demo.invalid:9191', apiKey: 'key', allowSelfSigned: true });
   });
   it('switches to username/password for Dispatcharr and Xtream', () => {
     expect(buildInput('dispatcharr', { ...base, useLogin: true })).toMatchObject({ username: 'u', password: 'p' });
@@ -22,6 +22,12 @@ describe('add source form', () => {
     expect(validate('dispatcharr', base)).toBeNull();
     expect(validate('xtream', { ...base, password: '' })).toBeTruthy();
     expect(validate('m3u', { ...base, apiKey: '', username: '' })).toBeNull();
+  });
+  it('requires a non-blank name on every tab', () => {
+    for (const k of ['dispatcharr', 'xtream', 'm3u'] as const) {
+      expect(validate(k, { ...base, name: '' })).toBeTruthy();
+      expect(validate(k, { ...base, name: '   ' })).toBeTruthy();
+    }
   });
   it('falls back to a generic name for unparsable URLs', () => {
     expect(defaultName('xtream', 'not a url')).toBe('Xtream');
