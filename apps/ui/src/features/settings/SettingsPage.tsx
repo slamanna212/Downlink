@@ -137,6 +137,20 @@ function useSettingsPatch() {
   });
 }
 
+const AUDIO_AUTO = 'auto';
+
+/** Always lead with the mpv `auto` device; keep a stored-but-missing device selectable. */
+export function audioDeviceOptions(list: { id: string; name: string }[], stored: string | null | undefined) {
+  const opts = [{ value: AUDIO_AUTO, label: t('settings.audioDevice.default') }];
+  for (const d of list) {
+    if (d.id !== AUDIO_AUTO && d.id !== 'default') opts.push({ value: d.id, label: d.name });
+  }
+  if (stored && stored !== 'default' && !opts.some((o) => o.value === stored)) {
+    opts.push({ value: stored, label: t('settings.audioDevice.missing', { name: stored }) });
+  }
+  return opts;
+}
+
 function PlaybackSection() {
   const { data } = useSettings();
   const patch = useSettingsPatch();
@@ -188,10 +202,10 @@ function PlaybackSection() {
         <Select
           w="100%"
           aria-label={t('settings.audioDevice')}
-          data={(devices.data ?? []).map((d) => ({ value: d.id, label: d.name }))}
-          value={data.audioDevice ?? 'default'}
+          data={audioDeviceOptions(devices.data ?? [], data.audioDevice)}
+          value={data.audioDevice && data.audioDevice !== 'default' ? data.audioDevice : AUDIO_AUTO}
           allowDeselect={false}
-          onChange={(v) => patch.mutate({ audioDevice: v === 'default' ? null : v })}
+          onChange={(v) => v && patch.mutate({ audioDevice: v === AUDIO_AUTO ? null : v })}
         />
       </SettingRow>
       <SettingRow label={t('settings.audioOutput')} help={t('settings.audioOutput.help')} wide>

@@ -538,7 +538,7 @@ export function createMockBackend(): Backend {
       streamInUse.set(channelId, index);
       return null;
     },
-    list_audio_devices: () => [{ id: 'default', name: 'System default' }, { id: 'hdmi-1', name: 'Demo TV (HDMI)' }, { id: 'usb-1', name: 'Demo headset (USB)' }],
+    list_audio_devices: () => [{ id: 'auto', name: 'Autoselect device' }, { id: 'hdmi-1', name: 'Demo TV (HDMI)' }, { id: 'usb-1', name: 'Demo headset (USB)' }],
     get_update_status: () => update,
     get_release_notes: ({ version }) => ({ version, body: update.notes ?? null, source: 'manifest' as const }),
     open_external_link: () => null,
