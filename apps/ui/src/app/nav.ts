@@ -35,12 +35,6 @@ export const PRIMARY_NAV: NavEntry[] = [
 
 export const SETTINGS_NAV: NavEntry = { id: 'settings', to: '/settings', label: 'nav.settings', icon: IconSettings };
 
-/** Video routes where the rail starts collapsed; every other route keeps the same rail size (DESIGN §8). */
-export const COLLAPSED_ROUTES = ['/player', '/multiview'];
-
-export const isCollapsedRoute = (pathname: string): boolean =>
-  COLLAPSED_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
-
 export function visibleNav(caps: Caps): NavEntry[] {
   return PRIMARY_NAV.filter((e) => !e.requires || e.requires(caps));
 }

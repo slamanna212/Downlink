@@ -18,7 +18,6 @@ import { preloadRoutes } from './routes';
 import { useDetailStore } from '../store/detail';
 import { whenIdle } from '../lib/perf';
 import { openPalette } from '../lib/palette';
-import { isCollapsedRoute } from './nav';
 import classes from './Shell.module.css';
 
 const CommandPalette = lazy(() => import('../features/palette/CommandPalette').then((m) => ({ default: m.CommandPalette })));
@@ -173,8 +172,8 @@ export function Shell() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['catalog', 'sources'] }),
   });
 
-  const autoCollapsed = isCollapsedRoute(pathname);
-  const collapsed = railPref === 'auto' ? autoCollapsed : railPref === 'collapsed';
+  // Same rail size on every route; only the user's explicit toggle collapses it.
+  const collapsed = railPref === 'collapsed';
   const mode: RailMode = density === 'tv' ? 'tv' : collapsed ? 'collapsed' : 'expanded';
   const width = mode === 'tv' ? dl.layout.railTv : mode === 'collapsed' ? dl.layout.railCollapsed : dl.layout.railExpanded;
   // Video routes leave the video rects transparent so the native surfaces show through.
