@@ -40,21 +40,21 @@ static USERINFO: LazyLock<Regex> =
 /// Credential-carrying query parameters.
 static QUERY_CRED: LazyLock<Regex> = LazyLock::new(|| {
     rx(
-        r#"(?i)([?&;])(username|password|user|pass|pwd|token|api_key|apikey|access_token|refresh_token|auth|key|secret|sig|signature)=([^&\s"'#<>]*)"#,
+        r#"(?i)([?&;])(username|password|user|pass|pwd|token|x-plex-token|api_key|apikey|access_token|refresh_token|auth|key|secret|sig|signature)=([^&\s"'#<>]*)"#,
     )
 });
 
 /// `Header-Name: value` / `Header-Name=value` for credential headers (to end of line / next quote).
 static HEADER: LazyLock<Regex> = LazyLock::new(|| {
     rx(
-        r#"(?i)\b(x-api-key|authorization|proxy-authorization|cookie|set-cookie|x-auth-token)(["']?\s*[:=]\s*["']?)([^\r\n"']*)"#,
+        r#"(?i)\b(x-api-key|x-plex-token|authorization|proxy-authorization|cookie|set-cookie|x-auth-token)(["']?\s*[:=]\s*["']?)([^\r\n"']*)"#,
     )
 });
 
 /// JSON-ish `"password":"…"` and debug-ish `password: "…"`.
 static JSON_SECRET: LazyLock<Regex> = LazyLock::new(|| {
     rx(
-        r#"(?i)(["']?(?:username|password|passwd|secret|api_key|apikey|access|refresh|access_token|refresh_token|token)["']?\s*[:=]\s*)"([^"]*)""#,
+        r#"(?i)(["']?(?:username|password|passwd|secret|api_key|apikey|access|refresh|access_token|refresh_token|token|authToken|accessToken)["']?\s*[:=]\s*)"([^"]*)""#,
     )
 });
 

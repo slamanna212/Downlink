@@ -1,6 +1,6 @@
 import { QueryClient, useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { invoke, listen } from './ipc';
-import type { Caps, CatalogUpdated } from './types';
+import type { Caps, CatalogUpdated, MediaTarget } from './types';
 import { notifyError } from '../components/Notify/notify';
 import { unionCaps } from '../lib/caps';
 
@@ -123,4 +123,22 @@ export const useHome = () =>
 export function useOffline(): boolean {
   const { data } = useSources();
   return data?.[0]?.status === 'offline';
+}
+
+// ---- media server (Plex) ----------------------------------------------------------------------
+
+export function useMediaServerStatus() {
+  return useQuery({ queryKey: ['mediaServer', 'status'], queryFn: () => invoke('media_server_status', {}) });
+}
+
+/** The playing title on the user's media server; idle until a server is chosen. Failures just hide the button. */
+export function useMediaMatch(target: MediaTarget | null) {
+  const status = useMediaServerStatus();
+  return useQuery({
+    queryKey: ['mediaServer', 'match', target],
+    queryFn: () => invoke('media_server_match', { target: target as MediaTarget }),
+    enabled: !!target && !!status.data?.plex.serverId,
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
 }

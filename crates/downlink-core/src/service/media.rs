@@ -65,6 +65,8 @@ fn to_item(r: &VodRow) -> VodItem {
         parent_ext: r.parent_ext.clone(),
         title: r.name.clone(),
         container: r.container.clone(),
+        tmdb_id: r.tmdb_id.clone(),
+        imdb_id: r.imdb_id.clone(),
         ..Default::default()
     }
 }

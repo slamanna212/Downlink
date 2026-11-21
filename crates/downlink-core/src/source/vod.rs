@@ -59,6 +59,23 @@ pub struct VodItem {
     pub category_ext: Option<String>,
     /// File extension for URL building (Xtream).
     pub container: Option<String>,
+    /// TMDB id as the source reports it (digits), for media-server matching.
+    pub tmdb_id: Option<String>,
+    /// IMDb id (`tt…`), for media-server matching.
+    pub imdb_id: Option<String>,
+}
+
+/// A TMDB id as sources send it (`"1616400"`, `1616400`, `"0"`, `""`): digits only, not zero.
+pub fn clean_tmdb(raw: Option<String>) -> Option<String> {
+    let t = raw?.trim().to_owned();
+    (!t.is_empty() && t.bytes().all(|b| b.is_ascii_digit()) && t.bytes().any(|b| b != b'0'))
+        .then_some(t)
+}
+
+/// An IMDb id (`tt0111161`); anything else is dropped.
+pub fn clean_imdb(raw: Option<String>) -> Option<String> {
+    let t = raw?.trim().to_ascii_lowercase();
+    (t.len() > 2 && t.starts_with("tt") && t[2..].bytes().all(|b| b.is_ascii_digit())).then_some(t)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -74,6 +91,29 @@ pub struct VodListPage {
     pub items: Vec<VodItem>,
     /// Total matching items across pages, when the source says.
     pub total: Option<i64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_ids_are_cleaned() {
+        assert_eq!(
+            clean_tmdb(Some(" 1616400 ".into())).as_deref(),
+            Some("1616400")
+        );
+        assert_eq!(clean_tmdb(Some("0".into())), None);
+        assert_eq!(clean_tmdb(Some(String::new())), None);
+        assert_eq!(clean_tmdb(Some("tt123".into())), None);
+        assert_eq!(clean_tmdb(None), None);
+        assert_eq!(
+            clean_imdb(Some("TT0111161".into())).as_deref(),
+            Some("tt0111161")
+        );
+        assert_eq!(clean_imdb(Some("tt".into())), None);
+        assert_eq!(clean_imdb(Some("12345".into())), None);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

@@ -8,6 +8,7 @@ pub mod error;
 pub mod hls;
 pub mod images;
 pub mod m3u;
+pub mod mediaserver;
 pub mod normalise;
 pub mod redact;
 pub mod service;

@@ -262,3 +262,17 @@ fn vod_and_dvr_url_shapes_redact() {
     );
     assert!(!line.contains("hunter22"), "{line}");
 }
+
+#[test]
+fn plex_token_shapes_redact() {
+    for s in [
+        "http://plex.test:32400/library/sections/1/all?X-Plex-Token=abcd1234secret",
+        "http://plex.test:32400/library/sections/1/all?includeGuids=1&x-plex-token=abcd1234secret",
+        "X-Plex-Token: abcd1234secret",
+        r#"{"id":1,"code":"ABCD","authToken":"abcd1234secret"}"#,
+        r#"[{"name":"Home","accessToken":"abcd1234secret","owned":true}]"#,
+    ] {
+        let out = clean(s);
+        assert!(!out.contains("abcd1234secret"), "{out}");
+    }
+}

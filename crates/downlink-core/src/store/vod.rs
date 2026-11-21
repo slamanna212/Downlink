@@ -29,10 +29,12 @@ pub struct VodRow {
     pub uuid: Option<String>,
     pub container: Option<String>,
     pub category_ext: Option<String>,
+    pub tmdb_id: Option<String>,
+    pub imdb_id: Option<String>,
 }
 
 const VOD_COLS: &str = "id, source_id, kind, ext_id, parent_ext, name, year, rating, genre, description, \
-    season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext";
+    season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext, tmdb_id, imdb_id";
 
 #[derive(Debug, Clone, PartialEq, FromRow)]
 pub struct RecordingRow {
@@ -107,7 +109,7 @@ impl Store {
     ) -> Result<Vec<VodRow>> {
         let mut query = sqlx::QueryBuilder::new(
             "INSERT INTO vod_item (source_id, kind, ext_id, parent_ext, name, year, rating, genre, description,
-                   season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext, updated_at) ",
+                   season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext, tmdb_id, imdb_id, updated_at) ",
         );
         query.push_values(items, |mut b, &(kind, it)| {
             b.push_bind(source_id)
@@ -127,6 +129,8 @@ impl Store {
                 .push_bind(&it.uuid)
                 .push_bind(&it.container)
                 .push_bind(&it.category_ext)
+                .push_bind(&it.tmdb_id)
+                .push_bind(&it.imdb_id)
                 .push_bind(now);
         });
         query.push(format!(
@@ -140,7 +144,9 @@ impl Store {
                    art_key = coalesce(excluded.art_key, vod_item.art_key),
                    backdrop_key = coalesce(excluded.backdrop_key, vod_item.backdrop_key),
                    uuid = coalesce(excluded.uuid, vod_item.uuid), container = coalesce(excluded.container, vod_item.container),
-                   category_ext = coalesce(excluded.category_ext, vod_item.category_ext), updated_at = excluded.updated_at
+                   category_ext = coalesce(excluded.category_ext, vod_item.category_ext),
+                   tmdb_id = coalesce(excluded.tmdb_id, vod_item.tmdb_id), imdb_id = coalesce(excluded.imdb_id, vod_item.imdb_id),
+                   updated_at = excluded.updated_at
 
                  RETURNING {VOD_COLS}",
         ));

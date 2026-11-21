@@ -8,6 +8,7 @@ import {
   type AppError,
   type AppSettings,
   type Channel,
+  type PlexStatus,
   type UpdateStatus,
   type Group,
   type NowNext,
@@ -136,7 +137,7 @@ export function idleState(): PlayerState {
   return {
     state: 'Idle', mode: null, channelId: null, position: null, duration: null, buffered: null, seekable: false,
     volume: 100, muted: false, hwdecCurrent: null, videoCodec: null, width: null, height: null, waitingOn: null, reconnecting: false,
-    error: null, transitionedAt: Date.now(), programme: null, title: null, resumeAt: null, tracks: [],
+    error: null, transitionedAt: Date.now(), programme: null, title: null, mediaId: null, resumeAt: null, tracks: [],
   };
 }
 
@@ -166,6 +167,8 @@ export function createMockBackend(): Backend {
     liveBufferSecs: 2, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
     deinterlace: 'auto', hdrOutput: 'auto', subtitleSize: 100, subtitleBackground: true, resumeLastChannel: false,
   };
+  let plex: PlexStatus = { signedIn: false, accountName: null, serverId: null, serverName: null };
+  let plexPinChecks = 0;
   let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, notes: null, lastChecked: null, ready: false };
   let searchIndex: { programme: Programme; channel: Channel; hay: string }[] | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
@@ -261,7 +264,7 @@ export function createMockBackend(): Backend {
       if (!p) throw appError('stream', 'That programme is not available to play.');
       const dur = p.endUtc - p.startUtc;
       const saved = p.channelId % 2 === 0 ? Math.floor(dur / 3) : null;
-      setPlayer({ state: 'Resolving', mode: 'catchup', channelId: p.channelId, programme: p, position: resume && saved ? saved : 0, duration: dur, buffered: 0, seekable: true, resumeAt: resume && saved ? saved : null, error: null });
+      setPlayer({ state: 'Resolving', mode: 'catchup', channelId: p.channelId, programme: p, title: null, mediaId: null, position: resume && saved ? saved : 0, duration: dur, buffered: 0, seekable: true, resumeAt: resume && saved ? saved : null, error: null });
       seekableTicker('catchup');
       return null;
     },
@@ -342,7 +345,7 @@ export function createMockBackend(): Backend {
       const info = vod.vodInfo(kind, id);
       if (!info) throw appError('stream', 'This title is not available to play right now. Try again later.');
       const at = resume && info.resumeSecs ? info.resumeSecs : 0;
-      setPlayer({ state: 'Resolving', mode: 'vod', channelId: null, programme: null, title: info.title, position: at, duration: info.durationSecs, buffered: at, seekable: true, resumeAt: null, error: null });
+      setPlayer({ state: 'Resolving', mode: 'vod', channelId: null, programme: null, title: info.title, mediaId: id, position: at, duration: info.durationSecs, buffered: at, seekable: true, resumeAt: null, error: null });
       seekableTicker('vod');
       return null;
     },
@@ -373,14 +376,14 @@ export function createMockBackend(): Backend {
       if (!r) throw appError('stream', 'That recording is gone. It may have been deleted.');
       const live = r.status === 'recording';
       const dur = (live ? nowSec() : r.endUtc) - r.startUtc;
-      setPlayer({ state: 'Resolving', mode: 'recording', channelId: r.channelId, programme: null, title: r.title, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: null, error: null });
+      setPlayer({ state: 'Resolving', mode: 'recording', channelId: r.channelId, programme: null, title: r.title, mediaId: id, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: null, error: null });
       seekableTicker('recording');
       return null;
     },
     get_player_state: () => player,
     play_channel: ({ channelId }) => {
       if (new URLSearchParams(location.search).has('failplay')) throw appError('stream', 'The server did not answer. Try again in a moment.');
-      setPlayer({ state: 'Resolving', mode: 'live', channelId, error: null, programme: mockNowNext(channelId, nowSec(), scheduled).now, position: null, duration: null, buffered: null, seekable: false, resumeAt: null });
+      setPlayer({ state: 'Resolving', mode: 'live', channelId, title: null, mediaId: null, error: null, programme: mockNowNext(channelId, nowSec(), scheduled).now, position: null, duration: null, buffered: null, seekable: false, resumeAt: null });
       setTimeout(() => setPlayer({ state: 'Connecting' }), 150);
       setTimeout(() => {
         // `?fail=<id>` in the URL makes that channel fail, to exercise the error overlay.
@@ -562,6 +565,39 @@ export function createMockBackend(): Backend {
     },
     set_fullscreen: () => null,
     set_mini_player: () => null,
+    media_server_status: () => ({ plex: { ...plex } }),
+    plex_sign_in_start: () => {
+      plexPinChecks = 0;
+      return { id: 1, code: 'DEMO', authUrl: 'https://app.plex.tv/auth#?code=DEMO' };
+    },
+    plex_sign_in_check: async () => {
+      await wait(300);
+      if (++plexPinChecks < 1) return false;
+      plex = { ...plex, signedIn: true, accountName: 'demo-user' };
+      return true;
+    },
+    plex_servers: () => [
+      { id: 'srv-home', name: 'Home server', owned: true },
+      { id: 'srv-friend', name: 'Friend’s server', owned: false },
+    ],
+    plex_select_server: async ({ serverId }) => {
+      await wait(400);
+      plex = { ...plex, serverId, serverName: serverId === 'srv-home' ? 'Home server' : 'Friend’s server' };
+      return { plex: { ...plex } };
+    },
+    media_server_sign_out: () => {
+      plex = { signedIn: false, accountName: null, serverId: null, serverName: null };
+      return null;
+    },
+    // Synthetic: VOD and recordings with an even id are "in the library".
+    media_server_match: ({ target }) => {
+      if (!plex.serverId) return null;
+      const hit = target.kind === 'programme' ? target.id.length % 2 === 0 : target.id % 2 === 0;
+      return hit
+        ? { server: 'plex' as const, serverName: plex.serverName ?? 'Plex', kind: target.kind === 'vod' ? 'movie' as const : 'show' as const, title: 'Demo title', url: 'https://app.plex.tv/desktop' }
+        : null;
+    },
+    media_server_open: () => null,
   };
 
   // `?mock=update`: a newer version is downloaded and waiting (rail dot, Settings → Updates card).

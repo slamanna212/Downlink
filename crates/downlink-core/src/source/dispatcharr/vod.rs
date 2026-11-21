@@ -39,6 +39,10 @@ struct EpisodeRow {
     season_number: Option<i64>,
     #[serde(default, deserialize_with = "super::dto::de_opt_i64")]
     episode_number: Option<i64>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    tmdb_id: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    imdb_id: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -62,6 +66,8 @@ impl EpisodeRow {
             season: self.season_number,
             episode: self.episode_number,
             duration_secs: self.duration_secs.filter(|d| *d > 0),
+            tmdb_id: clean_tmdb(self.tmdb_id),
+            imdb_id: clean_imdb(self.imdb_id),
             ..Default::default()
         })
     }
@@ -278,6 +284,8 @@ impl DispatcharrClient {
                 .map(|u| self.server_url(&u).unwrap_or(u)),
             category_ext: None,
             container: None,
+            tmdb_id: clean_tmdb(s(v, "tmdb_id")),
+            imdb_id: clean_imdb(s(v, "imdb_id")),
             ext_id: id,
         })
     }

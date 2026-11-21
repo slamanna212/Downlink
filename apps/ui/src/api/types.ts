@@ -127,6 +127,8 @@ export interface PlayerState {
   programme: Programme | null;
   /** Title of VOD / recording media being played (null for live and catch-up, which use `programme`). */
   title: string | null;
+  /** VOD item / recording id being played (with `mode`); null for live and catch-up. */
+  mediaId: number | null;
   /** A saved resume point (seconds) the UI may offer; null when none. */
   resumeAt: number | null;
   /** Seconds. Null while not seekable. */
@@ -565,3 +567,41 @@ export type DeepLink =
   | { kind: 'channel'; uuid: string }
   /** `channel` is a channel uuid; `programme` an opaque programme id (catch-up); `start` is informational. */
   | { kind: 'play'; channel: string; programme?: string; start?: number };
+
+// ---- media servers (Plex) ---------------------------------------------------------------------
+
+export interface PlexStatus {
+  signedIn: boolean;
+  accountName: string | null;
+  serverId: string | null;
+  serverName: string | null;
+}
+
+export interface MediaServerStatus {
+  plex: PlexStatus;
+}
+
+/** A Plex sign-in in progress; the desktop has opened `authUrl` in the browser. */
+export interface PlexPin {
+  id: number;
+  code: string;
+  authUrl: string;
+}
+
+export interface PlexServer {
+  id: string;
+  name: string;
+  owned: boolean;
+}
+
+/** What the player is showing, for a media-server lookup. */
+export type MediaTarget = { kind: 'vod'; id: number } | { kind: 'recording'; id: number } | { kind: 'programme'; id: string };
+
+/** The playing title, found on the user's media server. */
+export interface MediaMatch {
+  server: 'plex';
+  serverName: string;
+  kind: 'movie' | 'show' | 'episode';
+  title: string;
+  url: string;
+}

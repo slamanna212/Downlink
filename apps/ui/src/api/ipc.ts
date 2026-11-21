@@ -40,6 +40,11 @@ import type {
   Source,
   StreamList,
   MultiviewState,
+  MediaMatch,
+  MediaServerStatus,
+  MediaTarget,
+  PlexPin,
+  PlexServer,
 } from './types';
 
 /** Command name -> args/result. Keep in sync with the Rust `#[tauri::command]` set (PLAN §2.5). */
@@ -117,6 +122,17 @@ export interface Commands {
   quit_app: { args: Record<string, never>; result: null };
   set_source_options: { args: { sourceId: number; hlsTransport: boolean }; result: null };
   report_ui_timing: { args: { name: string; ms: number }; result: null };
+  media_server_status: { args: Record<string, never>; result: MediaServerStatus };
+  /** Starts Plex sign-in and opens the approval page in the browser. */
+  plex_sign_in_start: { args: Record<string, never>; result: PlexPin };
+  /** True once the user approved the sign-in. */
+  plex_sign_in_check: { args: { pinId: number }; result: boolean };
+  plex_servers: { args: Record<string, never>; result: PlexServer[] };
+  plex_select_server: { args: { serverId: string }; result: MediaServerStatus };
+  media_server_sign_out: { args: Record<string, never>; result: null };
+  media_server_match: { args: { target: MediaTarget }; result: MediaMatch | null };
+  /** Opens a page from `media_server_match` in the browser. */
+  media_server_open: { args: { url: string }; result: null };
 }
 export type CommandName = keyof Commands;
 

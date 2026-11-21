@@ -171,6 +171,14 @@ macro_rules! handlers {
             commands::updates::set_update_channel,
             commands::updates::check_for_updates,
             commands::updates::install_update,
+            commands::mediaserver::media_server_status,
+            commands::mediaserver::plex_sign_in_start,
+            commands::mediaserver::plex_sign_in_check,
+            commands::mediaserver::plex_servers,
+            commands::mediaserver::plex_select_server,
+            commands::mediaserver::media_server_sign_out,
+            commands::mediaserver::media_server_match,
+            commands::mediaserver::media_server_open,
             $($extra),*
         ]
     };

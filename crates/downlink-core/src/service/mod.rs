@@ -6,6 +6,7 @@
 pub mod dto;
 mod logtail;
 mod media;
+mod mediaserver;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -62,6 +63,9 @@ fn display_url(u: &str) -> String {
 }
 pub use logtail::LogTail;
 pub use media::{RecordingPlay, VodPlay};
+pub use mediaserver::{
+    MediaMatchDto, MediaServerStatusDto, MediaTargetArg, PlexPinDto, PlexServerDto, PlexStatusDto,
+};
 
 const SETTINGS_KEY: &str = "settings";
 const PREF_ADULT: &str = "pref.include_adult";
@@ -96,6 +100,9 @@ pub struct Service {
     vod_cats: Mutex<HashMap<i64, (i64, String)>>,
     log_tail: LogTail,
     app_version: String,
+    /// The connected Plex server, built lazily from settings + keychain.
+    plex: tokio::sync::Mutex<Option<Arc<crate::mediaserver::plex::PlexServer>>>,
+    plex_tv_url: std::sync::RwLock<String>,
 }
 
 impl Service {
@@ -140,6 +147,8 @@ impl Service {
             vod_cats: Mutex::new(HashMap::new()),
             log_tail: LogTail::new(),
             app_version,
+            plex: tokio::sync::Mutex::new(None),
+            plex_tv_url: std::sync::RwLock::new(crate::mediaserver::plex::PLEX_TV.to_owned()),
         })
     }
 

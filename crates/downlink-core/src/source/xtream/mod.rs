@@ -29,6 +29,7 @@ use crate::catchup::template::{CatchupTemplate, ExpandCtx, Mode, TimeSemantics, 
 use crate::error::{AppError, Result};
 use crate::m3u::load::{Fetched, Fetcher, HttpFetcher};
 use crate::redact::RedactionSet;
+use crate::source::vod::clean_tmdb;
 
 const MAX_CONCURRENT: usize = 2;
 
@@ -520,6 +521,7 @@ impl XtreamClient {
                 .map(|i| self.vault.template_url(i)),
             category_ext: m.category_id.clone(),
             container: m.container_extension.clone(),
+            tmdb_id: clean_tmdb(m.tmdb.clone()).or_else(|| clean_tmdb(m.tmdb_id.clone())),
             ..Default::default()
         }
     }
@@ -548,6 +550,7 @@ impl XtreamClient {
                 .filter(|i| !i.is_empty())
                 .map(|i| self.vault.template_url(i)),
             category_ext: s.category_id.clone(),
+            tmdb_id: clean_tmdb(s.tmdb.clone()).or_else(|| clean_tmdb(s.tmdb_id.clone())),
             ..Default::default()
         }
     }

@@ -99,6 +99,12 @@ pub struct VodStreamDto {
     pub added: Option<i64>,
     #[serde(default, deserialize_with = "opt_i64")]
     pub year: Option<i64>,
+    /// Some panels send the TMDB id as `tmdb`, others as `tmdb_id` (separate fields, not an
+    /// alias: a row carrying both must still parse).
+    #[serde(default, deserialize_with = "opt_str")]
+    pub tmdb: Option<String>,
+    #[serde(default, deserialize_with = "opt_str")]
+    pub tmdb_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -121,6 +127,10 @@ pub struct SeriesDto {
     pub release_date: Option<String>,
     #[serde(default, deserialize_with = "first_str")]
     pub backdrop_path: Option<String>,
+    #[serde(default, deserialize_with = "opt_str")]
+    pub tmdb: Option<String>,
+    #[serde(default, deserialize_with = "opt_str")]
+    pub tmdb_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

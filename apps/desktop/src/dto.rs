@@ -51,6 +51,8 @@ pub struct PlayerStateDto {
     pub programme: Option<ProgrammeDto>,
     /// Title of VOD / recording media (null for live and catch-up).
     pub title: Option<String>,
+    /// VOD item / recording id being played (null for live and catch-up).
+    pub media_id: Option<i64>,
     pub resume_at: Option<f64>,
     pub position: Option<f64>,
     pub duration: Option<f64>,
@@ -111,6 +113,8 @@ pub struct SessionInfo {
     pub mode: Option<PlayMode>,
     pub programme: Option<ProgrammeDto>,
     pub title: Option<String>,
+    /// VOD item or recording id (with `mode`), for media-server lookups.
+    pub media_id: Option<i64>,
     pub resume_at: Option<f64>,
     pub failure: Option<AppError>,
     /// A server-side failover attempt is in progress.
@@ -133,6 +137,7 @@ pub fn player_state(snap: &PlayerSnapshot, info: &SessionInfo) -> PlayerStateDto
         channel_id: info.channel_id,
         programme: info.programme.clone(),
         title: info.title.clone(),
+        media_id: info.media_id,
         resume_at: info.resume_at,
         position: snap.position_secs,
         duration: snap.duration_secs,
@@ -290,12 +295,14 @@ mod tests {
             let info = SessionInfo {
                 mode: Some(mode),
                 title: Some("A title".into()),
+                media_id: Some(7),
                 resume_at: Some(600.0),
                 ..SessionInfo::default()
             };
             let v = serde_json::to_value(player_state(&snap, &info)).unwrap_or_default();
             assert_eq!(v["mode"], name);
             assert_eq!(v["title"], "A title");
+            assert_eq!(v["mediaId"], 7);
             assert_eq!(v["seekable"], true);
             assert_eq!(v["resumeAt"], 600.0);
             assert!(v["channelId"].is_null());

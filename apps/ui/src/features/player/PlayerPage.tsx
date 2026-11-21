@@ -11,6 +11,7 @@ import {
   IconMaximize,
   IconMinimize,
   IconArrowsMaximize,
+  IconExternalLink,
   IconPictureInPicture,
   IconLayoutGrid,
   IconPlayerPause,
@@ -24,14 +25,14 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { inTauri, invoke, listen } from '../../api/ipc';
-import { invalidateFavourites, useChannel, useNowNextWindow, useSources } from '../../api/queries';
-import type { AppError, Channel, PlayerState, SessionStats } from '../../api/types';
+import { invalidateFavourites, useChannel, useMediaMatch, useNowNextWindow, useSources } from '../../api/queries';
+import type { AppError, Channel, MediaTarget, PlayerState, SessionStats } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { Icon } from '../../components/Icon/Icon';
-import { notifyInfo } from '../../components/Notify/notify';
+import { notifyError, notifyInfo } from '../../components/Notify/notify';
 import { SeekBar } from '../../components/SeekBar/SeekBar';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { appendDigit, NUMBER_ENTRY_TIMEOUT_MS } from '../../lib/numberEntry';
@@ -441,6 +442,11 @@ export function PlayerPage() {
   // Playback has already started at `resumeAt`; the prompt only offers to go back to the start. Recordings and
   // VOD have no programme, so the dismiss key covers mode + title + position, not just the programme id.
   const resumeKey = `${player.mode}|${player.programme?.id ?? player.title ?? ''}|${player.resumeAt ?? ''}`;
+  const mediaTarget = useMemo<MediaTarget | null>(() => {
+    if ((player.mode === 'vod' || player.mode === 'recording') && player.mediaId != null) return { kind: player.mode, id: player.mediaId };
+    return shownProg ? { kind: 'programme', id: shownProg.id } : null;
+  }, [player.mode, player.mediaId, shownProg]);
+  const mediaMatch = useMediaMatch(player.state === 'Idle' || player.state === 'Stopped' ? null : mediaTarget).data ?? null;
   const showResume = timeshift && player.mode !== 'vod' && resumeUseful(player.resumeAt, player.duration) && resumeDismissed !== resumeKey;
 
   return (
@@ -612,6 +618,17 @@ export function PlayerPage() {
                   filledGlyph={channel.isFavourite}
                   onClick={toggleFavourite}
                 />
+              )}
+              {mediaMatch && (
+                <DLButton
+                  variant="overlay"
+                  size="lg"
+                  icon={IconExternalLink}
+                  aria-label={t('player.openInPlex.help', { title: mediaMatch.title, server: mediaMatch.serverName })}
+                  onClick={() => void invoke('media_server_open', { url: mediaMatch.url }).catch(notifyError)}
+                >
+                  {t('player.openInPlex')}
+                </DLButton>
               )}
               <DLIconButton
                 label={t('player.info')}

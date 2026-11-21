@@ -1,17 +1,17 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal, NavLink, SegmentedControl, Select, Slider, Switch, Text } from '@mantine/core';
-import { IconPalette, IconPlayerPlay, IconPlugConnected, IconRefresh, IconStethoscope } from '@tabler/icons-react';
+import { IconPalette, IconPlayerPlay, IconPlugConnected, IconRefresh, IconServer2, IconStethoscope } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
-import { useSettings, useSources, useUpdateStatus, useUpdateWaiting } from '../../api/queries';
-import type { AudioOutput, Deinterlace, DensitySetting, HdrOutput, HwdecSetting, Source, UpdateChannel } from '../../api/types';
+import { useMediaServerStatus, useSettings, useSources, useUpdateStatus, useUpdateWaiting } from '../../api/queries';
+import type { AudioOutput, Deinterlace, DensitySetting, HdrOutput, HwdecSetting, PlexPin, Source, UpdateChannel } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { Icon, type TablerIcon } from '../../components/Icon/Icon';
 import { SettingRow } from '../../components/SettingRow/SettingRow';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { parseReleaseNotes } from '../../lib/releaseNotes';
-import { formatUpdated } from '../../lib/time';
+import { formatUpdated, nowEpoch } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
 import { useTasksStore } from '../../store/tasks';
 import { useUiStore } from '../../store/ui';
@@ -22,6 +22,7 @@ import classes from './Settings.module.css';
 const SECTIONS: { id: string; label: MessageKey; icon: TablerIcon }[] = [
   { id: 'sources', label: 'settings.sources', icon: IconPlugConnected },
   { id: 'playback', label: 'settings.playback', icon: IconPlayerPlay },
+  { id: 'mediaserver', label: 'settings.mediaServer', icon: IconServer2 },
   { id: 'appearance', label: 'settings.appearance', icon: IconPalette },
   { id: 'updates', label: 'settings.updates', icon: IconRefresh },
   { id: 'about', label: 'settings.about', icon: IconStethoscope },
@@ -348,6 +349,122 @@ function ReleaseNotes({ version, notes }: { version: string; notes: string }) {
   );
 }
 
+/** How long a Plex sign-in waits for approval in the browser. */
+const PLEX_PIN_TIMEOUT_SECS = 5 * 60;
+const PLEX_PIN_POLL_MS = 2000;
+
+function MediaServerSection() {
+  const qc = useQueryClient();
+  const status = useMediaServerStatus();
+  const plex = status.data?.plex;
+  const [pin, setPin] = useState<PlexPin | null>(null);
+  const [expired, setExpired] = useState(false);
+  const refresh = () => qc.invalidateQueries({ queryKey: ['mediaServer'] });
+  const start = useMutation({
+    mutationFn: () => invoke('plex_sign_in_start', {}),
+    onSuccess: (p) => {
+      setExpired(false);
+      setPin(p);
+    },
+  });
+  const servers = useQuery({
+    queryKey: ['mediaServer', 'servers'],
+    queryFn: () => invoke('plex_servers', {}),
+    enabled: !!plex?.signedIn,
+  });
+  const select = useMutation({
+    mutationFn: (serverId: string) => invoke('plex_select_server', { serverId }),
+    onSuccess: () => void refresh(),
+  });
+  const signOut = useMutation({
+    mutationFn: () => invoke('media_server_sign_out', {}),
+    onSuccess: () => void refresh(),
+  });
+
+  // Poll plex.tv until the user approves the sign-in in the browser (or it times out).
+  useEffect(() => {
+    if (!pin) return;
+    let stopped = false;
+    const startedAt = nowEpoch();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const tick = async () => {
+      if (stopped) return;
+      if (nowEpoch() - startedAt > PLEX_PIN_TIMEOUT_SECS) {
+        setPin(null);
+        setExpired(true);
+        return;
+      }
+      try {
+        if (await invoke('plex_sign_in_check', { pinId: pin.id })) {
+          if (stopped) return;
+          setPin(null);
+          void qc.invalidateQueries({ queryKey: ['mediaServer'] });
+          return;
+        }
+      } catch (e) {
+        if (stopped) return;
+        setPin(null);
+        notifyError(e);
+        return;
+      }
+      if (!stopped) timer = setTimeout(() => void tick(), PLEX_PIN_POLL_MS);
+    };
+    timer = setTimeout(() => void tick(), PLEX_PIN_POLL_MS);
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [pin, qc]);
+
+  if (!plex) return <SkeletonList rows={2} label={t('loading.generic')} />;
+  const accountHelp = plex.signedIn
+    ? plex.accountName ? t('settings.plex.signedInAs', { name: plex.accountName }) : t('settings.plex.signedIn')
+    : pin ? t('settings.plex.waiting', { code: pin.code })
+    : expired ? t('settings.plex.expired')
+    : t('settings.plex.help');
+  const serverList = servers.data ?? [];
+  return (
+    <Section title={t('settings.mediaServer')} help={t('settings.mediaServer.help')}>
+      <SettingRow label={t('settings.plex')} help={accountHelp} wide>
+        {plex.signedIn ? (
+          <DLButton variant="danger" size="sm" loading={signOut.isPending} onClick={() => signOut.mutate()}>
+            {t('settings.plex.signOut')}
+          </DLButton>
+        ) : pin ? (
+          <DLButton variant="subtle" onClick={() => setPin(null)}>{t('settings.plex.cancel')}</DLButton>
+        ) : (
+          <DLButton variant="filled" loading={start.isPending} onClick={() => start.mutate()}>
+            {t('settings.plex.signIn')}
+          </DLButton>
+        )}
+      </SettingRow>
+      {plex.signedIn && (
+        <SettingRow
+          label={t('settings.plex.server')}
+          help={plex.serverName ? t('settings.plex.server.connected', { name: plex.serverName }) : t('settings.plex.server.help')}
+        >
+          {servers.isLoading ? (
+            <SkeletonList rows={1} label={t('loading.generic')} />
+          ) : serverList.length === 0 ? (
+            <Text size="sm">{t('settings.plex.server.none')}</Text>
+          ) : (
+            <Select
+              w="100%"
+              aria-label={t('settings.plex.server')}
+              placeholder={t('settings.plex.server.pick')}
+              data={serverList.map((x) => ({ value: x.id, label: x.owned ? x.name : t('settings.plex.server.shared', { name: x.name }) }))}
+              value={plex.serverId}
+              allowDeselect={false}
+              disabled={select.isPending}
+              onChange={(v) => v && v !== plex.serverId && select.mutate(v)}
+            />
+          )}
+        </SettingRow>
+      )}
+    </Section>
+  );
+}
+
 function AppearanceSection() {
   const density = useUiStore((s) => s.density);
   const setDensity = useUiStore((s) => s.setDensity);
@@ -462,6 +579,7 @@ export function SettingsPage() {
         <div className={classes.inner}>
           {section === 'sources' && <SourcesSection />}
           {section === 'playback' && <PlaybackSection />}
+          {section === 'mediaserver' && <MediaServerSection />}
           {section === 'appearance' && <AppearanceSection />}
           {section === 'updates' && <UpdatesSection />}
           {section === 'about' && <AboutSection />}

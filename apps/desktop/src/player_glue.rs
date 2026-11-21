@@ -436,6 +436,7 @@ impl Playback {
             mode: Some(mode),
             programme,
             title: None,
+            media_id: None,
             resume_at: None,
             failure: None,
             failover_active: false,
@@ -671,6 +672,9 @@ impl Playback {
         let generation = {
             let mut a = lock(&self.active);
             a.info.title = Some(title);
+            a.info.media_id = Some(match media {
+                Media::Vod(id) | Media::Recording(id) => id,
+            });
             a.info.resume_at = start_secs;
             a.media = Some(media);
             a.generation
