@@ -506,6 +506,7 @@ export function createMockBackend(): Backend {
       void sync(sourceId);
       return null;
     },
+    get_recent_transitions: () => transitions.slice(-3),
     get_diagnostics: () => ({
       appVersion: '0.0.0-mock',
       serverVersions: sources.map((s) => s.serverVersion ?? 'unknown'),

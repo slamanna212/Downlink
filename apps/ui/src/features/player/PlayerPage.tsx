@@ -106,7 +106,7 @@ function BufferGraph({ history }: { history: number[] }) {
 }
 
 function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerState; sourceName: string; channel: Channel | undefined; onClose: () => void }) {
-  const diag = useQuery({ queryKey: ['diagnostics', 'session'], queryFn: () => invoke('get_diagnostics', {}), refetchInterval: 1000 });
+  const recent = useQuery({ queryKey: ['playerTransitions', player.state], queryFn: () => invoke('get_recent_transitions', {}), staleTime: 0 });
   const { stats, bufferHistory } = useSessionStats(true);
   const dash = '–';
   const join = (parts: (string | null | undefined)[]) => parts.filter(Boolean).join(' · ') || dash;
@@ -140,7 +140,7 @@ function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerSta
     [t('player.info.decoder'), stats?.hwdecCurrent ?? player.hwdecCurrent ?? dash],
     [t('player.info.state'), player.state],
   ];
-  const trans = (diag.data?.transitions ?? []).slice(-3);
+  const trans = recent.data ?? [];
   return (
     <aside className={classes.info} aria-label={t('player.info')}>
       <div className={classes.infoHead}>

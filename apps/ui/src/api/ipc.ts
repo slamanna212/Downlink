@@ -71,6 +71,7 @@ export interface Commands {
   test_source: { args: AddSourceInput; result: TestSourceResult };
   remove_source: { args: { sourceId: number }; result: null };
   sync_source: { args: { sourceId: number }; result: null };
+  get_recent_transitions: { args: Record<string, never>; result: Diagnostics['transitions'] };
   get_diagnostics: { args: Record<string, never>; result: Diagnostics };
   set_debug_logging: { args: { enabled: boolean }; result: null };
   get_settings: { args: Record<string, never>; result: AppSettings };

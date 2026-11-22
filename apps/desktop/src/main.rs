@@ -160,6 +160,7 @@ macro_rules! handlers {
             commands::player::multiview_exit,
             commands::settings::get_settings,
             commands::settings::set_settings,
+            commands::diagnostics::get_recent_transitions,
             commands::diagnostics::get_diagnostics,
             commands::diagnostics::set_debug_logging,
             commands::diagnostics::export_diagnostics,

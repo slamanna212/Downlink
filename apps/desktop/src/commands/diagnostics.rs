@@ -5,6 +5,18 @@ use super::CmdResult;
 use crate::dto::phase_name;
 use crate::state::AppState;
 
+fn transitions(pb: &crate::player_glue::Playback, limit: usize) -> Vec<Value> {
+    let history = pb.transitions();
+    history[history.len().saturating_sub(limit)..].iter()
+        .map(|t| json!({ "at": t.at_unix_ms, "from": phase_name(t.from), "to": phase_name(t.to), "note": t.note }))
+        .collect()
+}
+
+#[tauri::command]
+pub async fn get_recent_transitions(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+    Ok(transitions(&*state.playback().await?, 3))
+}
+
 #[tauri::command]
 pub async fn get_diagnostics(state: State<'_, AppState>) -> CmdResult<Value> {
     let d = state.svc().await?.diagnostics().await?;
@@ -12,10 +24,7 @@ pub async fn get_diagnostics(state: State<'_, AppState>) -> CmdResult<Value> {
         Some(pb) => (
             serde_json::to_value(pb.snapshot_dto()).unwrap_or(Value::Null),
             pb.snapshot().hwdec_current,
-            pb.transitions()
-                .iter()
-                .map(|t| json!({ "at": t.at_unix_ms, "from": phase_name(t.from), "to": phase_name(t.to), "note": t.note }))
-                .collect::<Vec<_>>(),
+            transitions(&pb, usize::MAX),
         ),
         None => (Value::Null, None, Vec::new()),
     };
@@ -51,14 +60,12 @@ pub async fn export_diagnostics(app: AppHandle, state: State<'_, AppState>) -> C
         Some(pb) => (
             serde_json::to_value(pb.snapshot_dto()).unwrap_or(Value::Null),
             pb.snapshot().hwdec_current,
-            pb.transitions()
-                .iter()
-                .rev()
-                .take(50)
-                .rev()
-                .map(|t| json!({ "at": t.at_unix_ms, "from": phase_name(t.from), "to": phase_name(t.to), "note": t.note }))
-                .collect::<Vec<_>>(),
-            state.player().await.map(|p| p.diagnostics()).unwrap_or_default(),
+            transitions(&pb, usize::MAX),
+            state
+                .player()
+                .await
+                .map(|p| p.diagnostics())
+                .unwrap_or_default(),
         ),
         None => (Value::Null, None, Vec::new(), Vec::new()),
     };
