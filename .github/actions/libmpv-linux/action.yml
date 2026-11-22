@@ -23,7 +23,7 @@ runs:
         fi
 
     - id: cache
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
       with:
         path: tools/mpv/out/linux/lib
         key: libmpv-linux-${{ hashFiles('tools/mpv/pins.env', 'tools/mpv/build-linux.sh', 'tools/mpv/linux.sh', 'tools/mpv/patches/**') }}

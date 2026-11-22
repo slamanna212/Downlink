@@ -42,23 +42,27 @@ jobs:
       release_id: ${{ steps.create.outputs.release_id }}
       signed: ${{ steps.meta.outputs.signed }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0 # git-cliff needs history and tags
 
       - id: meta
         name: Detect updater signing key
         env:
+          CHANNEL: ${{ inputs.channel }}
           SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           if [[ -n "$SIGNING_KEY" ]]; then
             echo "signed=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$CHANNEL" == stable ]]; then
+            echo "::error::Stable releases require the updater signing key."
+            exit 1
           else
             echo "signed=false" >> "$GITHUB_OUTPUT"
             echo "::warning title=Unsigned build::TAURI_SIGNING_PRIVATE_KEY is not set. Installers are published, but without updater signatures or latest.json, so in-app updates will not work. See docs/release.md."
           fi
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
         with:
           tool: git-cliff
 
@@ -93,7 +97,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Stage libmpv (pinned in tools/mpv/pins.env)
         shell: pwsh
@@ -102,14 +106,12 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           channel-version: ${{ inputs.version }}
-          signed: ${{ needs.prepare.outputs.signed }}
+          signed: "false"
           overlay: windows
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/desktop
           tauriScript: cargo tauri
@@ -143,7 +145,7 @@ jobs:
           #   desktop provides them). linuxdeploy ldd-walks usr/lib and aborts on any unresolved dependency, and
           #   on a libmpv cache hit build-linux.sh never runs, so nothing else installs them.
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: ./.github/actions/libmpv-linux
         with:
@@ -152,14 +154,12 @@ jobs:
       - uses: ./.github/actions/setup-build
         with:
           channel-version: ${{ inputs.version }}
-          signed: ${{ needs.prepare.outputs.signed }}
+          signed: "false"
           overlay: linux
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           NO_STRIP: "true"
         with:
           projectPath: apps/desktop
@@ -168,23 +168,6 @@ jobs:
           args: --bundles appimage,deb --config ../../release-config.json
           releaseId: ${{ needs.prepare.outputs.release_id }}
           includeUpdaterJson: false # publish writes the one latest.json; two jobs uploading their own race
-
-      # Tauri signs only the AppImage on Linux. The updater installs deb updates for deb users, so the deb needs
-      # its own .sig too.
-      - name: Sign and upload the deb
-        if: needs.prepare.outputs.signed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          # Inside the container git may refuse the checkout (dubious ownership), so do not let gh infer the repo.
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ inputs.tag }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: |
-          cd target/release/bundle/deb
-          for f in *.deb; do cargo tauri signer sign "$f"; done
-          # Flags before `--`: everything after it is taken as a file name.
-          gh release upload "$TAG" --clobber -- *.deb.sig
 
   # ---------------------------------------------------------------------------
   publish:
@@ -203,7 +186,7 @@ jobs:
       RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
       SIGNED: ${{ needs.prepare.outputs.signed }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download release assets
         run: |
@@ -214,6 +197,25 @@ jobs:
             gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$id" > "assets/$name"
           done
           ls -l assets
+
+      - name: Install updater signer
+        if: needs.prepare.outputs.signed == 'true'
+        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
+        with:
+          tool: tauri-cli@2
+
+      - name: Sign and upload updater signatures
+        if: needs.prepare.outputs.signed == 'true'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          for asset in assets/*_x64-setup.exe assets/*_amd64.AppImage assets/*_amd64.deb; do
+            test -s "$asset"
+            cargo tauri signer sign "$asset"
+            test -s "$asset.sig"
+          done
+          gh release upload "$TAG" --clobber -- assets/*.sig
 
       # The notes in latest.json are the draft's notes for now; release-notes.yml replaces them with the final
       # release text when you publish (or later edit) the release, so the in-app "What's new" matches GitHub.

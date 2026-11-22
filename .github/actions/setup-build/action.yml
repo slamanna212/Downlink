@@ -18,15 +18,15 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions-rust-lang/setup-rust-toolchain@v1
+    - uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1
       with:
         target: ${{ inputs.rust-targets }}
         cache-workspaces: ". -> target"
 
-    - uses: pnpm/action-setup@v6
+    - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
       with:
         version: "10"
-    - uses: actions/setup-node@v7
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
       with:
         node-version: "24"
         cache: pnpm
@@ -38,7 +38,7 @@ runs:
     # Prebuilt binary (cargo-binstall from tauri's GitHub releases). `cargo install` compiled it from source on
     # every run: ~10.5 min on windows-latest, ~5 min on Linux.
     - name: Install tauri-cli
-      uses: taiki-e/install-action@v2
+      uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
       with:
         tool: tauri-cli@2
 
