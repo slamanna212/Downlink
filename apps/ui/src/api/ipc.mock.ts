@@ -126,10 +126,10 @@ export function mockNowNext(channelId: number, now = nowSec(), scheduled?: Reado
 /** Synthetic tracks: two audio languages and subtitles including a teletext page. */
 export function mockTracks(): PlayerState['tracks'] {
   return [
-    { id: 1, kind: 'audio', lang: 'eng', title: 'Main', codec: 'ac3', selected: true },
-    { id: 2, kind: 'audio', lang: 'deu', title: null, codec: 'mp2', selected: false },
-    { id: 1, kind: 'sub', lang: 'eng', title: 'Teletext 888', codec: 'dvb_teletext', selected: false },
-    { id: 2, kind: 'sub', lang: 'fra', title: null, codec: 'dvb_subtitle', selected: false },
+    { id: 1, kind: 'audio', lang: 'eng', title: 'Main', codec: 'ac3', channels: '5.1', default: true, selected: true },
+    { id: 2, kind: 'audio', lang: 'deu', title: null, codec: 'mp2', channels: 'stereo', default: false, selected: false },
+    { id: 1, kind: 'sub', lang: 'eng', title: 'Teletext 888', codec: 'dvb_teletext', channels: null, default: false, selected: false },
+    { id: 2, kind: 'sub', lang: 'fra', title: null, codec: 'dvb_subtitle', channels: null, default: false, selected: false },
   ];
 }
 

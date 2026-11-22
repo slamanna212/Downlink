@@ -85,7 +85,30 @@ pub struct Track {
     pub lang: Option<String>,
     pub title: Option<String>,
     pub codec: Option<String>,
+    /// Audio layout ("stereo", "5.1", "6 ch"); audio tracks only.
+    pub channels: Option<String>,
+    /// The container's default-track flag.
+    pub default: bool,
     pub selected: bool,
+}
+
+/// Human layout for an audio track: mpv's `demux-channels` string, else a name from the channel count.
+fn channel_layout(t: &serde_json::Value) -> Option<String> {
+    if let Some(l) = t
+        .get("demux-channels")
+        .and_then(|x| x.as_str())
+        .filter(|l| !l.is_empty())
+    {
+        return Some(l.to_owned());
+    }
+    let n = t.get("demux-channel-count")?.as_i64().filter(|n| *n > 0)?;
+    Some(match n {
+        1 => "mono".to_owned(),
+        2 => "stereo".to_owned(),
+        6 => "5.1".to_owned(),
+        8 => "7.1".to_owned(),
+        n => format!("{n} ch"),
+    })
 }
 
 /// Parse mpv's `track-list` JSON.
@@ -105,6 +128,8 @@ pub fn parse_tracks(json: &str) -> Vec<Track> {
                 lang: str_of("lang"),
                 title: str_of("title"),
                 codec: str_of("codec"),
+                channels: channel_layout(t),
+                default: t.get("default").and_then(|x| x.as_bool()).unwrap_or(false),
                 selected: t.get("selected").and_then(|x| x.as_bool()).unwrap_or(false),
             })
         })
@@ -1745,6 +1770,21 @@ mod tests {
         assert_eq!(t[1].lang.as_deref(), Some("eng"));
         assert!(!t[2].selected);
         assert!(parse_tracks("not json").is_empty());
+    }
+
+    #[test]
+    fn audio_tracks_carry_channels_and_default_flag() {
+        let j = r#"[{"id":1,"type":"audio","lang":"eng","codec":"ac3","default":true,"selected":true,"demux-channels":"5.1(side)","demux-channel-count":6},
+                    {"id":2,"type":"audio","lang":"spa","codec":"aac","demux-channel-count":2},
+                    {"id":3,"type":"audio","demux-channel-count":0},
+                    {"id":4,"type":"audio","demux-channel-count":3}]"#;
+        let t = parse_tracks(j);
+        assert_eq!(t[0].channels.as_deref(), Some("5.1(side)"));
+        assert!(t[0].default && t[0].selected);
+        assert_eq!(t[1].channels.as_deref(), Some("stereo"));
+        assert!(!t[1].default);
+        assert_eq!(t[2].channels, None);
+        assert_eq!(t[3].channels.as_deref(), Some("3 ch"));
     }
 
     #[test]

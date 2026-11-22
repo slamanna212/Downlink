@@ -174,6 +174,9 @@ export interface Track {
   lang: string | null;
   title: string | null;
   codec: string | null;
+  /** Audio layout such as "stereo" or "5.1"; audio tracks only. */
+  channels: string | null;
+  default: boolean;
   selected: boolean;
 }
 

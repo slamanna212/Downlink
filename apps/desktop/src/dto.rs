@@ -105,6 +105,8 @@ pub struct TrackDto {
     pub lang: Option<String>,
     pub title: Option<String>,
     pub codec: Option<String>,
+    pub channels: Option<String>,
+    pub default: bool,
     pub selected: bool,
 }
 
@@ -123,6 +125,8 @@ pub fn track_dtos(tracks: &[downlink_player::Track]) -> Vec<TrackDto> {
                 lang: t.lang.clone(),
                 title: t.title.clone(),
                 codec: t.codec.clone(),
+                channels: t.channels.clone(),
+                default: t.default,
                 selected: t.selected,
             })
         })
