@@ -2,12 +2,12 @@
 //! memory), parsed streaming, `type="playlist"` includes merged to depth 2 with cycle detection.
 
 use std::collections::HashSet;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use tempfile::NamedTempFile;
+use tokio::io::AsyncWriteExt;
 
 use super::{M3uEntry, ParseStats, Playlist, parse};
 use crate::error::{AppError, Result};
@@ -152,17 +152,29 @@ async fn download(mut resp: reqwest::Response) -> Result<Fetched> {
             "that playlist",
         ));
     }
-    let mut tmp = NamedTempFile::new()?;
-    let mut total: u64 = 0;
-    while let Some(chunk) = resp.chunk().await? {
-        total += chunk.len() as u64;
-        if total > MAX_DOWNLOAD {
-            return Err(AppError::server("That file is too large to import."));
-        }
-        tmp.write_all(&chunk)?;
+    let too_large = || AppError::server("That file is too large to import.");
+    if resp.content_length().is_some_and(|len| len > MAX_DOWNLOAD) {
+        return Err(too_large());
     }
-    tmp.flush()?;
-    Ok(Fetched::Temp(tmp))
+    let tmp = tokio::task::spawn_blocking(NamedTempFile::new)
+        .await
+        .map_err(|_| AppError::local("Creating the download file was interrupted."))??;
+    let (file, path) = tmp.into_parts();
+    let mut file = tokio::fs::File::from_std(file);
+    let mut remaining = MAX_DOWNLOAD;
+    while let Some(chunk) = resp.chunk().await? {
+        let len = chunk.len() as u64;
+        if len > remaining {
+            return Err(too_large());
+        }
+        remaining -= len;
+        file.write_all(&chunk).await?;
+    }
+    file.flush().await?;
+    Ok(Fetched::Temp(NamedTempFile::from_parts(
+        file.into_std().await,
+        path,
+    )))
 }
 
 #[async_trait]
