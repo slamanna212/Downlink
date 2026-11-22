@@ -57,9 +57,53 @@ impl Fetched {
     }
 }
 
+/// HTTP cache validators from a previous download, to ask "has it changed?" next time. Keyed by a
+/// hash of the URL, never the URL itself (feed URLs can carry credentials and this is persisted).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Validators {
+    pub url_hash: String,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+impl Validators {
+    /// Validators with nothing to send: the next request downloads unconditionally.
+    pub fn for_url(url: &str) -> Self {
+        Self {
+            url_hash: url_hash(url),
+            ..Default::default()
+        }
+    }
+}
+
+/// Hex SHA-256 of a URL: identifies it without storing it.
+pub fn url_hash(url: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(url.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The outcome of a conditional download.
+pub enum Conditional {
+    /// The server confirmed the copy we already have is current (HTTP 304).
+    NotModified,
+    Fetched(Fetched, Validators),
+}
+
 #[async_trait]
 pub trait Fetcher: Send + Sync {
     async fn fetch(&self, url: &str) -> Result<Fetched>;
+
+    /// Download unless `prev` (for this same URL) shows the server's copy is unchanged. The
+    /// default always downloads.
+    async fn fetch_if_changed(&self, url: &str, _prev: Option<&Validators>) -> Result<Conditional> {
+        Ok(Conditional::Fetched(
+            self.fetch(url).await?,
+            Validators::for_url(url),
+        ))
+    }
 }
 
 /// Plain HTTP(S) download. No auth headers: playlist/EPG URLs carry their own credentials, and
@@ -80,29 +124,63 @@ impl HttpFetcher {
     }
 }
 
+/// Stream a successful response body to a temp file, bounded by `MAX_DOWNLOAD`.
+async fn download(mut resp: reqwest::Response) -> Result<Fetched> {
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(AppError::from_status(
+            status.as_u16(),
+            None,
+            "that playlist",
+        ));
+    }
+    let mut tmp = NamedTempFile::new()?;
+    let mut total: u64 = 0;
+    while let Some(chunk) = resp.chunk().await? {
+        total += chunk.len() as u64;
+        if total > MAX_DOWNLOAD {
+            return Err(AppError::server("That file is too large to import."));
+        }
+        tmp.write_all(&chunk)?;
+    }
+    tmp.flush()?;
+    Ok(Fetched::Temp(tmp))
+}
+
 #[async_trait]
 impl Fetcher for HttpFetcher {
     async fn fetch(&self, url: &str) -> Result<Fetched> {
-        let mut resp = self.client.get(url).send().await?;
-        let status = resp.status();
-        if !status.is_success() {
-            return Err(AppError::from_status(
-                status.as_u16(),
-                None,
-                "that playlist",
-            ));
-        }
-        let mut tmp = NamedTempFile::new()?;
-        let mut total: u64 = 0;
-        while let Some(chunk) = resp.chunk().await? {
-            total += chunk.len() as u64;
-            if total > MAX_DOWNLOAD {
-                return Err(AppError::server("That file is too large to import."));
+        download(self.client.get(url).send().await?).await
+    }
+
+    async fn fetch_if_changed(&self, url: &str, prev: Option<&Validators>) -> Result<Conditional> {
+        use reqwest::header::{ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED};
+        let hash = url_hash(url);
+        let mut req = self.client.get(url);
+        if let Some(p) = prev.filter(|p| p.url_hash == hash) {
+            if let Some(e) = &p.etag {
+                req = req.header(IF_NONE_MATCH, e);
             }
-            tmp.write_all(&chunk)?;
+            if let Some(m) = &p.last_modified {
+                req = req.header(IF_MODIFIED_SINCE, m);
+            }
         }
-        tmp.flush()?;
-        Ok(Fetched::Temp(tmp))
+        let resp = req.send().await?;
+        if resp.status() == reqwest::StatusCode::NOT_MODIFIED {
+            return Ok(Conditional::NotModified);
+        }
+        let header = |n| {
+            resp.headers()
+                .get(n)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        };
+        let validators = Validators {
+            url_hash: hash,
+            etag: header(ETAG),
+            last_modified: header(LAST_MODIFIED),
+        };
+        Ok(Conditional::Fetched(download(resp).await?, validators))
     }
 }
 

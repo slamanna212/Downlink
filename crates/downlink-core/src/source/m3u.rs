@@ -273,7 +273,10 @@ impl Source for M3uSource {
         Ok(Vec::new()) // the guide comes from `guide_feed` (XMLTV)
     }
 
-    async fn guide_feed(&self) -> Result<Option<GuideFeed>> {
+    async fn guide_feed(
+        &self,
+        prev: Option<&crate::m3u::load::Validators>,
+    ) -> Result<Option<GuideFeed>> {
         let urls: Vec<String> = if self.xmltv.is_empty() {
             self.playlist(false).await?.header.tvg_urls.clone()
         } else {
@@ -281,14 +284,20 @@ impl Source for M3uSource {
         };
         let mut last_err = None;
         for u in urls {
+            use crate::m3u::load::{Conditional, Fetched, Validators};
             let got = match Location::parse(&u) {
-                Ok(Location::File(p)) => Ok(crate::m3u::load::Fetched::Local(p)),
-                _ => self.fetcher.fetch(&u).await,
+                Ok(Location::File(p)) => Ok((Some(Fetched::Local(p)), Validators::for_url(&u))),
+                _ => match self.fetcher.fetch_if_changed(&u, prev).await {
+                    Ok(Conditional::NotModified) => Ok((None, prev.cloned().unwrap_or_default())),
+                    Ok(Conditional::Fetched(f, v)) => Ok((Some(f), v)),
+                    Err(e) => Err(e),
+                },
             };
             match got {
-                Ok(file) => {
+                Ok((file, validators)) => {
                     return Ok(Some(GuideFeed {
                         file,
+                        validators,
                         default_tz: None,
                     }));
                 }

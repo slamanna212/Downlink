@@ -174,6 +174,7 @@ export function createMockBackend(): Backend {
   let settings: AppSettings = {
     liveBufferSecs: 2, timeshiftMinutes: 60, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
     deinterlace: 'auto', hdrOutput: 'auto', subtitleSize: 100, subtitleBackground: true, resumeLastChannel: false,
+    autoRefreshHours: 4, refreshDuringPlayback: true,
   };
   let plex: PlexStatus = { signedIn: false, accountName: null, serverId: null, serverName: null };
   let plexPinChecks = 0;

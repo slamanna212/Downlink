@@ -995,3 +995,164 @@ async fn m3u_tvg_shift_header_and_entry_become_per_channel_seconds() {
         ]
     );
 }
+
+// ---- guide feed caching ---------------------------------------------------------------------------
+
+fn guide_xml(extra_title: &str) -> String {
+    let now = downlink_core::sync::now_utc();
+    let t = |o: i64| {
+        chrono::DateTime::from_timestamp(now + o, 0)
+            .unwrap()
+            .format("%Y%m%d%H%M%S +0000")
+            .to_string()
+    };
+    format!(
+        "<tv><channel id=\"one.test\"><display-name>Channel One</display-name></channel>\
+<programme start=\"{}\" stop=\"{}\" channel=\"one.test\"><title>{extra_title}</title></programme></tv>",
+        t(-600),
+        t(3000)
+    )
+}
+
+async fn programme_count(e: &Env) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM programme")
+        .fetch_one(e.svc.store().pool())
+        .await
+        .unwrap()
+}
+
+async fn add_m3u(server: &MockServer, e: &Env) -> i64 {
+    e.svc
+        .add_source(m3u_input(
+            &format!("{}/get.php", server.uri()),
+            Some(&format!("{}/epg.xml", server.uri())),
+        ))
+        .await
+        .unwrap()
+        .id
+}
+
+/// A feed the server says is unchanged (ETag -> 304) is neither downloaded nor re-imported.
+#[tokio::test]
+async fn unchanged_guide_feed_is_not_downloaded_again() {
+    let server = MockServer::start().await;
+    serve_text(&server, "/get.php", fx_text("m3u/basic.m3u")).await;
+    Mock::given(method("GET"))
+        .and(path("/epg.xml"))
+        .and(wiremock::matchers::header("if-none-match", "\"v1\""))
+        .respond_with(ResponseTemplate::new(304))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/epg.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("etag", "\"v1\"")
+                .set_body_string(guide_xml("Now On One")),
+        )
+        .mount(&server)
+        .await;
+    let e = env().await;
+    let sid = add_m3u(&server, &e).await;
+    assert_eq!(programme_count(&e).await, 1);
+    e.svc.sync_source(sid).await.unwrap();
+    let epg: Vec<_> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|r| r.url.path() == "/epg.xml")
+        .collect();
+    assert_eq!(epg.len(), 2);
+    assert!(epg[0].headers.get("if-none-match").is_none());
+    assert_eq!(
+        epg[1]
+            .headers
+            .get("if-none-match")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "\"v1\"",
+        "the second sync asks whether the feed changed"
+    );
+    assert_eq!(programme_count(&e).await, 1, "the guide is kept");
+    // No credentials or URLs are persisted with the validators.
+    let kv: Vec<String> =
+        sqlx::query_scalar("SELECT value FROM app_kv WHERE key LIKE 'guide_feed.%'")
+            .fetch_all(e.svc.store().pool())
+            .await
+            .unwrap();
+    assert_eq!(kv.len(), 1);
+    assert!(
+        !kv[0].contains("epg.xml") && !kv[0].contains("http"),
+        "{}",
+        kv[0]
+    );
+}
+
+/// Without validators, identical content is still recognised and the import skipped; changed
+/// content imports again.
+#[tokio::test]
+async fn identical_guide_content_skips_the_import_until_the_feed_changes() {
+    let server = MockServer::start().await;
+    serve_text(&server, "/get.php", fx_text("m3u/basic.m3u")).await;
+    serve_text(&server, "/epg.xml", guide_xml("Now On One")).await;
+    let e = env().await;
+    let sid = add_m3u(&server, &e).await;
+    assert_eq!(programme_count(&e).await, 1);
+
+    // Same bytes: the import is skipped (a deleted row is not written back).
+    sqlx::query("DELETE FROM programme")
+        .execute(e.svc.store().pool())
+        .await
+        .unwrap();
+    e.svc.sync_source(sid).await.unwrap();
+    assert_eq!(
+        programme_count(&e).await,
+        0,
+        "unchanged feed: import skipped"
+    );
+
+    // New content: imported.
+    server.reset().await;
+    serve_text(&server, "/get.php", fx_text("m3u/basic.m3u")).await;
+    serve_text(&server, "/epg.xml", guide_xml("Something New")).await;
+    e.svc.sync_source(sid).await.unwrap();
+    assert_eq!(programme_count(&e).await, 1, "changed feed: imported");
+}
+
+/// The same feed with changed matching inputs (channels or remaps) is imported again.
+#[tokio::test]
+async fn changed_channel_list_reimports_an_unchanged_guide() {
+    let server = MockServer::start().await;
+    serve_text(&server, "/get.php", fx_text("m3u/basic.m3u")).await;
+    serve_text(&server, "/epg.xml", guide_xml("Now On One")).await;
+    let e = env().await;
+    let sid = add_m3u(&server, &e).await;
+    sqlx::query("DELETE FROM programme")
+        .execute(e.svc.store().pool())
+        .await
+        .unwrap();
+    // The user points the unmatched channel at the feed's channel (a remap survives syncs).
+    let ext: String = sqlx::query_scalar(
+        "SELECT ext_id FROM channel WHERE source_id = ? AND name = 'No Group, No Id'",
+    )
+    .bind(sid)
+    .fetch_one(e.svc.store().pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO epg_remap (source_id, channel_ext_id, xmltv_id) VALUES (?, ?, 'one.test')",
+    )
+    .bind(sid)
+    .bind(&ext)
+    .execute(e.svc.store().pool())
+    .await
+    .unwrap();
+    e.svc.sync_source(sid).await.unwrap();
+    assert!(
+        programme_count(&e).await >= 1,
+        "channel inputs changed: imported"
+    );
+}

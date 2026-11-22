@@ -86,6 +86,48 @@ function SourceRow({ source, onRemove }: { source: Source; onRemove: (s: Source)
   );
 }
 
+const REFRESH_HOURS = [0, 1, 2, 4, 6, 12, 24];
+const DEFAULT_REFRESH_HOURS = 4;
+
+function refreshLabel(hours: number): string {
+  if (hours === 0) return t('settings.autoRefresh.off');
+  return hours === 1 ? t('settings.autoRefresh.every1') : t('settings.autoRefresh.everyN', { n: hours });
+}
+
+/** Background refresh interval and whether it may run during playback (machine-local settings). */
+function AutoRefreshRows() {
+  const { data } = useSettings();
+  const patch = useSettingsPatch();
+  if (!data) return null;
+  const hours = data.autoRefreshHours ?? DEFAULT_REFRESH_HOURS;
+  const options = (REFRESH_HOURS.includes(hours) ? REFRESH_HOURS : [...REFRESH_HOURS, hours].sort((a, b) => a - b)).map((h) => ({
+    value: String(h),
+    label: refreshLabel(h),
+  }));
+  return (
+    <>
+      <SettingRow label={t('settings.autoRefresh')} help={t('settings.autoRefresh.help')}>
+        <Select
+          w="100%"
+          aria-label={t('settings.autoRefresh')}
+          data={options}
+          value={String(hours)}
+          allowDeselect={false}
+          onChange={(v) => v !== null && patch.mutate({ autoRefreshHours: Number(v) })}
+        />
+      </SettingRow>
+      <SettingRow label={t('settings.refreshDuringPlayback')} help={t('settings.refreshDuringPlayback.help')} wide>
+        <Switch
+          aria-label={t('settings.refreshDuringPlayback')}
+          checked={data.refreshDuringPlayback ?? true}
+          disabled={hours === 0}
+          onChange={(e) => patch.mutate({ refreshDuringPlayback: e.currentTarget.checked })}
+        />
+      </SettingRow>
+    </>
+  );
+}
+
 function SourcesSection() {
   const qc = useQueryClient();
   const { data, isLoading } = useSources();
@@ -106,6 +148,7 @@ function SourcesSection() {
       {isLoading ? <SkeletonList rows={2} label={t('loading.generic')} /> : (data ?? []).map((s) => (
         <SourceRow key={s.id} source={s} onRemove={setRemoving} />
       ))}
+      <AutoRefreshRows />
       <Modal opened={!!removing} onClose={() => setRemoving(null)} title={t('settings.sources.removeAction')}>
         <Text size="md" mb="lg">{removing ? t('settings.sources.removeConfirm', { name: removing.name }) : ''}</Text>
         <div className={`${classes.actions} ${classes.end}`}>

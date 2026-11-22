@@ -301,6 +301,10 @@ export interface AppSettings {
   subtitleBackground: boolean;
   /** Open the player on the most recently watched channel at launch (off by default). */
   resumeLastChannel: boolean;
+  /** Hours between background refreshes of every source, 0 = off (0..24, default 4). */
+  autoRefreshHours?: number;
+  /** Background refreshes may run while something is playing (default on). */
+  refreshDuringPlayback?: boolean;
 }
 
 /** Graphics features the player can use on this machine. */

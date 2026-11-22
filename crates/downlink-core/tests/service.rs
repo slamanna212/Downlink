@@ -1119,6 +1119,208 @@ async fn status_is_connecting_until_probed_then_connected_offline_or_auth_error(
     );
 }
 
+fn relaunch(e: &Env, dir: &tempfile::TempDir, name: &str) -> Arc<Service> {
+    Service::with_store(
+        e.svc.store().clone(),
+        e.secrets.clone(),
+        dir.path().join(name),
+        "t".into(),
+    )
+}
+
+async fn age_last_sync(e: &Env, sid: i64, hours: i64) {
+    sqlx::query("UPDATE source SET last_sync_at = last_sync_at - ? WHERE id = ?")
+        .bind(hours * 3600)
+        .bind(sid)
+        .execute(e.svc.store().pool())
+        .await
+        .unwrap();
+}
+
+async fn status_of(s: &Service) -> Value {
+    serde_json::to_value(&s.list_sources().await.unwrap()[0]).unwrap()["status"].clone()
+}
+
+/// Launch with old data: the source is refreshed straight away instead of being shown as stale.
+#[tokio::test]
+async fn launch_refreshes_old_data_instead_of_showing_stale() {
+    let (server, e, sid) = added().await;
+    age_last_sync(&e, sid, 24).await;
+    let dir = tempfile::tempdir().unwrap();
+    let relaunched = relaunch(&e, &dir, "img");
+    let before = server.received_requests().await.unwrap().len();
+    relaunched.probe_sources().await.unwrap();
+    assert_eq!(status_of(&relaunched).await, "connected");
+    let fetched_channels = server.received_requests().await.unwrap()[before..]
+        .iter()
+        .any(|r| r.url.path() == "/api/channels/channels/");
+    assert!(fetched_channels, "old data triggers a sync at launch");
+    let row = &relaunched.list_sources().await.unwrap()[0];
+    assert!(row.last_sync_at.unwrap() > downlink_core::sync::now_utc() - 60);
+}
+
+/// Fresh data at launch: probe only, no sync.
+#[tokio::test]
+async fn launch_with_fresh_data_does_not_resync() {
+    let (server, e, _sid) = added().await;
+    let dir = tempfile::tempdir().unwrap();
+    let relaunched = relaunch(&e, &dir, "img");
+    let before = server.received_requests().await.unwrap().len();
+    relaunched.probe_sources().await.unwrap();
+    relaunched.auto_refresh(false).await.unwrap();
+    let new: Vec<String> = server.received_requests().await.unwrap()[before..]
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    assert_eq!(new, ["/api/accounts/users/me/"], "{new:?}");
+}
+
+/// The stale warning only shows when the refresh itself fails.
+#[tokio::test]
+async fn stale_shows_only_when_the_auto_refresh_fails() {
+    let (server, e, sid) = added().await;
+    age_last_sync(&e, sid, 24).await;
+    // Identity works, the channel list does not: probe passes, the sync fails (not network/auth).
+    server.reset().await;
+    get(&server, "/api/accounts/users/me/", fixture!("me.json")).await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let dir = tempfile::tempdir().unwrap();
+    let relaunched = relaunch(&e, &dir, "img");
+    relaunched.probe_sources().await.unwrap();
+    let s = status_of(&relaunched).await;
+    assert!(s == "stale" || s == "offline", "{s}");
+    // The next tick retries; once the server is back the source recovers by itself.
+    server.reset().await;
+    mount_server(&server).await;
+    relaunched.auto_refresh(false).await.unwrap();
+    assert_eq!(status_of(&relaunched).await, "connected");
+}
+
+/// The periodic tick syncs a source whose data aged past the threshold while the app ran.
+#[tokio::test]
+async fn auto_refresh_syncs_sources_that_aged_while_running() {
+    let (server, e, sid) = added().await;
+    age_last_sync(&e, sid, 4).await;
+    let before = server.received_requests().await.unwrap().len();
+    e.svc.auto_refresh(false).await.unwrap();
+    let synced = server.received_requests().await.unwrap()[before..]
+        .iter()
+        .any(|r| r.url.path() == "/api/channels/channels/");
+    assert!(synced);
+    assert_eq!(status_of(&e.svc).await, "connected");
+}
+
+/// `autoRefreshHours` 0 turns auto refresh off: no launch sync, and old data shows as stale.
+#[tokio::test]
+async fn auto_refresh_off_leaves_old_data_stale() {
+    let (server, e, sid) = added().await;
+    e.svc
+        .set_settings(json!({"autoRefreshHours": 0}))
+        .await
+        .unwrap();
+    age_last_sync(&e, sid, 24).await;
+    let dir = tempfile::tempdir().unwrap();
+    let relaunched = relaunch(&e, &dir, "img");
+    let before = server.received_requests().await.unwrap().len();
+    relaunched.probe_sources().await.unwrap();
+    relaunched.auto_refresh(false).await.unwrap();
+    let new: Vec<String> = server.received_requests().await.unwrap()[before..]
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    assert_eq!(new, ["/api/accounts/users/me/"], "{new:?}");
+    assert_eq!(status_of(&relaunched).await, "stale");
+}
+
+/// The interval setting decides when data is due, and is clamped to 0..=24 hours.
+#[tokio::test]
+async fn auto_refresh_interval_setting_is_respected_and_clamped() {
+    let (server, e, sid) = added().await;
+    let v = e
+        .svc
+        .set_settings(json!({"autoRefreshHours": 99}))
+        .await
+        .unwrap();
+    assert_eq!(v["autoRefreshHours"], 24);
+    let d = e.svc.get_settings().await.unwrap();
+    assert_eq!(d["refreshDuringPlayback"], true, "default on");
+    e.svc
+        .set_settings(json!({"autoRefreshHours": 12}))
+        .await
+        .unwrap();
+    age_last_sync(&e, sid, 6).await;
+    let before = server.received_requests().await.unwrap().len();
+    e.svc.auto_refresh(false).await.unwrap();
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        before,
+        "6 h old is not due on a 12 h interval"
+    );
+    assert_eq!(
+        status_of(&e.svc).await,
+        "connected",
+        "age alone is not stale"
+    );
+    age_last_sync(&e, sid, 7).await;
+    e.svc.auto_refresh(false).await.unwrap();
+    assert!(server.received_requests().await.unwrap().len() > before);
+}
+
+/// `refreshDuringPlayback` off: nothing is synced while playing; the next idle tick catches up.
+#[tokio::test]
+async fn refresh_waits_for_playback_to_end_when_that_setting_is_off() {
+    let (server, e, sid) = added().await;
+    e.svc
+        .set_settings(json!({"refreshDuringPlayback": false}))
+        .await
+        .unwrap();
+    age_last_sync(&e, sid, 24).await;
+    let before = server.received_requests().await.unwrap().len();
+    e.svc.auto_refresh(true).await.unwrap();
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+    e.svc.auto_refresh(false).await.unwrap();
+    assert!(server.received_requests().await.unwrap().len() > before);
+    // Default (on): playing does not hold the refresh back.
+    e.svc
+        .set_settings(json!({"refreshDuringPlayback": true}))
+        .await
+        .unwrap();
+    age_last_sync(&e, sid, 24).await;
+    let before = server.received_requests().await.unwrap().len();
+    e.svc.auto_refresh(true).await.unwrap();
+    assert!(server.received_requests().await.unwrap().len() > before);
+}
+
+/// Dispatcharr sync fills the guide ahead to 7 days, not just the visible 12 h window.
+#[tokio::test]
+async fn dispatcharr_sync_fills_the_guide_seven_days_ahead() {
+    let (server, _e, _sid) = added().await;
+    let now = downlink_core::sync::now_utc();
+    let ends: Vec<i64> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path() == "/api/epg/grid/")
+        .filter_map(|r| {
+            r.url
+                .query_pairs()
+                .find(|(k, _)| k == "end")
+                .and_then(|(_, v)| chrono::DateTime::parse_from_rfc3339(&v).ok())
+                .map(|d| d.timestamp())
+        })
+        .collect();
+    let furthest = ends.iter().copied().max().unwrap();
+    assert!(
+        furthest >= now + 7 * 86_400 - 120,
+        "furthest window ends {} h ahead",
+        (furthest - now) / 3600
+    );
+}
+
 /// Stream picker (PLAN §3.4, D18): an admin account switches the live channel to a chosen stream
 /// through `change_stream`, and the reported position follows.
 #[tokio::test]

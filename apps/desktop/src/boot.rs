@@ -110,9 +110,10 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
             }
         });
     }
-    // Crash recovery (rule 6) and the reachability probe.
+    // Crash recovery (rule 6), the reachability probe, then background refresh.
     {
         let s = service.clone();
+        let h_refresh = handle.clone();
         tauri::async_runtime::spawn(async move {
             match s.startup_cleanup().await {
                 Ok(r) if r.stopped + r.failed > 0 => {
@@ -127,6 +128,18 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
             }
             if let Err(e) = s.probe_sources().await {
                 tracing::warn!("source probe failed: {}", e.message);
+            }
+            // Background refresh: a cheap DB check every few minutes; a source is only synced
+            // once its data is older than the `autoRefreshHours` setting (or it was offline and
+            // may be back). `refreshDuringPlayback` off defers it while something plays.
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(5 * 60));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            tick.tick().await; // the first tick is immediate; launch already refreshed
+            loop {
+                tick.tick().await;
+                if let Err(e) = s.auto_refresh(is_playing(&h_refresh)).await {
+                    tracing::warn!("auto refresh failed: {}", e.message);
+                }
             }
         });
     }
@@ -320,4 +333,18 @@ fn media_session(app: &AppHandle, sink_ctx: &SinkContext) {
         }
         Err(e) => tracing::warn!("media controls unavailable: {e}"),
     }
+}
+
+/// Whether the main player is showing something (multiview tiles only exist alongside it).
+fn is_playing(handle: &AppHandle) -> bool {
+    use downlink_player::SessionState::*;
+    handle
+        .try_state::<crate::state::AppState>()
+        .and_then(|st| st.try_playback())
+        .is_some_and(|pb| {
+            matches!(
+                pb.snapshot().state,
+                Some(Resolving | Connecting | Buffering | Playing)
+            )
+        })
 }

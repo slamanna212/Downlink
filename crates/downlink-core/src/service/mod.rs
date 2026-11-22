@@ -61,6 +61,71 @@ fn display_url(u: &str) -> String {
         Err(_) => String::new(),
     }
 }
+/// Whether a source last synced at `last_sync_at` is due a background refresh every
+/// `interval_secs` (0 = auto refresh off: never due).
+fn sync_due(last_sync_at: Option<i64>, now: i64, interval_secs: i64) -> bool {
+    interval_secs > 0 && last_sync_at.is_none_or(|t| now - t >= interval_secs)
+}
+
+/// The auto refresh settings, read from the settings object.
+#[derive(Debug, Clone, Copy)]
+struct RefreshPrefs {
+    interval_secs: i64,
+    during_playback: bool,
+}
+
+impl RefreshPrefs {
+    fn from_settings(v: &Value) -> Self {
+        let hours = v
+            .get(SET_AUTO_REFRESH_HOURS)
+            .and_then(Value::as_i64)
+            .unwrap_or(DEFAULT_AUTO_REFRESH_HOURS)
+            .clamp(0, MAX_AUTO_REFRESH_HOURS);
+        Self {
+            interval_secs: hours * 3600,
+            during_playback: v
+                .get(SET_REFRESH_DURING_PLAYBACK)
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        }
+    }
+}
+
+/// What the last XMLTV import of a source was built from, to skip re-importing an unchanged feed.
+/// No URLs or credentials: validators are keyed by a URL hash.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct GuideFeedState {
+    validators: crate::m3u::load::Validators,
+    content_hash: String,
+    inputs_hash: String,
+    ingested_at: i64,
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Streaming SHA-256 of a file (decompression not needed: identical bytes, identical feed).
+async fn file_sha256(path: PathBuf) -> Result<String> {
+    tokio::task::spawn_blocking(move || -> Result<String> {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        let mut f = std::fs::File::open(&path)?;
+        let mut h = Sha256::new();
+        let mut buf = vec![0u8; 256 * 1024];
+        loop {
+            let n = f.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            h.update(&buf[..n]);
+        }
+        Ok(hex(&h.finalize()))
+    })
+    .await
+    .map_err(|_| AppError::local("Reading the guide was interrupted."))?
+}
+
 pub use logtail::LogTail;
 pub use media::{RecordingPlay, VodPlay};
 pub use mediaserver::{
@@ -70,8 +135,19 @@ pub use mediaserver::{
 const SETTINGS_KEY: &str = "settings";
 const PREF_ADULT: &str = "pref.include_adult";
 const PREF_RADIO: &str = "pref.include_radio";
-/// Sources not synced for this long show as stale.
+/// With auto refresh off, sources not synced for this long show as stale. With it on, age alone
+/// never makes a source stale: only a failed refresh does.
 const STALE_AFTER_SECS: i64 = 6 * 3600;
+/// Setting: hours between background refreshes (0 = off). Default and allowed range.
+const SET_AUTO_REFRESH_HOURS: &str = "autoRefreshHours";
+const DEFAULT_AUTO_REFRESH_HOURS: i64 = 4;
+const MAX_AUTO_REFRESH_HOURS: i64 = 24;
+/// Setting: whether background refreshes may run while something is playing (default on).
+const SET_REFRESH_DURING_PLAYBACK: &str = "refreshDuringPlayback";
+/// Per-source state of the last XMLTV download/import (`GuideFeedState`), in the kv table.
+const GUIDE_FEED_KEY_PREFIX: &str = "guide_feed.";
+/// An unchanged XMLTV feed is still fully re-imported this often (retention pruning).
+const GUIDE_REINGEST_SECS: i64 = 24 * 3600;
 
 pub struct ServiceConfig {
     /// Directory for the database and the image cache.
@@ -89,6 +165,10 @@ pub struct Service {
     /// The same Dispatcharr clients, concretely (auth headers for play plans).
     dispatcharr: RwLock<HashMap<i64, Arc<DispatcharrClient>>>,
     status: Mutex<HashMap<i64, SourceStatus>>,
+    /// One sync at a time per source: a manual sync during an auto refresh waits for it.
+    sync_locks: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
+    /// Auto refresh interval in seconds (0 = off), cached from settings for `status_of`.
+    auto_refresh_secs: std::sync::atomic::AtomicI64,
     registered_logos: Mutex<HashSet<String>>,
     /// Failover position (0-based) believed to be in use, per channel row id.
     current_stream: Mutex<HashMap<i64, usize>>,
@@ -140,6 +220,8 @@ impl Service {
             clients: RwLock::new(HashMap::new()),
             dispatcharr: RwLock::new(HashMap::new()),
             status: Mutex::new(HashMap::new()),
+            sync_locks: Mutex::new(HashMap::new()),
+            auto_refresh_secs: std::sync::atomic::AtomicI64::new(DEFAULT_AUTO_REFRESH_HOURS * 3600),
             registered_logos: Mutex::new(HashSet::new()),
             current_stream: Mutex::new(HashMap::new()),
             live_hls: Mutex::new(None),
@@ -195,6 +277,15 @@ impl Service {
             .and_then(|g| g.get(&row.id).copied())
         {
             None => SourceStatus::Connecting,
+            // Auto refresh on: a failed refresh says stale, age alone does not.
+            Some(SourceStatus::Connected)
+                if self
+                    .auto_refresh_secs
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    > 0 =>
+            {
+                SourceStatus::Connected
+            }
             Some(SourceStatus::Connected) => match row.last_sync_at {
                 Some(t) if now_utc() - t <= STALE_AFTER_SECS => SourceStatus::Connected,
                 _ => SourceStatus::Stale,
@@ -470,9 +561,11 @@ impl Service {
         let info = c.connect().await?;
         let groups = c.groups().await?;
         let (channels, _) = all_channels(c.as_ref(), 500).await?;
-        let programmes = match c.guide_feed().await {
-            Ok(Some(feed)) => {
-                let path = feed.file.path().to_path_buf();
+        let programmes = match c.guide_feed(None).await {
+            Ok(Some(crate::source::GuideFeed {
+                file: Some(file), ..
+            })) => {
+                let path = file.path().to_path_buf();
                 tokio::task::spawn_blocking(move || {
                     crate::xmltv::parse_programmes(&path, chrono_tz::Tz::UTC, |_| {})
                         .map(|s| s.programmes as usize)
@@ -487,7 +580,8 @@ impl Service {
                 .await
                 .map(|p| p.len())
                 .unwrap_or(0),
-            Err(_) => 0,
+            // No validators were sent, so a 304 cannot happen here.
+            Ok(Some(_)) | Err(_) => 0,
         };
         Ok(TestSourceResult {
             channels: crate::catalog::visible_count(&channels),
@@ -679,17 +773,68 @@ impl Service {
     }
 
     /// Probe every source concurrently (call once at startup, after `list_sources` has shown
-    /// `connecting`). Emits `catalog://updated` per source so the UI refetches the statuses.
+    /// `connecting`). A reachable source whose data is old is synced straight away, so it goes
+    /// `connecting` -> `syncing` -> `connected` and never shows as stale unless that sync fails.
+    /// Emits `catalog://updated` per source so the UI refetches the statuses.
     pub async fn probe_sources(&self) -> Result<()> {
+        let prefs = self.refresh_prefs().await?;
         let rows = self.store.list_sources().await?;
         let probes = rows.iter().map(|r| async move {
-            let _ = self.probe_source(r.id).await;
-            if let Ok(c) = self.counts(r.id, CatalogChange::Status).await {
-                self.emit(Event::CatalogUpdated(c));
+            let probed = self.probe_source(r.id).await;
+            if matches!(probed, Ok(SourceStatus::Connected))
+                && sync_due(r.last_sync_at, now_utc(), prefs.interval_secs)
+            {
+                if let Err(e) = self.sync_source(r.id).await {
+                    tracing::warn!(source_id = r.id, error = %e, "launch refresh failed");
+                }
+                return; // sync_source emitted the outcome
             }
+            self.emit_status(r.id).await;
         });
         futures_util::future::join_all(probes).await;
         Ok(())
+    }
+
+    /// Periodic background refresh: sync every source whose data is older than the
+    /// `autoRefreshHours` setting, one at a time. Offline sources are retried here too, so they
+    /// recover on their own; `auth_error` waits for the user, and sources still being probed or
+    /// synced are left alone. `playing`: something is on screen; with `refreshDuringPlayback`
+    /// off the refresh waits for a later tick.
+    pub async fn auto_refresh(&self, playing: bool) -> Result<()> {
+        let prefs = self.refresh_prefs().await?;
+        if prefs.interval_secs == 0 || (playing && !prefs.during_playback) {
+            return Ok(());
+        }
+        let now = now_utc();
+        for r in self.store.list_sources().await? {
+            let status = self.status.lock().ok().and_then(|g| g.get(&r.id).copied());
+            let eligible = matches!(
+                status,
+                Some(SourceStatus::Connected | SourceStatus::Offline | SourceStatus::Stale)
+            );
+            if !eligible || !sync_due(r.last_sync_at, now, prefs.interval_secs) {
+                continue;
+            }
+            tracing::info!(source_id = r.id, "auto refresh");
+            if let Err(e) = self.sync_source(r.id).await {
+                tracing::warn!(source_id = r.id, error = %e, "auto refresh failed");
+            }
+        }
+        Ok(())
+    }
+
+    /// Current auto refresh settings; also refreshes the cached interval `status_of` uses.
+    async fn refresh_prefs(&self) -> Result<RefreshPrefs> {
+        let prefs = RefreshPrefs::from_settings(&self.get_settings().await?);
+        self.auto_refresh_secs
+            .store(prefs.interval_secs, std::sync::atomic::Ordering::Relaxed);
+        Ok(prefs)
+    }
+
+    async fn emit_status(&self, source_id: i64) {
+        if let Ok(c) = self.counts(source_id, CatalogChange::Status).await {
+            self.emit(Event::CatalogUpdated(c));
+        }
     }
 
     /// Stop its sessions, delete its rows and its keychain entries.
@@ -749,8 +894,25 @@ impl Service {
 
     /// Connect, sync channels + groups, fill the visible guide window, then sync user state.
     /// Emits `task://progress` per phase and `catalog://updated` at the end.
+    /// If a sync of this source is already running, waits for it and returns without syncing
+    /// again (its outcome is already recorded and emitted).
     pub async fn sync_source(&self, source_id: i64) -> Result<()> {
+        let lock = self
+            .sync_locks
+            .lock()
+            .map_err(|_| AppError::local("Sync state is unavailable."))?
+            .entry(source_id)
+            .or_default()
+            .clone();
+        let _guard = match lock.try_lock() {
+            Ok(g) => g,
+            Err(_) => {
+                let _done = lock.lock().await;
+                return Ok(());
+            }
+        };
         self.set_status(source_id, SourceStatus::Syncing);
+        self.emit_status(source_id).await;
         let r = self.sync_inner(source_id).await;
         match &r {
             Ok(()) => self.set_status(source_id, SourceStatus::Connected),
@@ -763,6 +925,8 @@ impl Service {
                 },
             ),
         }
+        // The final status is recorded after sync_inner's last event: tell the UI.
+        self.emit_status(source_id).await;
         r
     }
 
@@ -816,77 +980,138 @@ impl Service {
     /// Whole-feed guides (XMLTV) for M3U/Xtream; windowed grid for Dispatcharr.
     async fn sync_guide_for(&self, source_id: i64, client: &dyn SourceClient) -> Result<()> {
         let now = now_utc();
-        match client.guide_feed().await {
-            Ok(Some(feed)) => {
-                let row = self.store.source(source_id).await?;
-                let tz = refresh::parse_tz(feed.default_tz.as_deref().or(row.server_tz.as_deref()));
-                let days = refresh::max_catchup_days(&self.store, source_id)
-                    .await?
-                    .max(0);
-                let keep = crate::source::TimeWindow {
-                    start_utc: epg::retention_cutoff(now, days),
-                    end_utc: now + 7 * 86_400,
-                };
-                // Programmes written so far after each batch (total unknown: 0).
-                let r = crate::xmltv::ingest::ingest_with_progress(
-                    &self.store,
-                    source_id,
-                    feed.file.path().to_path_buf(),
-                    tz,
-                    keep,
-                    &|n| self.progress(source_id, "guide", n, 0),
-                )
-                .await;
-                match r {
-                    Ok(rep) => {
-                        tracing::info!(
-                            programmes = rep.programmes,
-                            by_name = rep.matches.by_name,
-                            unmatched = rep.matches.unmatched.len(),
-                            "guide ingested"
-                        );
-                        self.store.set_sync_ok(source_id, "guide", now).await?;
-                        Ok(())
-                    }
-                    Err(e) => {
-                        self.store
-                            .set_sync_error(source_id, "guide", &e.message)
-                            .await?;
-                        Err(e)
-                    }
-                }
+        let state_key = format!("{GUIDE_FEED_KEY_PREFIX}{source_id}");
+        let prev: Option<GuideFeedState> = self
+            .store
+            .kv_get(&state_key)
+            .await?
+            .and_then(|(v, _)| serde_json::from_str(&v).ok());
+        // A full re-import at least daily, so the retention window still prunes old programmes.
+        let prev = prev.filter(|p| now - p.ingested_at < GUIDE_REINGEST_SECS);
+        match client
+            .guide_feed(prev.as_ref().map(|p| &p.validators))
+            .await
+        {
+            Ok(Some(crate::source::GuideFeed { file: None, .. })) => {
+                tracing::info!("guide unchanged on the server (304), import skipped");
+                self.store.set_sync_ok(source_id, "guide", now).await?;
+                Ok(())
             }
-            Ok(None) => {
-                if client.kind() == SourceKind::Dispatcharr {
-                    // PLAN §7.3: the visible window first, then history back to the longest
-                    // `catchup_days`, so catch-up from the guide has programme rows to play.
-                    epg::sync_guide(client, &self.store, source_id, epg::visible_window(now))
+            Ok(Some(crate::source::GuideFeed {
+                file: Some(file),
+                validators,
+                default_tz,
+            })) => {
+                let content_hash = file_sha256(file.path().to_path_buf()).await?;
+                let inputs_hash = self.guide_inputs_hash(source_id).await?;
+                if let Some(p) = prev.as_ref()
+                    && p.content_hash == content_hash
+                    && p.inputs_hash == inputs_hash
+                {
+                    tracing::info!("guide content unchanged, import skipped");
+                    let state = GuideFeedState {
+                        validators,
+                        ..p.clone()
+                    };
+                    self.store
+                        .kv_set(&state_key, &serde_json::to_string(&state)?, now)
                         .await?;
-                    let days = refresh::max_catchup_days(&self.store, source_id).await?;
-                    if days > 0 {
-                        let row = self.store.source(source_id).await?;
-                        let plan = refresh::plan_windows(
-                            now,
-                            days,
-                            refresh::parse_tz(row.server_tz.as_deref()),
-                        );
-                        let cancel = AtomicBool::new(false);
-                        if let Err(e) = refresh::run_plan(
-                            client,
-                            &self.store,
-                            source_id,
-                            &plan,
-                            &[refresh::WindowKind::CatchupHistory],
-                            &cancel,
-                            |d, t| self.progress(source_id, "history", d, t),
-                        )
-                        .await
-                        {
-                            // History is best effort: the visible guide is already in place.
-                            tracing::warn!(error = %e, "catch-up history fill failed");
-                        }
-                    }
+                    self.store.set_sync_ok(source_id, "guide", now).await?;
+                    return Ok(());
                 }
+                let feed = crate::source::GuideFeed {
+                    file: Some(file),
+                    validators: validators.clone(),
+                    default_tz,
+                };
+                let r = self.ingest_feed(source_id, feed, now).await;
+                if r.is_ok() {
+                    let state = GuideFeedState {
+                        validators,
+                        content_hash,
+                        inputs_hash,
+                        ingested_at: now,
+                    };
+                    self.store
+                        .kv_set(&state_key, &serde_json::to_string(&state)?, now)
+                        .await?;
+                }
+                r
+            }
+            Ok(None) => self.sync_windowed_guide(source_id, client, now).await,
+            Err(e) => {
+                self.store
+                    .set_sync_error(source_id, "guide", &e.message)
+                    .await?;
+                Err(e)
+            }
+        }
+    }
+
+    /// Fingerprint of everything besides the file that decides what an XMLTV import writes:
+    /// the source's channels (ids, EPG keys, names, shifts) and the user's EPG remaps.
+    async fn guide_inputs_hash(&self, source_id: i64) -> Result<String> {
+        use sha2::{Digest, Sha256};
+        let pool = self.store.pool();
+        let chans: Option<String> = sqlx::query_scalar(
+            "SELECT json_group_array(json_array(id, ext_id, tvg_id, tvg_name, name, epg_shift_secs))
+             FROM (SELECT * FROM channel WHERE source_id = ? ORDER BY id)",
+        )
+        .bind(source_id)
+        .fetch_one(pool)
+        .await?;
+        let remaps: Option<String> = sqlx::query_scalar(
+            "SELECT json_group_array(json_array(channel_ext_id, xmltv_id))
+             FROM (SELECT * FROM epg_remap WHERE source_id = ? ORDER BY channel_ext_id)",
+        )
+        .bind(source_id)
+        .fetch_one(pool)
+        .await?;
+        let mut h = Sha256::new();
+        h.update(chans.unwrap_or_default());
+        h.update([0]);
+        h.update(remaps.unwrap_or_default());
+        Ok(hex(&h.finalize()))
+    }
+
+    /// Ingest a downloaded XMLTV feed (the file must be present).
+    async fn ingest_feed(
+        &self,
+        source_id: i64,
+        feed: crate::source::GuideFeed,
+        now: i64,
+    ) -> Result<()> {
+        let Some(file) = feed.file else {
+            return Ok(());
+        };
+        let row = self.store.source(source_id).await?;
+        let tz = refresh::parse_tz(feed.default_tz.as_deref().or(row.server_tz.as_deref()));
+        let days = refresh::max_catchup_days(&self.store, source_id)
+            .await?
+            .max(0);
+        let keep = crate::source::TimeWindow {
+            start_utc: epg::retention_cutoff(now, days),
+            end_utc: now + 7 * 86_400,
+        };
+        // Programmes written so far after each batch (total unknown: 0).
+        let r = crate::xmltv::ingest::ingest_with_progress(
+            &self.store,
+            source_id,
+            file.path().to_path_buf(),
+            tz,
+            keep,
+            &|n| self.progress(source_id, "guide", n, 0),
+        )
+        .await;
+        match r {
+            Ok(rep) => {
+                tracing::info!(
+                    programmes = rep.programmes,
+                    by_name = rep.matches.by_name,
+                    unmatched = rep.matches.unmatched.len(),
+                    "guide ingested"
+                );
+                self.store.set_sync_ok(source_id, "guide", now).await?;
                 Ok(())
             }
             Err(e) => {
@@ -896,6 +1121,50 @@ impl Service {
                 Err(e)
             }
         }
+    }
+
+    /// Windowed guide (Dispatcharr): the visible window first, then history back to the longest
+    /// `catchup_days` (so catch-up from the guide has programme rows to play), then the days ahead
+    /// to `AHEAD_DAYS` so the guide can be browsed beyond tonight. History and ahead are best
+    /// effort: the visible guide is already in place.
+    async fn sync_windowed_guide(
+        &self,
+        source_id: i64,
+        client: &dyn SourceClient,
+        now: i64,
+    ) -> Result<()> {
+        if client.kind() != SourceKind::Dispatcharr {
+            return Ok(());
+        }
+        epg::sync_guide(client, &self.store, source_id, epg::visible_window(now)).await?;
+        // The visible window is in: show it before the longer fills.
+        self.emit(Event::CatalogUpdated(
+            self.counts(source_id, CatalogChange::Guide).await?,
+        ));
+        let days = refresh::max_catchup_days(&self.store, source_id).await?;
+        let row = self.store.source(source_id).await?;
+        let plan = refresh::plan_windows(now, days, refresh::parse_tz(row.server_tz.as_deref()));
+        let cancel = AtomicBool::new(false);
+        for (kind, phase) in [
+            (refresh::WindowKind::CatchupHistory, "history"),
+            // Shown to the user as "Syncing guide…".
+            (refresh::WindowKind::Ahead, "guide"),
+        ] {
+            if let Err(e) = refresh::run_plan(
+                client,
+                &self.store,
+                source_id,
+                &plan,
+                &[kind],
+                &cancel,
+                |d, t| self.progress(source_id, phase, d, t),
+            )
+            .await
+            {
+                tracing::warn!(error = %e, phase, "guide fill failed");
+            }
+        }
+        Ok(())
     }
 
     /// Background guide fill: catch-up history and the days ahead (cancellable).
@@ -973,6 +1242,11 @@ impl Service {
         m.insert("liveBufferSecs".into(), 3.into());
         m.insert("hwdec".into(), "auto-safe".into());
         m.insert("debugLogging".into(), false.into());
+        m.insert(
+            SET_AUTO_REFRESH_HOURS.into(),
+            DEFAULT_AUTO_REFRESH_HOURS.into(),
+        );
+        m.insert(SET_REFRESH_DURING_PLAYBACK.into(), true.into());
         m
     }
 
@@ -1002,6 +1276,14 @@ impl Service {
                     .as_f64()
                     .ok_or_else(|| AppError::local("Live buffer must be a number."))?;
                 cur.insert(k, Value::from(n.round().clamp(1.0, 10.0) as i64));
+            } else if k == SET_AUTO_REFRESH_HOURS {
+                let n = v
+                    .as_f64()
+                    .ok_or_else(|| AppError::local("Refresh interval must be a number."))?;
+                cur.insert(
+                    k,
+                    Value::from(n.round().clamp(0.0, MAX_AUTO_REFRESH_HOURS as f64) as i64),
+                );
             } else {
                 cur.insert(k, v);
             }
@@ -1010,6 +1292,20 @@ impl Service {
         self.store
             .kv_set(SETTINGS_KEY, &serde_json::to_string(&out)?, now_utc())
             .await?;
+        let prefs = RefreshPrefs::from_settings(&out);
+        let was = self
+            .auto_refresh_secs
+            .swap(prefs.interval_secs, std::sync::atomic::Ordering::Relaxed);
+        if (was > 0) != (prefs.interval_secs > 0) {
+            // Turning auto refresh on/off changes whether old data shows as stale.
+            self.emit(Event::CatalogUpdated(CatalogUpdated {
+                scope: CatalogChange::Status,
+                source_id: 0,
+                channels: 0,
+                groups: 0,
+                programmes: 0,
+            }));
+        }
         Ok(out)
     }
 

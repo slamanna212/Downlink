@@ -390,10 +390,10 @@ async fn guide_feed_downloads_xmltv_php() {
         .await;
     let c = client(&server);
     c.connect().await.unwrap();
-    let feed = c.guide_feed().await.unwrap().unwrap();
+    let feed = c.guide_feed(None).await.unwrap().unwrap();
     assert_eq!(feed.default_tz.as_deref(), Some("Europe/London"));
     assert_eq!(
-        downlink_core::xmltv::parse_channels(feed.file.path())
+        downlink_core::xmltv::parse_channels(feed.file.as_ref().unwrap().path())
             .unwrap()
             .len(),
         1

@@ -286,7 +286,10 @@ impl ChannelKey {
 
 /// A downloaded guide file (XMLTV) ready for `xmltv::ingest`. Deleted on drop.
 pub struct GuideFeed {
-    pub file: crate::m3u::load::Fetched,
+    /// `None`: the server confirmed the previously downloaded feed is unchanged (HTTP 304).
+    pub file: Option<crate::m3u::load::Fetched>,
+    /// Cache validators to send next time.
+    pub validators: crate::m3u::load::Validators,
     /// Zone for stamps without an offset (the server's, when known).
     pub default_tz: Option<String>,
 }
@@ -374,8 +377,12 @@ pub trait Source: Send + Sync {
     }
     /// Load previously persisted credentials before channels are mapped or played.
     fn load_credentials(&self, _map: std::collections::HashMap<String, String>) {}
-    /// A whole-guide file to ingest (XMLTV), for sources without a windowed guide API.
-    async fn guide_feed(&self) -> Result<Option<GuideFeed>> {
+    /// A whole-guide file to ingest (XMLTV), for sources without a windowed guide API. `prev` are
+    /// the validators from the last download, so an unchanged feed is not downloaded again.
+    async fn guide_feed(
+        &self,
+        _prev: Option<&crate::m3u::load::Validators>,
+    ) -> Result<Option<GuideFeed>> {
         Ok(None)
     }
     /// Ask the server to move an active channel to its next provider stream (failover). `false`

@@ -667,11 +667,20 @@ impl Source for XtreamClient {
         Ok(Vec::new())
     }
 
-    async fn guide_feed(&self) -> Result<Option<super::GuideFeed>> {
+    async fn guide_feed(
+        &self,
+        prev: Option<&crate::m3u::load::Validators>,
+    ) -> Result<Option<super::GuideFeed>> {
+        use crate::m3u::load::Conditional;
         let url = self.xmltv_url()?;
-        let file: Fetched = self.fetcher()?.fetch(&url).await?;
+        let (file, validators): (Option<Fetched>, _) =
+            match self.fetcher()?.fetch_if_changed(&url, prev).await? {
+                Conditional::NotModified => (None, prev.cloned().unwrap_or_default()),
+                Conditional::Fetched(f, v) => (Some(f), v),
+            };
         Ok(Some(super::GuideFeed {
             file,
+            validators,
             default_tz: self.st().server_tz,
         }))
     }
