@@ -51,6 +51,7 @@ import { AudioMenu, StreamMenu, SubtitleMenu, streamPosition } from './PlayerMen
 import { rtxSummary } from './rtx';
 import { useMultiviewAvailable } from '../multiview/available';
 import { holdSession, releaseSession } from './session';
+import { holdFullscreen, isFullscreenKey, releaseFullscreen, toggleFullscreen } from './fullscreen';
 import classes from './Player.module.css';
 
 const BUFFER_SLOTS = 30;
@@ -211,7 +212,7 @@ function ErrorOverlay({ error, onRetry }: { error: AppError | null; onRetry: () 
   );
 }
 
-let pendingFullscreenReset: ReturnType<typeof setTimeout> | null = null;
+let pendingMiniReset: ReturnType<typeof setTimeout> | null = null;
 
 /** Enter or leave the mini player (compact always-on-top window). */
 export function setMiniPlayer(enabled: boolean): Promise<void> {
@@ -240,7 +241,6 @@ export function PlayerPage() {
   const navigate = useNavigate();
   const player = usePlayerStore((s) => s.player);
   const fullscreen = useUiStore((s) => s.fullscreen);
-  const setFullscreen = useUiStore((s) => s.setFullscreen);
   const mini = useUiStore((s) => s.mini);
   const multiviewAvailable = useMultiviewAvailable();
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -285,20 +285,20 @@ export function PlayerPage() {
   const hasSubMenu = subTracks.length > 0;
 
   // Sessions are stopped when leaving the player (CLAUDE rule 6), unless the guide's mini player takes the
-  // session over (see ./session). Fullscreen always ends with the player; deferred one tick so React
-  // StrictMode's simulated unmount/mount does not drop it.
+  // session over (see ./session). Fullscreen carries over to multiview and ends anywhere else (see
+  // ./fullscreen). The mini window always ends with the player; deferred one tick so React StrictMode's
+  // simulated unmount/mount does not drop it.
   useEffect(() => {
     holdSession();
-    if (pendingFullscreenReset) clearTimeout(pendingFullscreenReset);
-    pendingFullscreenReset = null;
+    holdFullscreen();
+    if (pendingMiniReset) clearTimeout(pendingMiniReset);
+    pendingMiniReset = null;
     return () => {
       releaseSession();
-      pendingFullscreenReset = setTimeout(() => {
-        pendingFullscreenReset = null;
+      releaseFullscreen();
+      pendingMiniReset = setTimeout(() => {
+        pendingMiniReset = null;
         if (useUiStore.getState().mini) void setMiniPlayer(false);
-        if (!useUiStore.getState().fullscreen) return;
-        useUiStore.getState().setFullscreen(false);
-        void invoke('set_fullscreen', { enabled: false }).catch(() => undefined);
       }, 0);
     };
   }, []);
@@ -309,11 +309,6 @@ export function PlayerPage() {
   );
   const togglePause = useCallback(() => cmd({ kind: paused ? 'resume' : 'pause' }), [cmd, paused]);
   const toggleMute = useCallback(() => cmd({ kind: 'setMuted', muted: !player.muted }), [cmd, player.muted]);
-  const toggleFullscreen = useCallback(() => {
-    const enabled = !fullscreen;
-    setFullscreen(enabled);
-    void invoke('set_fullscreen', { enabled });
-  }, [fullscreen, setFullscreen]);
   const toggleFavourite = useCallback(() => {
     const st = usePlayerStore.getState().player;
     const ch = channelRef.current;
@@ -420,7 +415,7 @@ export function PlayerPage() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       // Fullscreen: F11, and Ctrl+Cmd+F on macOS (F itself is favourite, PLAN §8.4).
-      if (e.key === 'F11' || (e.ctrlKey && e.metaKey && (e.key === 'f' || e.key === 'F'))) {
+      if (isFullscreenKey(e)) {
         e.preventDefault();
         toggleFullscreen();
         return;
@@ -477,7 +472,7 @@ export function PlayerPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mini, toggleMini, entry, infoOpen, menu, hasAudioMenu, hasSubMenu, fullscreen, toggleFavourite, commitEntry, clearEntry, togglePause, toggleMute, toggleFullscreen, goBack, seekBy, restart, goLive]);
+  }, [mini, toggleMini, entry, infoOpen, menu, hasAudioMenu, hasSubMenu, fullscreen, toggleFavourite, commitEntry, clearEntry, togglePause, toggleMute, goBack, seekBy, restart, goLive]);
 
   useEffect(() => () => {
     entryRequest.current++;

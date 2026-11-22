@@ -99,7 +99,7 @@ export const en = {
   'multiview.audio': 'Audio',
   'multiview.listen': 'Listen (A)',
   'multiview.makeMain': 'Make main (Enter)',
-  'multiview.fullScreen': 'Full screen (F)',
+  'multiview.fullScreen': 'Watch in player (F)',
   'multiview.replace': 'Replace channel',
   'multiview.remove': 'Remove tile',
   'multiview.limitBody': 'This tile needs one more stream than your server allows right now.',

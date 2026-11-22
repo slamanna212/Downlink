@@ -8,6 +8,8 @@ import {
   IconGauge,
   IconLayoutGrid,
   IconLayoutSidebarRight,
+  IconMaximize,
+  IconMinimize,
   IconPlus,
   IconReplace,
   IconSquareRoundedArrowUp,
@@ -28,8 +30,10 @@ import { progress } from '../../lib/time';
 import { useNowEpoch } from '../../lib/useNow';
 import { useVideoBounds } from '../../lib/useVideoBounds';
 import { usePlayerStore } from '../../store/player';
+import { useUiStore } from '../../store/ui';
 import { dl } from '../../theme';
 import { playChannel } from '../player/actions';
+import { holdFullscreen, isFullscreenKey, releaseFullscreen, setFullscreen, toggleFullscreen } from '../player/fullscreen';
 import { holdSession, releaseSession } from '../player/session';
 import { layoutFor, nextStyle, stylesFor, type GridArea, type LayoutStyle } from './layout';
 import classes from './Multiview.module.css';
@@ -313,6 +317,7 @@ export function MultiviewPage() {
   const location = useLocation();
   const player = usePlayerStore((s) => s.player);
   const mv = useMultiviewState();
+  const fullscreen = useUiStore((s) => s.fullscreen);
   const now = useNowEpoch(15_000);
 
   // Slot 0 mirrors the main player: its channel when playing live.
@@ -345,11 +350,14 @@ export function MultiviewPage() {
   const chromeHidden = idle && !toolbarHover && !addOpen && pickerSlot == null;
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  // Keep the session (main player) alive while here; every tile stops when leaving (rule 6).
+  // Keep the session (main player) alive while here; every tile stops when leaving (rule 6). Window
+  // fullscreen carries over to and from the player (see ../player/fullscreen).
   useEffect(() => {
     holdSession();
+    holdFullscreen();
     return () => {
       releaseSession();
+      releaseFullscreen();
       void invoke('multiview_exit', {}).catch(() => undefined);
     };
   }, []);
@@ -453,6 +461,11 @@ export function MultiviewPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isFullscreenKey(e)) {
+        e.preventDefault();
+        toggleFullscreen();
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey || pickerSlot != null || addOpen) return;
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
@@ -465,13 +478,15 @@ export function MultiviewPage() {
       else if ((e.key === 'Delete' || e.key === 'Backspace') && focused !== 0) remove(focused);
       else if (e.key === 'n' || e.key === 'N') setAddOpen(true);
       else if (e.key === 'l' || e.key === 'L') setStyle(nextStyle(effectiveStyle, styles));
-      else if (e.key === 'Escape') exit();
-      else return;
+      else if (e.key === 'Escape') {
+        if (fullscreen) setFullscreen(false);
+        else exit();
+      } else return;
       e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [order, focused, pickerSlot, addOpen, freeSlot, focus, listen_, makeMain, fullScreen, remove, exit, effectiveStyle, styles]);
+  }, [order, focused, pickerSlot, addOpen, freeSlot, focus, listen_, makeMain, fullScreen, remove, exit, effectiveStyle, styles, fullscreen]);
 
   const pickerBudget = t('multiview.pickerBudget', { used: inUse, total: budget });
   const picker = (slot: number) => (
@@ -551,6 +566,13 @@ export function MultiviewPage() {
           />
         )}
         <Switch size="sm" checked={audioFollows} onChange={(e) => setAudioFollows(e.currentTarget.checked)} label={t('multiview.audioFollows')} />
+        <DLIconButton
+          label={fullscreen ? t('player.exitFullscreen') : t('player.fullscreen')}
+          icon={fullscreen ? IconMinimize : IconMaximize}
+          variant="subtle"
+          size="sm"
+          onClick={toggleFullscreen}
+        />
         <DLButton variant="default" size="sm" keyHint="Esc" onClick={exit}>
           {t('multiview.exit')}
         </DLButton>
