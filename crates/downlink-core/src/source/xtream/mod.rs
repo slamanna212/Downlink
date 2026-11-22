@@ -173,11 +173,14 @@ impl XtreamClient {
     ) -> Result<Self> {
         Ok(Self {
             id,
-            http: crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
-                .timeout(Duration::from_secs(60))
-                .connect_timeout(Duration::from_secs(20))
-                .user_agent(crate::user_agent())
-                .build()?,
+            http: crate::http::authenticated(crate::tls::apply(
+                reqwest::Client::builder(),
+                insecure_tls,
+            )?)
+            .timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(20))
+            .user_agent(crate::user_agent())
+            .build()?,
             insecure_tls,
             base: normalise_base(base_url)?,
             username: username.to_owned(),

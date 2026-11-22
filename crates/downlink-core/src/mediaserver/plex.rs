@@ -69,7 +69,7 @@ fn token_header(token: &SecretString) -> Result<HeaderValue> {
 }
 
 fn http(timeout: Duration) -> Result<reqwest::Client> {
-    Ok(reqwest::Client::builder()
+    Ok(crate::http::authenticated(reqwest::Client::builder())
         .timeout(timeout)
         .user_agent(crate::user_agent())
         .build()?)

@@ -252,10 +252,13 @@ impl DispatcharrClient {
         opts: ClientOptions,
     ) -> Result<Self> {
         let base = normalise_base_url(base_url)?;
-        let http = crate::tls::apply(reqwest::Client::builder(), opts.insecure_tls)?
-            .timeout(opts.timeout)
-            .user_agent(crate::user_agent())
-            .build()?;
+        let http = crate::http::authenticated(crate::tls::apply(
+            reqwest::Client::builder(),
+            opts.insecure_tls,
+        )?)
+        .timeout(opts.timeout)
+        .user_agent(crate::user_agent())
+        .build()?;
         let mut secrets = RedactionSet::new();
         match &creds {
             Credentials::ApiKey(k) => {

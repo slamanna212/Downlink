@@ -73,7 +73,7 @@ pub async fn prepare(plan: &PlayPlan) -> Option<(String, HlsProxy)> {
         .iter()
         .map(|(k, v)| (k.clone(), v.expose().to_owned()))
         .collect();
-    let client = reqwest::Client::builder()
+    let client = downlink_core::http::authenticated(reqwest::Client::builder())
         .user_agent(downlink_core::user_agent())
         .timeout(Duration::from_secs(10))
         .build()

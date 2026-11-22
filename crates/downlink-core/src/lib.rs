@@ -6,6 +6,7 @@ pub mod catchup;
 pub mod epg;
 pub mod error;
 pub mod hls;
+pub mod http;
 pub mod images;
 pub mod m3u;
 pub mod mediaserver;

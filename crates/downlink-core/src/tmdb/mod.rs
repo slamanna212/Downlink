@@ -432,7 +432,7 @@ impl TmdbClient {
         let bearer = trimmed.starts_with("eyJ") && trimmed.matches('.').count() == 2;
         let (language, region, image_lang) = locale(language);
         Ok(Self {
-            http: reqwest::Client::builder()
+            http: crate::http::authenticated(reqwest::Client::builder())
                 .timeout(Duration::from_secs(10))
                 .user_agent(crate::user_agent())
                 .build()?,
