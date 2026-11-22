@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::{Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, Semaphore};
 
 use async_trait::async_trait;
 use image::{DynamicImage, ImageFormat};
@@ -78,17 +78,34 @@ pub const REVALIDATE_AFTER_SECS: i64 = 30 * 86_400;
 /// After a failed re-check, try again this much later rather than on every request.
 const REVALIDATE_RETRY_SECS: i64 = 86_400;
 
-/// Unauthenticated fetch of a public image URL (M3U/Xtream logos). No credentials are sent.
+const MAX_PUBLIC_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+static PUBLIC_IMAGE_FETCHES: Semaphore = Semaphore::const_new(8);
+static PUBLIC_IMAGE_CLIENT: LazyLock<Result<reqwest::Client>> =
+    LazyLock::new(|| Ok(public_client_builder().build()?));
+
+fn public_client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .referer(false)
+        .user_agent(crate::user_agent())
+        .pool_max_idle_per_host(2)
+        .timeout(std::time::Duration::from_secs(20))
+}
+
+/// Fetch public artwork without sending source authentication headers.
 pub async fn fetch_public(url: &str, pin: Option<&crate::tls::Pin>) -> Result<RawImage> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err(AppError::local("That image address is not supported."));
     }
     let url = reqwest::Url::parse(url)?;
-    let client = crate::tls::apply(reqwest::Client::builder().referer(false), &url, pin)?
-        .user_agent(crate::user_agent())
-        .timeout(std::time::Duration::from_secs(20))
-        .build()?;
-    let r = client.get(url).send().await?;
+    let _permit = PUBLIC_IMAGE_FETCHES
+        .acquire()
+        .await
+        .map_err(|_| AppError::local("Image fetching is unavailable."))?;
+    let client = match pin.filter(|pin| pin.matches(&url)) {
+        Some(pin) => pin.apply(public_client_builder())?.build()?,
+        None => PUBLIC_IMAGE_CLIENT.as_ref().map_err(Clone::clone)?.clone(),
+    };
+    let mut r = client.get(url).send().await?;
     if !r.status().is_success() {
         return Err(AppError::from_status(
             r.status().as_u16(),
@@ -96,17 +113,25 @@ pub async fn fetch_public(url: &str, pin: Option<&crate::tls::Pin>) -> Result<Ra
             "that image",
         ));
     }
+    if r.content_length()
+        .is_some_and(|bytes| bytes > MAX_PUBLIC_IMAGE_BYTES as u64)
+    {
+        return Err(AppError::media("That image is too large."));
+    }
     let content_type = r
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
-    let bytes = r.bytes().await?;
-    if bytes.len() > 10 * 1024 * 1024 {
-        return Err(AppError::media("That image is too large."));
+    let mut bytes = Vec::new();
+    while let Some(chunk) = r.chunk().await? {
+        if chunk.len() > MAX_PUBLIC_IMAGE_BYTES - bytes.len() {
+            return Err(AppError::media("That image is too large."));
+        }
+        bytes.extend_from_slice(&chunk);
     }
     Ok(RawImage {
-        bytes: bytes.to_vec(),
+        bytes,
         content_type,
     })
 }
