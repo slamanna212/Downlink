@@ -4,11 +4,11 @@
 //! credentials, userinfo, `username`/`password`/`token` query parameters, credential headers) is
 //! replaced by a placeholder such as `{dl:user}` before it is written to SQLite. The extracted
 //! values live in a per-source [`Vault`], which the app persists in the OS keychain (one entry per
-//! source, deduplicated: identical values share one placeholder, a differing value gets a short
-//! hash suffix). Placeholders are resolved in Rust at play/fetch time only.
+//! source, deduplicated: identical values share one placeholder, a differing value gets a
+//! suffixed placeholder). Placeholders are resolved in Rust at play/fetch time only.
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
 
 use regex::{Captures, Regex};
 use sha2::{Digest, Sha256};
@@ -23,7 +23,7 @@ static XTREAM_PATH: LazyLock<Option<Regex>> = LazyLock::new(|| {
 static HLS_TOKEN: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r#"(?i)(/proxy/hls/)([^/\s?#"'<>]+)"#).ok());
 static PLACEHOLDER: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r"\{dl:([a-z]+(?::[0-9a-f]{8})?)\}").ok());
+    LazyLock::new(|| Regex::new(r"\{dl:([a-z]+(?::[0-9a-f]{8}(?::[0-9]+)?)?)\}").ok());
 
 fn is_placeholder(s: &str) -> bool {
     PLACEHOLDER
@@ -46,11 +46,7 @@ pub struct Vault(Arc<Mutex<HashMap<String, String>>>);
 
 impl std::fmt::Debug for Vault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Vault({} entries)",
-            self.0.lock().map(|g| g.len()).unwrap_or(0)
-        )
+        write!(f, "Vault({} entries)", self.lock().len())
     }
 }
 
@@ -62,21 +58,33 @@ impl Vault {
     /// Placeholder for `value` under `base` (`user`, `pass`, `token`, `hdr`). The first distinct
     /// value gets `{dl:base}`; further distinct values get `{dl:base:<8 hex>}`.
     fn intern(&self, base: &str, value: &str) -> String {
-        let Ok(mut g) = self.0.lock() else {
-            return value.to_owned();
+        let mut entries = self.lock();
+        let key = if let Some(first) = entries.get(base) {
+            if first == value {
+                return format!("{{dl:{base}}}");
+            }
+            let hash_key = format!("{base}:{}", short_hash(value));
+            let mut key = hash_key.clone();
+            let mut attempt = 1;
+            while let Some(previous) = entries.get(&key) {
+                if previous == value {
+                    return format!("{{dl:{key}}}");
+                }
+                key = format!("{hash_key}:{attempt}");
+                attempt += 1;
+            }
+            key
+        } else {
+            base.to_owned()
         };
-        match g.get(base) {
-            None => {
-                g.insert(base.to_owned(), value.to_owned());
-                format!("{{dl:{base}}}")
-            }
-            Some(v) if v == value => format!("{{dl:{base}}}"),
-            Some(_) => {
-                let key = format!("{base}:{}", short_hash(value));
-                g.entry(key.clone()).or_insert_with(|| value.to_owned());
-                format!("{{dl:{key}}}")
-            }
-        }
+        entries.insert(key.clone(), value.to_owned());
+        format!("{{dl:{key}}}")
+    }
+
+    fn lock(&self) -> MutexGuard<'_, HashMap<String, String>> {
+        // A poisoned lock must never push raw credentials into a template. The map's
+        // individual entries remain valid and can still resolve earlier placeholders.
+        self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     fn credential(&self, base: &str, value: &str) -> String {
@@ -168,10 +176,7 @@ impl Vault {
         let Some(re) = PLACEHOLDER.as_ref() else {
             return Ok(s.to_owned());
         };
-        let g = self
-            .0
-            .lock()
-            .map_err(|_| AppError::local("The credential store is unavailable."))?;
+        let g = self.lock();
         let mut missing = false;
         let out = re
             .replace_all(s, |c: &Captures| match g.get(&c[1]) {
@@ -191,17 +196,15 @@ impl Vault {
     }
 
     pub fn export(&self) -> HashMap<String, String> {
-        self.0.lock().map(|g| g.clone()).unwrap_or_default()
+        self.lock().clone()
     }
 
     pub fn load(&self, map: HashMap<String, String>) {
-        if let Ok(mut g) = self.0.lock() {
-            *g = map;
-        }
+        *self.lock() = map;
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.lock().map(|g| g.is_empty()).unwrap_or(true)
+        self.lock().is_empty()
     }
 
     /// Serialise for the keychain.
@@ -327,6 +330,36 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.code, crate::ErrorCode::Auth);
         assert_eq!(v.resolve("no placeholders").unwrap(), "no placeholders");
+    }
+
+    #[test]
+    fn hash_collisions_preserve_both_values() {
+        let v = Vault::new();
+        let collision_key = format!("token:{}", short_hash("new-token"));
+        v.load(HashMap::from([
+            ("token".into(), "first".into()),
+            (collision_key.clone(), "older-colliding-token".into()),
+        ]));
+        let url = "https://iptv.test/?token=new-token";
+        let template = v.template_url(url);
+        assert_eq!(v.resolve(&template).unwrap(), url);
+        assert_eq!(v.template_url(url), template);
+        assert_eq!(
+            v.resolve(&format!("{{dl:{collision_key}}}")).unwrap(),
+            "older-colliding-token"
+        );
+    }
+
+    #[test]
+    fn a_poisoned_lock_still_templates_and_resolves() {
+        let v = Vault::new();
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = v.lock();
+            panic!("poison test");
+        });
+        let template = v.template_header("Authorization", "Bearer secret");
+        assert_eq!(template, "{dl:hdr}");
+        assert_eq!(v.resolve(&template).unwrap(), "Bearer secret");
     }
 
     #[test]
