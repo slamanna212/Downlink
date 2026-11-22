@@ -52,7 +52,8 @@
   transition: opacity 160ms ease;
 }
 
-.tile[data-focused]:hover::after { opacity: 1; }
+.tile[data-focused]:hover::after,
+.tile[data-focused]:has(:focus-visible)::after { opacity: 1; }
 
 /* Idle: the focus ring and audio indicator fade so they don't sit on the picture. */
 .root[data-idle] .tile[data-focused]::after,
@@ -98,7 +99,20 @@
   padding: 0.25rem var(--mantine-spacing-sm);
   border-radius: var(--mantine-radius-lg);
   font-size: var(--mantine-font-size-sm);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
 }
+
+/* Label pill and audio badge only show on hover or keyboard focus, like the actions. */
+.tile:hover .label,
+.tile:has(:focus-visible) .label,
+.tile[data-picker] .label,
+.tile:hover .audio,
+.tile:has(:focus-visible) .audio,
+.tile[data-picker] .audio { opacity: 1; }
+
+.root[data-idle] .tile:not([data-picker]) .label { opacity: 0; }
 
 .labelNumber {
   font-variant-numeric: tabular-nums;
@@ -118,6 +132,8 @@
   right: var(--mantine-spacing-sm);
   display: flex;
   color: var(--dl-text-dim);
+  opacity: 0;
+  pointer-events: none;
   transition: opacity 240ms ease;
 }
 
@@ -337,6 +353,7 @@
 @media (prefers-reduced-motion: reduce) {
   .actions,
   .audio,
+  .label,
   .toolbar,
   .tile[data-focused]::after { transition: none; }
 }
