@@ -146,7 +146,12 @@ pub fn parse_channels(path: &Path) -> std::io::Result<Vec<XmltvChannel>> {
     let mut cur: Option<XmltvChannel> = None;
     let mut in_name = false;
     let mut text = String::new();
-    while let Ok(ev) = reader.read_event_into(&mut buf) {
+    loop {
+        let ev = match reader.read_event_into(&mut buf) {
+            Ok(ev) => ev,
+            Err(quick_xml::Error::Io(e)) => return Err(std::io::Error::new(e.kind(), e)),
+            Err(_) => break,
+        };
         match ev {
             Event::Decl(d) => {
                 if let Some(enc) = d.encoder() {
@@ -218,6 +223,7 @@ pub fn parse_programmes(
     loop {
         let ev = match reader.read_event_into(&mut buf) {
             Ok(e) => e,
+            Err(quick_xml::Error::Io(e)) => return Err(std::io::Error::new(e.kind(), e)),
             Err(_) => {
                 st.truncated = true;
                 break;
