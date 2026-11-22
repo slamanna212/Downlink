@@ -16,28 +16,20 @@ use sha2::{Digest, Sha256};
 use crate::error::{AppError, Result};
 
 static USERINFO: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r"(?i)(://)([^/\s@?#:{}]+):([^/\s@?#{}]+)@").ok());
-static USERINFO_USER_ONLY: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r"(?i)(://)([^/\s@?#:{}]+)@").ok());
+    LazyLock::new(|| Regex::new(r"(?i)(://)([^/\s@?#]+)@").ok());
 static XTREAM_PATH: LazyLock<Option<Regex>> = LazyLock::new(|| {
-    Regex::new(r"(?i)(/(?:live|movie|series|timeshift)/)([^/\s?#]+)/([^/\s?#]+)(/|\b)").ok()
+    Regex::new(r#"(?i)(/(?:live|movie|series|timeshift)/)([^/\s?#"'<>]+)/([^/\s?#"'<>]+)"#).ok()
 });
-static QUERY: LazyLock<Option<Regex>> = LazyLock::new(|| {
-    Regex::new(r#"(?i)([?&;])(username|user|password|pass|pwd|token|api_key|apikey|access_token|auth|key|secret|sig|signature)=([^&\s"'#<>]*)"#).ok()
-});
+static HLS_TOKEN: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r#"(?i)(/proxy/hls/)([^/\s?#"'<>]+)"#).ok());
 static PLACEHOLDER: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"\{dl:([a-z]+(?::[0-9a-f]{8})?)\}").ok());
 
-const HEADERS: [&str; 5] = [
-    "x-api-key",
-    "authorization",
-    "proxy-authorization",
-    "cookie",
-    "x-auth-token",
-];
-
 fn is_placeholder(s: &str) -> bool {
-    s.starts_with("{dl:")
+    PLACEHOLDER
+        .as_ref()
+        .and_then(|re| re.find(s))
+        .is_some_and(|m| m.as_str() == s)
 }
 
 fn short_hash(v: &str) -> String {
@@ -87,48 +79,62 @@ impl Vault {
         }
     }
 
+    fn credential(&self, base: &str, value: &str) -> String {
+        if value.is_empty() || is_placeholder(value) {
+            return value.to_owned();
+        }
+        self.intern(base, value)
+    }
+
     /// Replace credentials in a URL (or URL-bearing string) with placeholders. Idempotent.
     pub fn template_url(&self, url: &str) -> String {
         let mut s = url.to_owned();
         if let Some(re) = USERINFO.as_ref() {
             s = re
                 .replace_all(&s, |c: &Captures| {
-                    if is_placeholder(&c[2]) {
-                        return c[0].to_owned();
-                    }
-                    format!(
-                        "{}{}:{}@",
-                        &c[1],
-                        self.intern("user", &c[2]),
-                        self.intern("pass", &c[3])
-                    )
-                })
-                .into_owned();
-        }
-        if let Some(re) = USERINFO_USER_ONLY.as_ref() {
-            s = re
-                .replace_all(&s, |c: &Captures| {
-                    format!("{}{}@", &c[1], self.intern("user", &c[2]))
+                    // Colons inside placeholders are part of the username, not separators.
+                    let user_info = &c[2];
+                    let separator = PLACEHOLDER
+                        .as_ref()
+                        .and_then(|re| re.find(user_info))
+                        .filter(|p| p.start() == 0)
+                        .map_or(0, |p| p.end());
+                    let templated = match user_info[separator..].find(':') {
+                        Some(i) => {
+                            let (user, pass) = user_info.split_at(separator + i);
+                            format!(
+                                "{}:{}",
+                                self.credential("user", user),
+                                self.credential("pass", &pass[1..])
+                            )
+                        }
+                        None => self.credential("user", user_info),
+                    };
+                    format!("{}{templated}@", &c[1])
                 })
                 .into_owned();
         }
         if let Some(re) = XTREAM_PATH.as_ref() {
             s = re
                 .replace_all(&s, |c: &Captures| {
-                    if is_placeholder(&c[2]) || is_placeholder(&c[3]) {
-                        return c[0].to_owned();
-                    }
                     format!(
-                        "{}{}/{}{}",
+                        "{}{}/{}",
                         &c[1],
-                        self.intern("user", &c[2]),
-                        self.intern("pass", &c[3]),
-                        &c[4]
+                        self.credential("user", &c[2]),
+                        self.credential("pass", &c[3]),
                     )
                 })
                 .into_owned();
         }
-        if let Some(re) = QUERY.as_ref() {
+        if let Some(re) = HLS_TOKEN.as_ref() {
+            s = re
+                .replace_all(&s, |c: &Captures| {
+                    format!("{}{}", &c[1], self.credential("token", &c[2]))
+                })
+                .into_owned();
+        }
+        {
+            let re = &*crate::redact::QUERY_CRED;
             s = re
                 .replace_all(&s, |c: &Captures| {
                     let val = &c[3];
@@ -149,8 +155,8 @@ impl Vault {
 
     /// Template a header value when the header name is a credential header.
     pub fn template_header(&self, name: &str, value: &str) -> String {
-        if HEADERS.contains(&name.to_ascii_lowercase().as_str()) && !is_placeholder(value) {
-            self.intern("hdr", value)
+        if crate::redact::is_credential_header(name) {
+            self.credential("hdr", value)
         } else {
             self.template_url(value)
         }
@@ -242,6 +248,38 @@ mod tests {
         assert_eq!(e.get("user").map(String::as_str), Some("u1"));
         assert_eq!(e.get("pass").map(String::as_str), Some("p1xx"));
         assert_eq!(e.len(), 3, "{e:?}");
+    }
+
+    #[test]
+    fn templates_tokens_and_headers_covered_by_redaction() {
+        let v = Vault::new();
+        let url = "https://u:colon:password@iptv.test/proxy/hls/session-token/index.m3u8?x-plex-token=plex-token;refresh_token=refresh-secret";
+        let template = v.template_url(url);
+        for secret in [
+            "colon:password",
+            "session-token",
+            "=plex-token",
+            "refresh-secret",
+        ] {
+            assert!(!template.contains(secret));
+        }
+        assert_eq!(v.resolve(&template).unwrap(), url);
+        assert_eq!(v.template_url(&template), template);
+        for header in ["X-Plex-Token", "Set-Cookie"] {
+            let template = v.template_header(header, "header-secret");
+            assert_eq!(v.template_header(header, &template), template);
+            assert_eq!(v.resolve(&template).unwrap(), "header-secret");
+            assert_eq!(
+                crate::redact::redact_header_value(header, "header-secret"),
+                "***"
+            );
+        }
+        let mixed = v.template_url("https://iptv.test/live/{dl:user}/new-pass!/1.ts");
+        assert!(!mixed.contains("new-pass!"));
+        assert_eq!(
+            v.resolve(&mixed).unwrap(),
+            "https://iptv.test/live/u/new-pass!/1.ts"
+        );
     }
 
     #[test]

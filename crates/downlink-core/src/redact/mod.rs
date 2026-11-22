@@ -38,9 +38,9 @@ static USERINFO: LazyLock<Regex> =
     LazyLock::new(|| rx(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/\s@?#]+@"));
 
 /// Credential-carrying query parameters.
-static QUERY_CRED: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static QUERY_CRED: LazyLock<Regex> = LazyLock::new(|| {
     rx(
-        r#"(?i)([?&;])(username|password|user|pass|pwd|token|x-plex-token|api_key|apikey|access_token|refresh_token|auth|key|secret|sig|signature)=([^&\s"'#<>]*)"#,
+        r#"(?i)([?&;])(username|password|user|pass|pwd|token|x-plex-token|api_key|apikey|access_token|refresh_token|auth|key|secret|sig|signature)=([^&;\s"'#<>]*)"#,
     )
 });
 
@@ -127,18 +127,22 @@ pub fn redact_redirect_url(_url: &str) -> &'static str {
     "<redirect-url>"
 }
 
-/// Redact a header value by header name (value only; names are not secret).
-pub fn redact_header_value<'a>(name: &str, value: &'a str) -> std::borrow::Cow<'a, str> {
-    let n = name.to_ascii_lowercase();
-    if matches!(
-        n.as_str(),
+pub(crate) fn is_credential_header(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
         "x-api-key"
+            | "x-plex-token"
             | "authorization"
             | "proxy-authorization"
             | "cookie"
             | "set-cookie"
             | "x-auth-token"
-    ) {
+    )
+}
+
+/// Redact a header value by header name (value only; names are not secret).
+pub fn redact_header_value<'a>(name: &str, value: &'a str) -> std::borrow::Cow<'a, str> {
+    if is_credential_header(name) {
         std::borrow::Cow::Borrowed(MASK)
     } else {
         std::borrow::Cow::Owned(redact(value))
