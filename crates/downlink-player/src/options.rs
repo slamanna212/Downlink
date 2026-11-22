@@ -549,10 +549,14 @@ pub fn loadfile_options(
     headers: &[(String, String)],
     start_secs: Option<f64>,
 ) -> String {
-    let mut parts: Vec<String> = profile_options(profile, prefs)
-        .into_iter()
-        .map(|(k, v)| format!("{k}={}", quote(&v)))
-        .collect();
+    // `pause` is engine state that survives `loadfile`: a session paused (or one that failed while
+    // paused) would otherwise start the next file frozen while the UI says it is playing.
+    let mut parts: Vec<String> = vec!["pause=no".to_owned()];
+    parts.extend(
+        profile_options(profile, prefs)
+            .into_iter()
+            .map(|(k, v)| format!("{k}={}", quote(&v))),
+    );
     // A plan-supplied User-Agent (M3U `http-user-agent`, pipe headers) goes through mpv's own
     // per-file option so it replaces the default instead of being sent twice.
     let (ua, rest): (Vec<_>, Vec<_>) = headers
@@ -859,6 +863,14 @@ mod tests {
         };
         let o = base_options(&p, RenderBackend::RenderApi);
         assert!(has(&o, "user-agent", "Downlink/1.0.0 (Linux)"));
+    }
+
+    #[test]
+    fn every_load_starts_unpaused() {
+        for p in [Profile::Live, Profile::Timeshift, Profile::Seekable] {
+            let s = loadfile_options(p, &Preferences::default(), &[], None);
+            assert!(s.starts_with("pause=no,"), "{s}");
+        }
     }
 
     #[test]

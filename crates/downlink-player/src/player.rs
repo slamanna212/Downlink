@@ -1063,6 +1063,7 @@ fn on_failure(inner: &Inner, s: &mut Shared, cause: FailureCause) {
                 format!("reconnect failed, asking for the next stream: {last_error}"),
             );
             s.error = Some(last_error.clone());
+            release_engine(inner);
             go(inner, s, SessionState::Failed, Some(last_error.clone()));
             s.outbox.push(PlayerEvent::FailoverNeeded {
                 session: s.session,
@@ -1072,8 +1073,18 @@ fn on_failure(inner: &Inner, s: &mut Shared, cause: FailureCause) {
         RetryDecision::GiveUp { last_error } => {
             note(inner, format!("giving up: {last_error}"));
             s.error = Some(last_error.clone());
+            release_engine(inner);
             go(inner, s, SessionState::Failed, Some(last_error));
         }
+    }
+}
+
+/// A session gave up: make sure mpv is not still half-way through the failed load. Without this a
+/// slow stream can start playing behind the error overlay (the state machine rightly ignores
+/// first-frame events once `Failed`), and the engine is not idle for the next `loadfile`.
+fn release_engine(inner: &Inner) {
+    if let Err(e) = inner.eng().command(&["stop"]) {
+        tracing::debug!("stop after a failed session: {e}");
     }
 }
 
@@ -1514,6 +1525,9 @@ fn supervise_engine_death(inner: &Arc<Inner>) {
             Err(e) => tracing::error!("engine restart failed: {e}"),
         }
     }
+    // Out of restarts for this session (or the rebuild failed). A dead handle reports shutdown
+    // at once; do not spin on it until the next `play` resets the restart budget and rebuilds.
+    std::thread::sleep(Duration::from_millis(250));
     let mut s = lock(inner);
     s.engine_failure = Some(crash_id.clone());
     s.error = Some("The playback engine stopped unexpectedly.".to_owned());

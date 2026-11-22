@@ -208,6 +208,32 @@ mod tests {
     }
 
     #[test]
+    fn every_state_can_start_a_new_play() {
+        // After any failure (or stop) the next zap / retry must always be possible, from every
+        // state, via both entry points (`begin_resolving` and `play`).
+        for from in [
+            Idle, Resolving, Connecting, Buffering, Playing, Paused, Stopped, Failed,
+        ] {
+            assert!(
+                from == Connecting || from.can_go(Connecting),
+                "{from:?} -> Connecting"
+            );
+            assert!(
+                from == Resolving || from.can_go(Resolving),
+                "{from:?} -> Resolving"
+            );
+        }
+        let mut m = StateMachine::new();
+        m.transition(Connecting, None, 0).unwrap();
+        m.transition(Failed, None, 1).unwrap();
+        m.transition(Resolving, None, 2).unwrap();
+        m.transition(Failed, None, 3).unwrap();
+        m.transition(Connecting, None, 4).unwrap();
+        m.transition(Buffering, None, 5).unwrap();
+        m.transition(Playing, None, 6).unwrap();
+    }
+
+    #[test]
     fn history_keeps_last_fifty() {
         let mut m = StateMachine::new();
         m.transition(Connecting, None, 0).unwrap();

@@ -174,6 +174,10 @@ impl SinkContext {
         let Some(player) = self.extras.player.get().cloned() else {
             return;
         };
+        // The user may zap or stop while the server round trips below are in flight; their play
+        // owns the player then, and a stale failover must not replace it.
+        let generation = lock(&self.active).generation;
+        let superseded = || lock(&self.active).generation != generation;
         // Live HLS: a dead session (410) is fixed by minting a new one, once per play.
         let remint = {
             let mut a = lock(&self.active);
@@ -188,6 +192,7 @@ impl SinkContext {
         if let Some(channel) = remint {
             player.begin_resolving();
             match self.service.remint_hls(channel).await {
+                _ if superseded() => {}
                 Ok(plan) => {
                     tracing::info!("live HLS session re-minted after a failure");
                     if let Err(e) = player.play(live_request(&player, &plan, true)) {
@@ -224,6 +229,7 @@ impl SinkContext {
         }
         player.begin_resolving();
         match self.service.failover_next(channel, attempt).await {
+            _ if superseded() => {}
             Ok(step) => {
                 {
                     let mut a = lock(&self.active);
@@ -918,24 +924,37 @@ impl Playback {
 
     /// Navigate away / stop button: stop playback and any open session.
     pub async fn stop(&self) -> Result<(), AppError> {
+        // A stop that is slow (network round trips below) must never tear down a playback the
+        // user started after asking for it: bail out as soon as a newer play owns the player.
+        let start_generation = lock(&self.active).generation;
         // Save the final position of VOD / recordings before the player forgets it.
         let (media, snap) = (lock(&self.active).media, self.player.snapshot());
         if let (Some(m), Some(pos)) = (media, snap.position_secs) {
             self.report_media(m, pos, snap.duration_secs).await;
         }
-        {
+        let generation = {
             let mut a = lock(&self.active);
+            if a.generation != start_generation {
+                return Ok(());
+            }
             a.generation += 1;
             a.media = None;
             a.hls = None;
-        }
+            a.generation
+        };
         let r = self.player.stop().map_err(player_err);
-        self.service.stop_live_hls().await;
-        let prev = lock(&self.active).catchup.take();
-        if let Some(play) = prev
-            && let Err(e) = self.service.stop_catchup(&play).await
-        {
-            tracing::warn!("could not stop the catch-up session: {}", e.message);
+        let still_ours = || lock(&self.active).generation == generation;
+        // A play that started meanwhile released the previous sessions itself (`begin`, HLS mint).
+        if still_ours() {
+            self.service.stop_live_hls().await;
+        }
+        if still_ours() {
+            let prev = lock(&self.active).catchup.take();
+            if let Some(play) = prev
+                && let Err(e) = self.service.stop_catchup(&play).await
+            {
+                tracing::warn!("could not stop the catch-up session: {}", e.message);
+            }
         }
         r
     }
