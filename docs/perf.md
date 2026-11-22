@@ -95,3 +95,21 @@ library, three runs on the warm cache:
 The first launch after a core schema migration is slower (core ready at 1.1 s in the run that migrated the old cache);
 that cost is paid once. The remaining ~0.25 s before `setup` runs and ~0.2 s between `setup` returning and the webview
 navigating are Tauri/GTK/WebKit initialisation.
+
+### Security review measurements, 2026-11-22
+
+On the Linux review VM, the release service benchmark at the search change (4e1b86a) measured
+14.2 ms p50 and 22.4 ms p95 over 61 queries. The desktop perf harness measured unified search
+at 11.9 ms p50 and 25.1 ms p95 over 39 prefixes on 20,000 generated channels and 672,000
+programmes. An isolated visible WebKit run searched for 32 distinct generated channel names
+after four warm-ups. Input to matching DOM row was 50 ms p95 idle and 47 ms during a local
+source refresh. Waiting two animation frames after the match raised those figures to 80 and
+67 ms respectively. These are separate runs, so the smaller refresh times do not establish
+a speedup.
+
+The cold artwork comparison used four CPUs, a debug build, and 64 concurrent cache misses.
+Each request fetched a synthetic 800 × 450 JPEG over loopback with a 30 ms response delay,
+encoded both cache sizes and persisted them. Across five runs at 2c0f84a, median request
+p50/p95 were 4.11/5.53 seconds and median process peak RSS was 120 MiB. One final run at
+4fbb008 measured 2.94/5.57 seconds and 39 MiB peak RSS. Tail latency was similar while
+peak memory fell substantially on this workload.
