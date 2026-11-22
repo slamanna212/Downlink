@@ -99,3 +99,39 @@ describe('memoised formatting', () => {
     }
   });
 });
+
+import { bucketEpoch, epochAtRatio, formatBehindLive, programmeSegments, ratioOfEpoch, timelineWindow } from './time';
+
+describe('channel timeline', () => {
+  const w = timelineWindow(10_000, 3600);
+
+  it('centres the window on the playhead', () => {
+    expect(w).toEqual({ start: 8200, end: 11_800 });
+    expect(ratioOfEpoch(w, 10_000)).toBe(0.5);
+    expect(epochAtRatio(w, 0.25)).toBe(9100);
+    expect(epochAtRatio(w, 2)).toBe(11_800);
+  });
+
+  it('splits only at programme boundaries', () => {
+    expect(programmeSegments([], w)).toEqual([{ start: 0, end: 1, title: null }]);
+    const segs = programmeSegments(
+      [
+        { startUtc: 9000, endUtc: 10_800, title: 'B' },
+        { startUtc: 5000, endUtc: 9000, title: 'A' },
+        { startUtc: 20_000, endUtc: 21_000, title: 'far' },
+      ],
+      w,
+    );
+    expect(segs.map((s) => s.title)).toEqual(['A', 'B', null]);
+    expect(segs[0]).toMatchObject({ start: 0 });
+    expect(segs[1]?.start).toBeCloseTo(800 / 3600);
+    expect(segs[1]?.end).toBeCloseTo(2600 / 3600);
+    expect(segs[2]?.end).toBe(1);
+  });
+
+  it('formats time behind live and buckets epochs', () => {
+    expect(formatBehindLive(2)).toBe('');
+    expect(formatBehindLive(320)).toBe('−5:20');
+    expect(bucketEpoch(1234)).toBe(1200);
+  });
+});

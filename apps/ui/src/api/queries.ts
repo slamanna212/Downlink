@@ -119,6 +119,16 @@ export function useNowNextWindow(ids: number[], windowKey: string) {
   });
 }
 
+/** Guide entries for one channel in [start, end) (player timeline). Pass bucketed bounds so the key is stable. */
+export function useChannelProgrammes(channelId: number | null, start: number, end: number) {
+  return useQuery({
+    queryKey: ['catalog', 'programmes', channelId, start, end],
+    queryFn: () => invoke('get_programmes', { channelId: channelId ?? 0, start, end }),
+    enabled: channelId != null,
+    placeholderData: (prev) => prev,
+  });
+}
+
 export const useSettings = () =>
   useQuery({ queryKey: ['settings'], queryFn: () => invoke('get_settings', {}), staleTime: Infinity });
 

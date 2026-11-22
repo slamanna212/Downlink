@@ -25,7 +25,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { inTauri, invoke, listen } from '../../api/ipc';
-import { invalidateFavourites, useChannel, useMediaMatch, useNowNextWindow, useSources } from '../../api/queries';
+import { invalidateFavourites, useChannel, useChannelProgrammes, useMediaMatch, useNowNextWindow, useSources } from '../../api/queries';
 import type { AppError, Channel, MediaTarget, PlayerState, SessionStats } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
@@ -34,9 +34,10 @@ import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { Icon } from '../../components/Icon/Icon';
 import { notifyError, notifyInfo } from '../../components/Notify/notify';
 import { SeekBar } from '../../components/SeekBar/SeekBar';
+import { Timeline, TIMELINE_SPAN_SECONDS } from '../../components/Timeline/Timeline';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { appendDigit, NUMBER_ENTRY_TIMEOUT_MS } from '../../lib/numberEntry';
-import { dayLabel, formatClock, formatClockSeconds, formatDuration, formatRange, progress } from '../../lib/time';
+import { bucketEpoch, dayLabel, nowEpoch, formatBehindLive, formatClock, formatClockSeconds, formatDuration, formatRange, progress } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
 import { useVideoBounds } from '../../lib/useVideoBounds';
 import { useNowEpoch } from '../../lib/useNow';
@@ -52,6 +53,10 @@ import { holdSession, releaseSession } from './session';
 import classes from './Player.module.css';
 
 const BUFFER_SLOTS = 30;
+/** Repeated skip presses are gathered into one seek after this pause. */
+const SEEK_COALESCE_MS = 250;
+/** Give up waiting for the playhead to reach a pending seek after this long. */
+const SEEK_PENDING_MAX_SECS = 6;
 
 /** Live stats (1 Hz) plus the last `BUFFER_SLOTS` buffer samples for the graph. */
 function useSessionStats(enabled: boolean): { stats: SessionStats | null; bufferHistory: number[] } {
@@ -249,6 +254,9 @@ export function PlayerPage() {
   const now = useNowEpoch(15_000);
   const prog = nn.data?.[0]?.now ?? null;
   const next = nn.data?.[0]?.next ?? null;
+  // Guide entries around the timeline window, refetched as the window moves by 5 minutes.
+  const tlCenter = bucketEpoch(player.timeline?.playheadUtc ?? now);
+  const tlProgs = useChannelProgrammes(player.timeline ? player.channelId : null, tlCenter - TIMELINE_SPAN_SECONDS, tlCenter + TIMELINE_SPAN_SECONDS);
 
   const [infoOpen, setInfoOpen] = useState(false);
   const [menu, setMenu] = useState<'audio' | 'subs' | 'stream' | null>(null);
@@ -312,19 +320,62 @@ export function PlayerPage() {
       notifyInfo(t(favourite ? 'player.favouriteAdded' : 'player.favouriteRemoved', { name: ch.name }));
     });
   }, [qc]);
+  // Timeline seeks (live buffer / archive): shown at once, sent once the user stops pressing.
+  const [pendingUtc, setPendingUtc] = useState<number | null>(null);
+  const pendingRef = useRef<{ utc: number; since: number } | null>(null);
+  const seekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const seekTo = useCallback(
+    (utc: number, delay = 0) => {
+      const tl = usePlayerStore.getState().player.timeline;
+      if (!tl) return;
+      const oldest = tl.archiveStartUtc ?? tl.bufferStartUtc ?? tl.playheadUtc;
+      const target = Math.min(tl.liveEdgeUtc, Math.max(oldest, utc));
+      pendingRef.current = { utc: target, since: nowEpoch() };
+      setPendingUtc(target);
+      if (seekTimer.current) clearTimeout(seekTimer.current);
+      seekTimer.current = setTimeout(() => {
+        seekTimer.current = null;
+        cmd({ kind: 'seekTo', utc: target });
+      }, delay);
+    },
+    [cmd],
+  );
+  // Clear the pending seek once the player is there (or it plainly is not going to get there).
+  useEffect(() => {
+    const p = pendingRef.current;
+    const tl = player.timeline;
+    if (!p || seekTimer.current) return;
+    if (!tl || Math.abs(tl.playheadUtc - p.utc) < 3 || nowEpoch() - p.since > SEEK_PENDING_MAX_SECS) {
+      pendingRef.current = null;
+      setPendingUtc(null);
+    }
+  }, [player.timeline]);
+  useEffect(() => () => {
+    if (seekTimer.current) clearTimeout(seekTimer.current);
+  }, []);
   const seekBy = useCallback(
     (delta: number) => {
       const st = usePlayerStore.getState().player;
-      if (st.mode === 'live' || st.mode === null || !st.seekable) return;
+      if (!st.seekable) return;
+      if (st.timeline) {
+        seekTo((pendingRef.current?.utc ?? st.timeline.playheadUtc) + delta, SEEK_COALESCE_MS);
+        return;
+      }
+      if (st.mode === 'live' || st.mode === null) return;
       cmd({ kind: 'seek', seconds: Math.max(0, Math.min((st.position ?? 0) + delta, st.duration ?? 0)) });
     },
-    [cmd],
+    [cmd, seekTo],
   );
   const restart = useCallback(() => {
     const st = usePlayerStore.getState().player;
     if (st.channelId != null) void restartProgramme(st.channelId);
   }, []);
-  const goLive = useCallback(() => cmd({ kind: 'goLive' }), [cmd]);
+  // Behind live in the local buffer: jump to the edge without reloading. From the archive: back to the stream.
+  const goLive = useCallback(() => {
+    const st = usePlayerStore.getState().player;
+    if (st.mode === 'live' && st.timeline) seekTo(st.timeline.liveEdgeUtc);
+    else cmd({ kind: 'goLive' });
+  }, [cmd, seekTo]);
   const toggleMini = useCallback(() => void setMiniPlayer(!useUiStore.getState().mini), []);
   // Back to wherever the player was opened from (the guide keeps playing in its mini player); a player
   // reached without history (resume on launch, deep link into a fresh window) falls back to the list.
@@ -408,8 +459,8 @@ export function PlayerPage() {
       else if ((e.key === 'a' || e.key === 'A') && hasAudioMenu) setMenu((m) => (m === 'audio' ? null : 'audio'));
       else if ((e.key === 't' || e.key === 'T') && hasSubMenu) setMenu((m) => (m === 'subs' ? null : 'subs'));
       else if (e.key === 'f' || e.key === 'F') toggleFavourite();
-      else if (e.key === 'ArrowLeft') seekBy(-10);
-      else if (e.key === 'ArrowRight') seekBy(10);
+      else if (e.key === 'ArrowLeft') seekBy(e.shiftKey ? -60 : -10);
+      else if (e.key === 'ArrowRight') seekBy(e.shiftKey ? 60 : 10);
       else if (e.key === 's' || e.key === 'S') restart();
       else if (e.key === 'End') goLive();
       else if (e.key === 'Escape') {
@@ -431,8 +482,13 @@ export function PlayerPage() {
 
   const showStatus = player.reconnecting || ['Resolving', 'Connecting', 'Buffering'].includes(player.state);
   const catchup = player.mode === 'catchup';
+  // Seekable media with a position/duration bar (catch-up keeps this name: it is seekable too).
   const timeshift = player.mode === 'catchup' || player.mode === 'vod' || player.mode === 'recording';
   const live = !timeshift && (player.mode === 'live' || player.mode === null);
+  const tl = player.timeline;
+  const behindLive = tl ? Math.max(0, tl.liveEdgeUtc - (pendingUtc ?? tl.playheadUtc)) : 0;
+  const canSkip = timeshift || (live && player.seekable);
+  const showGoLive = catchup || (live && formatBehindLive(behindLive) !== '');
   const source = sources.data?.find((s) => s.id === channel?.sourceId);
   const sourceName = source?.name ?? '–';
   const canSwitchStream = live && player.state !== 'Idle' && !!channel && !!source && decodeCaps(source.caps).streamSwitch && !streamDenied;
@@ -540,7 +596,22 @@ export function PlayerPage() {
                 </div>
               </div>
             </div>
-            {timeshift && player.seekable && duration > 0 ? (
+            {tl && player.channelId != null ? (
+              <div className={classes.timeline}>
+                <span>{formatClock(Math.round(pendingUtc ?? tl.playheadUtc))}</span>
+                <Timeline
+                  label={t('player.timeline')}
+                  timeline={tl}
+                  programmes={tlProgs.data ?? []}
+                  pendingUtc={pendingUtc}
+                  disabled={!player.seekable}
+                  onSeekTo={(utc) => seekTo(utc)}
+                />
+                <span aria-label={behindLive > 5 ? t('player.behindLive', { time: formatDuration(behindLive) }) : undefined}>
+                  {formatBehindLive(behindLive)}
+                </span>
+              </div>
+            ) : timeshift && player.seekable && duration > 0 ? (
               <div className={classes.timeline}>
                 <span>{formatDuration(position)}</span>
                 <SeekBar label={t('player.seek')} position={position} duration={duration} buffered={player.buffered ?? 0} onSeek={(s) => cmd({ kind: 'seek', seconds: s })} />
@@ -563,7 +634,7 @@ export function PlayerPage() {
             )}
             <div className={classes.controls}>
               <DLIconButton label={t('player.back')} icon={IconArrowLeft} variant="overlay" size="lg" onClick={goBack} />
-              {timeshift && <DLIconButton label={t('player.back10')} icon={IconRewindBackward10} variant="overlay" size="lg" onClick={() => seekBy(-10)} />}
+              {canSkip && <DLIconButton label={t('player.back10')} icon={IconRewindBackward10} variant="overlay" size="lg" onClick={() => seekBy(-10)} />}
               <span className={classes.playPause}>
                 <DLIconButton
                   label={paused ? t('player.play') : t('player.pause')}
@@ -574,13 +645,13 @@ export function PlayerPage() {
                   onClick={togglePause}
                 />
               </span>
-              {timeshift && <DLIconButton label={t('player.fwd10')} icon={IconRewindForward10} variant="overlay" size="lg" onClick={() => seekBy(10)} />}
+              {canSkip && <DLIconButton label={t('player.fwd10')} icon={IconRewindForward10} variant="overlay" size="lg" onClick={() => seekBy(10)} />}
               {(live || catchup) && channel && (
                 <DLButton variant="overlay" size="lg" icon={IconHistory} keyHint="S" onClick={restart}>
                   {t('player.restart')}
                 </DLButton>
               )}
-              {catchup && (
+              {showGoLive && (
                 <DLButton variant="live" size="lg" keyHint="End" onClick={goLive}>
                   {t('player.goLive')}
                 </DLButton>

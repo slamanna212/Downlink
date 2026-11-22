@@ -7,6 +7,8 @@
 pub enum Profile {
     /// Live TV.
     Live,
+    /// Live TV with a disk-backed timeshift buffer (pause / rewind / fast-forward live).
+    Timeshift,
     /// Catch-up, VOD, recordings.
     Seekable,
     /// A live multiview tile (PLAN §4.11): the live profile, nothing else.
@@ -19,7 +21,10 @@ pub enum Profile {
 impl Profile {
     /// Live sessions treat an end of file as a failure (the stream should never end).
     pub fn is_live(self) -> bool {
-        matches!(self, Self::Live | Self::Multiview | Self::MultiviewDense)
+        matches!(
+            self,
+            Self::Live | Self::Timeshift | Self::Multiview | Self::MultiviewDense
+        )
     }
 }
 
@@ -223,7 +228,18 @@ pub struct Preferences {
     /// A per-file `User-Agent` header from the play plan still wins.
     pub user_agent: String,
     pub hdr_output: HdrOutput,
+    /// Live timeshift buffer length in seconds; 0 turns timeshift off. Clamped to
+    /// [`TIMESHIFT_MIN_SECS`]..=[`TIMESHIFT_MAX_SECS`] otherwise.
+    pub timeshift_secs: u32,
+    /// Directory for the on-disk timeshift cache (`demuxer-cache-dir`). Empty = mpv's default.
+    pub timeshift_dir: String,
 }
+
+/// Shortest and longest timeshift buffer.
+pub const TIMESHIFT_MIN_SECS: u32 = 15 * 60;
+pub const TIMESHIFT_MAX_SECS: u32 = 3 * 60 * 60;
+/// Bytes per second the timeshift cache is sized for (about 12 Mbit/s, a high HD bitrate).
+pub const TIMESHIFT_BYTES_PER_SEC: u64 = 1_500_000;
 
 impl Default for Preferences {
     fn default() -> Self {
@@ -238,6 +254,8 @@ impl Default for Preferences {
             subtitle: SubtitleStyle::default(),
             user_agent: String::new(),
             hdr_output: HdrOutput::Auto,
+            timeshift_secs: 60 * 60,
+            timeshift_dir: String::new(),
         }
     }
 }
@@ -245,6 +263,14 @@ impl Default for Preferences {
 impl Preferences {
     pub fn live_buffer_secs_clamped(&self) -> u32 {
         self.live_buffer_secs.clamp(1, 10)
+    }
+
+    /// Timeshift buffer length in seconds, `None` when timeshift is off.
+    pub fn timeshift_secs_effective(&self) -> Option<u32> {
+        (self.timeshift_secs > 0).then(|| {
+            self.timeshift_secs
+                .clamp(TIMESHIFT_MIN_SECS, TIMESHIFT_MAX_SECS)
+        })
     }
 
     pub fn hwdec_effective(&self) -> &str {
@@ -392,6 +418,33 @@ pub fn profile_options(profile: Profile, prefs: &Preferences) -> Opts {
             kv("demuxer-max-bytes", "32MiB"),
             kv("demuxer-max-back-bytes", "16MiB"),
         ],
+        Profile::Timeshift => {
+            let Some(secs) = prefs.timeshift_secs_effective() else {
+                return profile_options(Profile::Live, prefs);
+            };
+            let bytes = u64::from(secs) * TIMESHIFT_BYTES_PER_SEC;
+            // Reading continues while paused (cache-secs covers the whole buffer) and seeking
+            // stays inside the cache; the forward and back limits are each one buffer long so a
+            // pause of the full length still fits. The cache lives on disk, not in RAM.
+            let mut o = vec![
+                kv("cache", "yes"),
+                kv("cache-on-disk", "yes"),
+                kv("force-seekable", "yes"),
+                kv("demuxer-seekable-cache", "yes"),
+                kv("cache-secs", secs.to_string()),
+                kv(
+                    "cache-pause-wait",
+                    prefs.live_buffer_secs_clamped().to_string(),
+                ),
+                kv("demuxer-readahead-secs", "2"),
+                kv("demuxer-max-bytes", bytes.to_string()),
+                kv("demuxer-max-back-bytes", bytes.to_string()),
+            ];
+            if !prefs.timeshift_dir.is_empty() {
+                o.push(kv("demuxer-cache-dir", prefs.timeshift_dir.clone()));
+            }
+            o
+        }
         Profile::Seekable => vec![
             kv("cache", "yes"),
             kv("demuxer-readahead-secs", "20"),
@@ -549,6 +602,45 @@ mod tests {
         assert!(has(&seek, "demuxer-max-bytes", "128MiB"));
         assert!(has(&seek, "demuxer-max-back-bytes", "64MiB"));
         assert!(!seek.iter().any(|(k, _)| k == "cache-secs"));
+    }
+
+    #[test]
+    fn timeshift_profile_uses_a_disk_cache_sized_from_the_setting() {
+        let p = Preferences {
+            timeshift_secs: 3600,
+            timeshift_dir: "/tmp/ts".into(),
+            ..Preferences::default()
+        };
+        let o = profile_options(Profile::Timeshift, &p);
+        assert!(has(&o, "cache-on-disk", "yes"));
+        assert!(has(&o, "force-seekable", "yes"));
+        assert!(has(&o, "cache-secs", "3600"));
+        assert!(has(&o, "demuxer-max-back-bytes", "5400000000"));
+        assert!(has(&o, "demuxer-max-bytes", "5400000000"));
+        assert!(has(&o, "demuxer-cache-dir", "/tmp/ts"));
+        assert!(Profile::Timeshift.is_live());
+    }
+
+    #[test]
+    fn timeshift_is_clamped_and_can_be_off() {
+        let at = |secs| {
+            Preferences {
+                timeshift_secs: secs,
+                ..Preferences::default()
+            }
+            .timeshift_secs_effective()
+        };
+        assert_eq!(at(0), None);
+        assert_eq!(at(60), Some(TIMESHIFT_MIN_SECS));
+        assert_eq!(at(99_999), Some(TIMESHIFT_MAX_SECS));
+        let off = Preferences {
+            timeshift_secs: 0,
+            ..Preferences::default()
+        };
+        assert_eq!(
+            profile_options(Profile::Timeshift, &off),
+            profile_options(Profile::Live, &off)
+        );
     }
 
     #[test]

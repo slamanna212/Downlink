@@ -150,3 +150,58 @@ export const recentWindowStart = (hours: number, now: Epoch = nowEpoch()): Epoch
 export function splitHoursMinutes(totalSeconds: number): { h: number; m: number } {
   return { h: Math.floor(totalSeconds / 3600), m: Math.round((totalSeconds % 3600) / 60) };
 }
+
+// ---- Channel timeline (player scrub bar): a window of wall-clock time centred on the playhead ----
+
+export interface TimeWindow {
+  start: Epoch;
+  end: Epoch;
+}
+
+/** Window of `spanSeconds` centred on `center`. */
+export const timelineWindow = (center: Epoch, spanSeconds: number): TimeWindow => ({
+  start: center - spanSeconds / 2,
+  end: center + spanSeconds / 2,
+});
+
+/** 0..1 position of `epoch` in the window (not clamped). */
+export const ratioOfEpoch = (w: TimeWindow, epoch: Epoch): number => (w.end > w.start ? (epoch - w.start) / (w.end - w.start) : 0);
+
+/** Epoch at ratio `r` (clamped to 0..1) of the window. */
+export const epochAtRatio = (w: TimeWindow, r: number): Epoch => w.start + Math.min(1, Math.max(0, r)) * (w.end - w.start);
+
+export interface TimelineSegment {
+  /** 0..1 within the window. */
+  start: number;
+  end: number;
+  title: string | null;
+}
+
+/**
+ * Bar segments for the programmes overlapping the window, split at programme boundaries. With no
+ * programmes the whole bar is one segment. Gaps between programmes in the guide become untitled segments.
+ */
+export function programmeSegments(programmes: { startUtc: Epoch; endUtc: Epoch; title: string | null }[], w: TimeWindow): TimelineSegment[] {
+  const clamp = (r: number) => Math.min(1, Math.max(0, r));
+  const inWindow = programmes
+    .filter((p) => p.endUtc > w.start && p.startUtc < w.end && p.endUtc > p.startUtc)
+    .sort((a, b) => a.startUtc - b.startUtc);
+  const out: TimelineSegment[] = [];
+  let cursor = 0;
+  for (const p of inWindow) {
+    const s = clamp(ratioOfEpoch(w, p.startUtc));
+    const e = clamp(ratioOfEpoch(w, p.endUtc));
+    if (e <= cursor) continue;
+    if (s > cursor) out.push({ start: cursor, end: s, title: null });
+    out.push({ start: Math.max(s, cursor), end: e, title: p.title });
+    cursor = e;
+  }
+  if (cursor < 1) out.push({ start: cursor, end: 1, title: null });
+  return out;
+}
+
+/** "−5:20" behind live; empty within `slack` seconds of the edge. */
+export const formatBehindLive = (seconds: number, slack = 5): string => (seconds > slack ? `−${formatDuration(seconds)}` : '');
+
+/** Coarse bucket of an epoch (default 5 min), for query keys that should not change every second. */
+export const bucketEpoch = (epoch: Epoch, seconds = 300): Epoch => Math.floor(epoch / seconds) * seconds;

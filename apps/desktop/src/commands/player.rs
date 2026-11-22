@@ -48,6 +48,14 @@ pub enum UiCommand {
     Seek {
         seconds: f64,
     },
+    /// Wall-clock seek on a live or catch-up timeline (UTC seconds).
+    SeekTo {
+        utc: f64,
+    },
+    /// Relative seek on a live or catch-up timeline.
+    SeekBy {
+        seconds: f64,
+    },
     GoLive,
     SetVolume {
         volume: f64,
@@ -74,6 +82,8 @@ pub async fn player_command(state: State<'_, AppState>, command: UiCommand) -> C
         UiCommand::TogglePause => pb.command(PlayerCommand::TogglePause),
         UiCommand::Stop => pb.stop().await,
         UiCommand::Seek { seconds } => pb.command(PlayerCommand::SeekAbsolute { secs: seconds }),
+        UiCommand::SeekTo { utc } => pb.seek_to(utc).await,
+        UiCommand::SeekBy { seconds } => pb.seek_by(seconds).await,
         UiCommand::GoLive => pb.go_live().await,
         UiCommand::SetVolume { volume } => pb.command(PlayerCommand::Volume {
             percent: volume.clamp(0.0, 130.0).round() as u8,

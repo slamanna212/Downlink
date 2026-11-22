@@ -147,8 +147,15 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   icon · past no archive dashed, disabled text · now `--dl-guide-now` + 10% fill + 2 px bar · future
   `--dl-guide-future` · scheduled red dot · focused ring.
 - **Player**: full-bleed video, bottom `--dl-scrim` with badge row, 30/650 title, timeline, 44 px controls.
-  Live timeline = programme start→end. Catch-up = position (accent), buffered (white 32%), thumb + time
-  tooltip, Go live (live variant, `End`). Info panel 380 px right, mono values, then
+  Live and catch-up share one channel timeline: a 1 h window of wall-clock time sliding under a thumb
+  fixed at the centre, so there is always room to rewind. Gaps (0.25rem) only at EPG programme
+  boundaries; no guide data = no gaps. Layers: unplayable (before the buffer/archive, after the live edge)
+  white 6% · rewindable white 18% · watched (oldest → thumb) accent · ahead to the live edge white 32% ·
+  2 px `--dl-live` tick at the live edge. Hovered segment grows ×1.75; tooltip = clock + programme title.
+  Drag pans and seeks on release; click seeks. Left label playhead clock, right label `−m:ss` behind
+  live. ←/→ ±10 s, Shift ±60 s, repeats gathered into one seek. Go live (live variant, `End`) whenever
+  behind live. VOD/recordings keep the position bar: position (accent), buffered (white 32%), thumb + time
+  tooltip. Info panel 380 px right, mono values, then
   a BUFFER · n s graph (last 30 samples at 1 Hz, 36 px bars, `--dl-accent-bar`). Channel logo (tv size) left of the badge row and title; no separate zap pill.
   Number entry pill top-right with accent caret.
 

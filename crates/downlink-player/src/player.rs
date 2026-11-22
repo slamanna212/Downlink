@@ -298,6 +298,10 @@ pub struct PlayerSnapshot {
     pub reconnecting: bool,
     /// Classification of the failure when `state` is `failed`.
     pub failure: Option<FailureInfo>,
+    /// Seekable range of the demuxer cache (media seconds) around the position.
+    pub seek_range: Option<(f64, f64)>,
+    /// Live sessions: media time ↔ wall clock (see [`crate::timeshift`]).
+    pub live_anchor: Option<crate::timeshift::LiveAnchor>,
 }
 
 #[derive(Debug, Clone)]
@@ -423,6 +427,8 @@ struct Stats {
     height: Option<i64>,
     fps: Option<f64>,
     dropped: Option<i64>,
+    seek_range: Option<(f64, f64)>,
+    live_anchor: Option<crate::timeshift::LiveAnchor>,
 }
 
 struct Shared {
@@ -532,6 +538,7 @@ const OBSERVED: &[(&str, i32)] = &[
     ("estimated-vf-fps", ffi::FORMAT_DOUBLE),
     ("frame-drop-count", ffi::FORMAT_INT64),
     ("demuxer-cache-time", ffi::FORMAT_DOUBLE),
+    ("demuxer-cache-state", ffi::FORMAT_STRING),
     ("volume", ffi::FORMAT_DOUBLE),
     ("mute", ffi::FORMAT_FLAG),
     ("track-list", ffi::FORMAT_STRING),
@@ -934,6 +941,8 @@ fn snapshot(s: &Shared) -> PlayerSnapshot {
             s.file_loaded,
             s.first_frame_ms.is_some(),
         ),
+        seek_range: s.stats.seek_range,
+        live_anchor: s.stats.live_anchor,
     }
 }
 
@@ -959,6 +968,9 @@ fn load_current(inner: &Inner, s: &mut Shared) -> Result<(), PlayerError> {
     let opts = options::loadfile_options(req.profile, &prefs, &req.headers, req.start_secs);
     s.load_started = Some(Instant::now());
     s.first_frame_ms = None;
+    // A new file starts a new timeline and a new cache.
+    s.stats.seek_range = None;
+    s.stats.live_anchor = None;
     inner.eng().command_named(
         "loadfile",
         &[("url", &req.url), ("flags", "replace"), ("options", &opts)],
@@ -1144,6 +1156,23 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
             } else {
                 None
             };
+            s.throttle.mark_dirty();
+        }
+        ("demuxer-cache-state", v) => {
+            let range = if let PropValue::Str(j) = v {
+                crate::timeshift::parse_seek_range(&j, s.stats.position)
+            } else {
+                None
+            };
+            s.stats.seek_range = range;
+            let live = s.request.as_ref().is_some_and(|r| r.profile.is_live());
+            if let (true, Some((_, end))) = (live, range) {
+                s.stats.live_anchor = Some(crate::timeshift::advance_anchor(
+                    s.stats.live_anchor,
+                    end,
+                    unix_ms(),
+                ));
+            }
             s.throttle.mark_dirty();
         }
         ("volume", PropValue::Double(v)) => {

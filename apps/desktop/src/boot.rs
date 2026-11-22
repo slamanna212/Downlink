@@ -146,6 +146,16 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
     match loaded {
         Ok(Ok(loaded)) => {
             tracing::info!(source = ?loaded.source, api = ?loaded.client_api_version, "libmpv loaded");
+            // Our own timeshift cache dir only: emptied on every start (mpv unlinks its cache
+            // files, but a crash can leave one behind).
+            if let Ok(dir) = handle.path().app_cache_dir() {
+                let dir = dir.join("timeshift");
+                let _ = std::fs::remove_dir_all(&dir);
+                match std::fs::create_dir_all(&dir) {
+                    Ok(()) => dto::set_timeshift_dir(dir.to_string_lossy().into_owned()),
+                    Err(e) => tracing::warn!("timeshift cache dir unavailable: {e}"),
+                }
+            }
             let prefs = dto::preferences_from_settings(&settings);
             let sink = sink_ctx.sink();
             let loaded_for_tiles = loaded.clone();

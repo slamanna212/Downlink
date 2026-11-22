@@ -137,7 +137,7 @@ export function idleState(): PlayerState {
   return {
     state: 'Idle', mode: null, channelId: null, position: null, duration: null, buffered: null, seekable: false,
     volume: 100, muted: false, hwdecCurrent: null, videoCodec: null, width: null, height: null, waitingOn: null, reconnecting: false,
-    error: null, transitionedAt: Date.now(), programme: null, title: null, mediaId: null, resumeAt: null, tracks: [],
+    error: null, transitionedAt: Date.now(), programme: null, title: null, mediaId: null, resumeAt: null, tracks: [], timeline: null,
   };
 }
 
@@ -162,9 +162,17 @@ export function createMockBackend(): Backend {
   const channels = mode === 'empty' ? [] : mockChannels(mode === 'big' ? 5000 : 240);
   const scheduled = new Set<string>();
   let tick: ReturnType<typeof setInterval> | null = null;
+  // Live timeshift mock: seconds behind the edge and when the buffer started.
+  let behind = 0;
+  let liveSince = 0;
+  const liveTimeline = (): PlayerState['timeline'] => {
+    const now = nowSec();
+    const bufferStartUtc = Math.max(liveSince, now - 3600);
+    return { playheadUtc: now - behind, liveEdgeUtc: now, bufferStartUtc, archiveStartUtc: null, behindLiveSecs: behind, source: behind > 5 ? 'buffer' : 'live' };
+  };
   const groups = mockGroups();
   let settings: AppSettings = {
-    liveBufferSecs: 2, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
+    liveBufferSecs: 2, timeshiftMinutes: 60, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
     deinterlace: 'auto', hdrOutput: 'auto', subtitleSize: 100, subtitleBackground: true, resumeLastChannel: false,
   };
   let plex: PlexStatus = { signedIn: false, accountName: null, serverId: null, serverName: null };
@@ -383,7 +391,15 @@ export function createMockBackend(): Backend {
     get_player_state: () => player,
     play_channel: ({ channelId }) => {
       if (new URLSearchParams(location.search).has('failplay')) throw appError('stream', 'The server did not answer. Try again in a moment.');
-      setPlayer({ state: 'Resolving', mode: 'live', channelId, title: null, mediaId: null, error: null, programme: mockNowNext(channelId, nowSec(), scheduled).now, position: null, duration: null, buffered: null, seekable: false, resumeAt: null });
+      behind = 0;
+      liveSince = nowSec() - 1200;
+      setPlayer({ state: 'Resolving', mode: 'live', channelId, title: null, mediaId: null, error: null, programme: mockNowNext(channelId, nowSec(), scheduled).now, position: null, duration: null, buffered: null, seekable: true, resumeAt: null, timeline: liveTimeline() });
+      if (tick) clearInterval(tick);
+      tick = setInterval(() => {
+        if (player.mode !== 'live') return;
+        if (player.state === 'Paused') behind += 1;
+        setPlayer({ timeline: liveTimeline() });
+      }, 1000);
       setTimeout(() => setPlayer({ state: 'Connecting' }), 150);
       setTimeout(() => {
         // `?fail=<id>` in the URL makes that channel fail, to exercise the error overlay.
@@ -399,7 +415,12 @@ export function createMockBackend(): Backend {
       else if (command.kind === 'stop') setPlayer({ ...idleState(), state: 'Stopped' });
       else if (command.kind === 'setVolume') setPlayer({ volume: command.volume });
       else if (command.kind === 'setMuted') setPlayer({ muted: command.muted });
-      else if (command.kind === 'seek') setPlayer({ position: Math.max(0, Math.min(command.seconds, player.duration ?? command.seconds)) });
+      else if ((command.kind === 'seekTo' || command.kind === 'seekBy') && player.mode === 'live') {
+        const tl = liveTimeline();
+        const target = command.kind === 'seekTo' ? command.utc : (tl?.playheadUtc ?? nowSec()) + command.seconds;
+        behind = Math.max(0, Math.min(nowSec() - target, nowSec() - (tl?.bufferStartUtc ?? nowSec())));
+        setPlayer({ timeline: liveTimeline() });
+      } else if (command.kind === 'seek') setPlayer({ position: Math.max(0, Math.min(command.seconds, player.duration ?? command.seconds)) });
       else if (command.kind === 'setAudioTrack') setPlayer({ tracks: player.tracks.map((t) => (t.kind === 'audio' ? { ...t, selected: t.id === command.id } : t)) });
       else if (command.kind === 'setSubtitleTrack') setPlayer({ tracks: player.tracks.map((t) => (t.kind === 'sub' ? { ...t, selected: t.id === command.id } : t)) });
       else if (command.kind === 'goLive' && player.channelId != null) impl.play_channel({ channelId: player.channelId });

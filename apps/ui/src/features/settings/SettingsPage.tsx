@@ -10,7 +10,7 @@ import { DLButton } from '../../components/DLButton/DLButton';
 import { Icon, type TablerIcon } from '../../components/Icon/Icon';
 import { SettingRow } from '../../components/SettingRow/SettingRow';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
-import { formatUpdated, nowEpoch } from '../../lib/time';
+import { formatUpdated, nowEpoch, splitHoursMinutes } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
 import { useTasksStore } from '../../store/tasks';
 import { useUiStore } from '../../store/ui';
@@ -151,15 +151,28 @@ export function audioDeviceOptions(list: { id: string; name: string }[], stored:
   return opts;
 }
 
+/** "Off", "45 min", "1 h", "1 h 30 min". */
+function timeshiftLabel(minutes: number): string {
+  if (minutes <= 0) return t('settings.timeshift.off');
+  const { h, m } = splitHoursMinutes(minutes * 60);
+  if (h === 0) return t('settings.timeshift.minutes', { m });
+  return m === 0 ? t('settings.timeshift.hours', { h }) : t('settings.timeshift.hoursMinutes', { h, m });
+}
+
+/** Disk the buffer may use at its size cap (about 12 Mbit/s, matching the player's limit). */
+const timeshiftDiskGb = (minutes: number): string => ((minutes * 60 * 1.5) / 1000).toFixed(1);
+
 function PlaybackSection() {
   const { data } = useSettings();
   const patch = useSettingsPatch();
   const diag = useQuery({ queryKey: ['diagnostics', 'hwdec'], queryFn: () => invoke('get_diagnostics', {}) });
   const devices = useQuery({ queryKey: ['audioDevices'], queryFn: () => invoke('list_audio_devices', {}) });
   const [buffer, setBuffer] = useState<number | null>(null);
+  const [timeshift, setTimeshift] = useState<number | null>(null);
   const [subSize, setSubSize] = useState<number | null>(null);
   if (!data) return <SkeletonList rows={3} label={t('loading.generic')} />;
   const shown = buffer ?? data.liveBufferSecs;
+  const shownTimeshift = timeshift ?? data.timeshiftMinutes ?? 60;
   const current = diag.data?.hwdecCurrent;
   return (
     <Section title={t('settings.playback')} help={t('settings.playback.help')}>
@@ -196,6 +209,27 @@ function PlaybackSection() {
             }}
           />
           <span className={classes.value}>{shown} s</span>
+        </div>
+      </SettingRow>
+      <SettingRow
+        label={t('settings.timeshift')}
+        help={shownTimeshift > 0 ? t('settings.timeshift.help', { gb: timeshiftDiskGb(shownTimeshift) }) : t('settings.timeshift.offHelp')}
+      >
+        <div className={classes.sliderRow}>
+          <Slider
+            min={0}
+            max={180}
+            step={15}
+            value={shownTimeshift}
+            label={null}
+            thumbLabel={t('settings.timeshift')}
+            onChange={setTimeshift}
+            onChangeEnd={(v) => {
+              patch.mutate({ timeshiftMinutes: v });
+              setTimeshift(null);
+            }}
+          />
+          <span className={classes.value}>{timeshiftLabel(shownTimeshift)}</span>
         </div>
       </SettingRow>
       <SettingRow label={t('settings.audioDevice')} help={t('settings.audioDevice.help')}>

@@ -12,6 +12,7 @@ pub mod player;
 pub mod retry;
 pub mod state;
 pub mod surface;
+pub mod timeshift;
 
 pub use engine::{Engine, RenderContext};
 pub use error::PlayerError;
@@ -28,3 +29,4 @@ pub use player::{
 pub use retry::{FailureCause, RetryDecision, RetryPolicy};
 pub use state::{SessionState, StateMachine, Transition};
 pub use surface::{MAX_SURFACES, MainThreadDispatch, SurfaceBounds, VideoSurface};
+pub use timeshift::LiveAnchor;

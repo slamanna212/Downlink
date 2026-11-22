@@ -151,6 +151,21 @@ export interface PlayerState {
   transitionedAt: number;
   /** Audio and subtitle tracks of the current file (teletext / DVB subtitles are `sub`). */
   tracks: Track[];
+  /** Wall-clock timeline of a live or catch-up session; null for VOD and recordings. */
+  timeline: Timeline | null;
+}
+
+/** Channel timeline in UTC seconds (fractional). Older than the buffer is the archive, when there is one. */
+export interface Timeline {
+  playheadUtc: number;
+  /** Newest playable moment. */
+  liveEdgeUtc: number;
+  /** Oldest moment in the local timeshift buffer (live only). */
+  bufferStartUtc: number | null;
+  /** Oldest moment in the server archive (channels with catch-up only). */
+  archiveStartUtc: number | null;
+  behindLiveSecs: number;
+  source: 'buffer' | 'archive' | 'live';
 }
 
 export interface Track {
@@ -239,6 +254,10 @@ export type PlayerCommand =
   | { kind: 'stop' }
   /** Absolute position in seconds (catch-up / VOD). */
   | { kind: 'seek'; seconds: number }
+  /** Wall-clock seek on a live / catch-up timeline (UTC seconds). */
+  | { kind: 'seekTo'; utc: number }
+  /** Relative seek on a live / catch-up timeline. */
+  | { kind: 'seekBy'; seconds: number }
   | { kind: 'goLive' }
   | { kind: 'setVolume'; volume: number }
   | { kind: 'setMuted'; muted: boolean }
@@ -260,6 +279,8 @@ export type HdrOutput = 'auto' | 'off';
 export interface AppSettings {
   /** 1..10 seconds. */
   liveBufferSecs: number;
+  /** Live timeshift buffer in minutes: 0 = off, 15..180. Missing in older settings; treat as 60. */
+  timeshiftMinutes?: number;
   hwdec: HwdecSetting;
   debugLogging: boolean;
   /** Null = system default. */
