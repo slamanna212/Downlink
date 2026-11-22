@@ -144,12 +144,13 @@ impl Upstream {
                 return None;
             };
             if let Some(base) = &self.recording_base
-                && Url::parse(uri).is_ok()
+                && playlist.origin() == base.origin()
+                && (Url::parse(uri).is_ok() || uri.starts_with("//"))
                 && url.origin() != base.origin()
             {
                 // Dispatcharr synthesizes recording segment addresses from the upstream
                 // Host. Rebase that recording directory, leaving other resources anonymous.
-                let (directory, _) = self.root.path().rsplit_once('/')?;
+                let (directory, _) = playlist.path().rsplit_once('/')?;
                 let configured_prefix = base.path().trim_end_matches('/');
                 let upstream_directory = directory
                     .strip_prefix(configured_prefix)
@@ -163,7 +164,7 @@ impl Upstream {
                         .strip_prefix(upstream_directory)
                         .is_some_and(|suffix| suffix.starts_with('/'))
                 {
-                    url = Url::parse(&rewrite_playlist(uri, base)).ok()?;
+                    url = Url::parse(&rewrite_playlist(url.as_str(), base)).ok()?;
                 }
             }
             if !matches!(url.scheme(), "http" | "https") {
@@ -249,7 +250,7 @@ async fn serve(
     };
     let mut response = match initial {
         Some(response) => response,
-        None => upstream.fetch(url.clone(), range).await?,
+        None => upstream.fetch(url, range).await?,
     };
     let known_playlist = root
         || is_playlist_url(response.url())
@@ -280,7 +281,7 @@ async fn serve(
         }
         let text = std::str::from_utf8(&bytes)
             .map_err(|_| AppError::stream("The server returned an invalid playlist."))?;
-        let body = upstream.playlist(text, &url)?;
+        let body = upstream.playlist(text, response.url())?;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: {PLAYLIST_CONTENT_TYPE}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
             body.len(),
@@ -442,7 +443,7 @@ mod tests {
     use super::*;
     use downlink_core::auth::SecretString;
     use downlink_core::source::PlayProfile;
-    use wiremock::matchers::{header, method, path};
+    use wiremock::matchers::{header, method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn plan(url: String) -> PlayPlan {
@@ -584,5 +585,48 @@ mod tests {
         let _proxy = prepare(&mut plan, true, None).await.unwrap().unwrap();
         let playlist = get(&plan.url).await;
         assert_eq!(get(playlist.lines().last().unwrap()).await, "segment");
+    }
+
+    #[tokio::test]
+    async fn resolves_segment_and_map_references_using_the_redirected_playlist_address() {
+        let source = MockServer::start().await;
+        let other = MockServer::start().await;
+        Mock::given(path("/index.m3u8"))
+            .and(header("X-API-Key", "fixture-key"))
+            .respond_with(ResponseTemplate::new(302).insert_header(
+                "location",
+                format!("{}/nested/video/live.m3u8", other.uri()),
+            ))
+            .expect(1)
+            .mount(&source)
+            .await;
+        Mock::given(path("/nested/video/live.m3u8"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "#EXTM3U\n#EXT-X-MAP:URI=\"../init.mp4?quality=hd\"\n#EXTINF:4,\nseg.ts\n",
+            ))
+            .expect(1)
+            .mount(&other)
+            .await;
+        Mock::given(path("/nested/init.mp4"))
+            .and(query_param("quality", "hd"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("init"))
+            .expect(1)
+            .mount(&other)
+            .await;
+        Mock::given(path("/nested/video/seg.ts"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("video"))
+            .expect(1)
+            .mount(&other)
+            .await;
+
+        let mut plan = plan(format!("{}/index.m3u8", source.uri()));
+        let _proxy = prepare(&mut plan, false, None).await.unwrap().unwrap();
+        let playlist = get(&plan.url).await;
+        let mut lines = playlist.lines().skip(1);
+        assert_eq!(get(uri(lines.next().unwrap())).await, "init");
+        assert_eq!(get(lines.nth(1).unwrap()).await, "video");
+        assert!(other.received_requests().await.unwrap().iter().all(|req| {
+            !req.headers.contains_key("x-api-key") && !req.headers.contains_key("referer")
+        }));
     }
 }
