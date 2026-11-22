@@ -235,6 +235,8 @@ export interface AppError {
   message: string;
   /** Seconds. */
   retryAfter: number | null;
+  /** Source that requires a new certificate trust decision. */
+  sourceId?: number;
   /** More specific cause for code 'stream'/'media' (PLAN §4.9): server stream limit, undecodable codec, engine crash. */
   reason?: 'limit' | 'codec' | 'engine';
   /** Codec name when reason is 'codec'. */

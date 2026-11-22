@@ -558,6 +558,8 @@ export const en = {
   'blocking.newerDb.body': 'Opening it with this version could damage it. Quit and update Downlink, or start with a fresh library (the old one is kept aside).',
   'blocking.newerDb.fresh': 'Start fresh',
   'blocking.newerDb.quit': 'Quit',
+  'blocking.cert.missingTitle': 'This source has no trusted certificate.',
+  'blocking.cert.missingBody': 'Only trust this certificate if you recognize the server and expected it to use a self-signed certificate.',
   'blocking.cert.title': 'The server’s certificate changed.',
   'blocking.cert.body': 'This can happen after a server upgrade. Only trust the new certificate if you expected the change.',
   'blocking.cert.trust': 'Trust new certificate',

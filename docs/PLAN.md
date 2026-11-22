@@ -270,8 +270,9 @@ sources, connection limit), `media` (codec/format), `local` (disk/DB). Only `aut
 - API keys, passwords and JWT refresh tokens live in the OS keychain (`keyring`: Credential Manager,
   Keychain, Secret Service). SQLite stores only a keychain reference. A test asserts no secret is
   written to the DB.
-- TLS: self-signed allowed per source behind an explicit toggle with a warning; re-prompt if the
-  certificate changes. Verification is never silently disabled.
+- TLS: self-signed certificates require explicit trust for each source and its configured HTTPS
+  origin. A missing or changed fingerprint requires another trust decision for that source.
+  Connections to other origins use normal certificate verification.
 - **Redaction** (hard rule, unit-tested): `/live/<u>/<p>/`, `/movie/<u>/<p>/`, `/series/<u>/<p>/`,
   `/timeshift/<u>/<p>/`, `player_api.php` / `get.php` / `xmltv.php` / `timeshift.php` query
   credentials, `X-API-Key`, `Authorization`, and provider URLs from redirects. Applied at the logging

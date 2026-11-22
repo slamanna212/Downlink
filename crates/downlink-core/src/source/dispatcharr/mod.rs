@@ -61,14 +61,14 @@ impl std::fmt::Debug for Credentials {
 #[derive(Debug, Clone)]
 pub struct ClientOptions {
     /// Self-signed certificates, behind an explicit per-source toggle only.
-    pub insecure_tls: bool,
+    pub tls_pin: Option<crate::tls::Pin>,
     pub timeout: Duration,
 }
 
 impl Default for ClientOptions {
     fn default() -> Self {
         Self {
-            insecure_tls: false,
+            tls_pin: None,
             timeout: Duration::from_secs(30),
         }
     }
@@ -163,7 +163,7 @@ pub struct DispatcharrClient {
     http: reqwest::Client,
     base: Url,
     creds: Credentials,
-    insecure_tls: bool,
+    tls_pin: Option<crate::tls::Pin>,
     tokens: tokio::sync::Mutex<Tokens>,
     sem: Semaphore,
     secrets: Mutex<RedactionSet>,
@@ -254,7 +254,8 @@ impl DispatcharrClient {
         let base = normalise_base_url(base_url)?;
         let http = crate::http::authenticated(crate::tls::apply(
             reqwest::Client::builder(),
-            opts.insecure_tls,
+            &base,
+            opts.tls_pin.as_ref(),
         )?)
         .timeout(opts.timeout)
         .user_agent(crate::user_agent())
@@ -273,7 +274,7 @@ impl DispatcharrClient {
             http,
             base,
             creds,
-            insecure_tls: opts.insecure_tls,
+            tls_pin: opts.tls_pin,
             tokens: tokio::sync::Mutex::new(Tokens::default()),
             sem: Semaphore::new(MAX_CONCURRENT),
             secrets: Mutex::new(secrets),
@@ -1038,7 +1039,7 @@ impl DispatcharrClient {
         let u = Url::parse(url)?;
         if u.origin() != self.base.origin() || !u.path().starts_with(self.base.path()) {
             // Another host (a poster CDN): fetched anonymously. The key never goes elsewhere.
-            return crate::images::fetch_public(url, self.insecure_tls).await;
+            return crate::images::fetch_public(url, self.tls_pin.as_ref()).await;
         }
         let rel = u.path().strip_prefix(self.base.path()).unwrap_or_default();
         // Keep the query: image URLs select the variant (`?kind=backdrop&index=0`).
@@ -1134,7 +1135,7 @@ impl DispatcharrClient {
             .base
             .join(&format!("proxy/ts/stream/{channel_uuid}?output_format=hls"))?;
         let auth = self.auth_header().await?;
-        match crate::source::probe_redirect(url.as_str(), &[auth], self.insecure_tls).await? {
+        match crate::source::probe_redirect(url.as_str(), &[auth], self.tls_pin.as_ref()).await? {
             crate::source::RedirectOutcome::Redirect(loc) => {
                 let u = reqwest::Url::parse(loc.expose())?;
                 let token = hls_token_of(u.path()).ok_or_else(|| {
@@ -1369,7 +1370,7 @@ impl Source for DispatcharrClient {
         let plan = self.live_plan(&ch).await?;
         // Redirect and Unknown profiles: resolve in Rust with redirects disabled; mpv gets the
         // Location and no key. A 2xx (profile was really Proxy) hands back the original plan.
-        plan.resolve_at_play(self.insecure_tls).await
+        plan.resolve_at_play(self.tls_pin.as_ref()).await
     }
 
     async fn catchup(&self, ch: ChannelKey, p: &Programme) -> Result<PlayPlan> {

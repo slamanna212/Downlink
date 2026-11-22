@@ -59,11 +59,11 @@ impl PlayPlan {
     /// - 2xx: the channel was really a proxy. The response is dropped at once and the original
     ///   URL plus header go to mpv. One extra client registration happened; logged at info when
     ///   the profile was unknown.
-    pub async fn resolve_at_play(self, insecure_tls: bool) -> Result<PlayPlan> {
+    pub async fn resolve_at_play(self, pin: Option<&crate::tls::Pin>) -> Result<PlayPlan> {
         if !self.needs_redirect_resolve {
             return Ok(self);
         }
-        match probe_redirect(&self.url, &self.headers, insecure_tls).await? {
+        match probe_redirect(&self.url, &self.headers, pin).await? {
             RedirectOutcome::Redirect(loc) => Ok(self.with_location(&loc)),
             RedirectOutcome::Direct => {
                 if self.unknown_profile {
@@ -165,9 +165,10 @@ pub enum RedirectOutcome {
 pub async fn probe_redirect(
     url: &str,
     headers: &[(String, SecretString)],
-    insecure_tls: bool,
+    pin: Option<&crate::tls::Pin>,
 ) -> Result<RedirectOutcome> {
-    let client = crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
+    let url = reqwest::Url::parse(url)?;
+    let client = crate::tls::apply(reqwest::Client::builder(), &url, pin)?
         .redirect(reqwest::redirect::Policy::none())
         .user_agent(crate::user_agent())
         .timeout(Duration::from_secs(15))
@@ -181,7 +182,7 @@ pub async fn probe_redirect(
         val.set_sensitive(true);
         map.insert(name, val);
     }
-    let resp = client.get(url).headers(map).send().await?;
+    let resp = client.get(url.clone()).headers(map).send().await?;
     let status = resp.status();
     if status.is_redirection() {
         let loc = resp
@@ -190,8 +191,7 @@ pub async fn probe_redirect(
             .and_then(|v| v.to_str().ok())
             .ok_or_else(|| AppError::stream("The server redirected without saying where."))?;
         // Resolve relative redirects against the request URL.
-        let base = reqwest::Url::parse(url)?;
-        let abs = base.join(loc)?;
+        let abs = url.join(loc)?;
         return Ok(RedirectOutcome::Redirect(Location(abs.to_string())));
     }
     let ra = retry_after(resp.headers());
@@ -220,9 +220,9 @@ pub async fn probe_redirect(
 pub async fn resolve_redirect(
     url: &str,
     headers: &[(String, SecretString)],
-    insecure_tls: bool,
+    pin: Option<&crate::tls::Pin>,
 ) -> Result<Location> {
-    match probe_redirect(url, headers, insecure_tls).await? {
+    match probe_redirect(url, headers, pin).await? {
         RedirectOutcome::Redirect(l) => Ok(l),
         RedirectOutcome::Direct => Err(AppError::stream(
             "This channel did not redirect as expected. Its stream profile may have changed; refresh the channel list.",

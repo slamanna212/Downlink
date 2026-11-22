@@ -110,17 +110,35 @@ pub trait Fetcher: Send + Sync {
 /// they are never logged (errors are URL-free).
 pub struct HttpFetcher {
     client: reqwest::Client,
+    pinned: Option<(crate::tls::Pin, reqwest::Client)>,
 }
 
 impl HttpFetcher {
-    pub fn new(insecure_tls: bool) -> Result<Self> {
-        Ok(Self {
-            client: crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
+    pub fn new(pin: Option<&crate::tls::Pin>) -> Result<Self> {
+        let builder = || {
+            reqwest::Client::builder()
+                .referer(false)
                 .timeout(Duration::from_secs(300))
                 .connect_timeout(Duration::from_secs(20))
                 .user_agent(crate::user_agent())
-                .build()?,
+        };
+        let pinned = match pin {
+            Some(pin) => Some((pin.clone(), pin.apply(builder())?.build()?)),
+            None => None,
+        };
+        Ok(Self {
+            client: builder().build()?,
+            pinned,
         })
+    }
+
+    fn get(&self, url: &str) -> Result<reqwest::RequestBuilder> {
+        let url = reqwest::Url::parse(url)?;
+        let client = match &self.pinned {
+            Some((pin, client)) if pin.matches(&url) => client,
+            _ => &self.client,
+        };
+        Ok(client.get(url))
     }
 }
 
@@ -150,13 +168,13 @@ async fn download(mut resp: reqwest::Response) -> Result<Fetched> {
 #[async_trait]
 impl Fetcher for HttpFetcher {
     async fn fetch(&self, url: &str) -> Result<Fetched> {
-        download(self.client.get(url).send().await?).await
+        download(self.get(url)?.send().await?).await
     }
 
     async fn fetch_if_changed(&self, url: &str, prev: Option<&Validators>) -> Result<Conditional> {
         use reqwest::header::{ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED};
         let hash = url_hash(url);
-        let mut req = self.client.get(url);
+        let mut req = self.get(url)?;
         if let Some(p) = prev.filter(|p| p.url_hash == hash) {
             if let Some(e) = &p.etag {
                 req = req.header(IF_NONE_MATCH, e);

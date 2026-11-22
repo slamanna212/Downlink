@@ -28,7 +28,7 @@ fn client(server: &MockServer) -> XtreamClient {
         &server.uri(),
         USER,
         SecretString::new(PASS),
-        false,
+        None,
     )
     .unwrap()
 }
@@ -419,7 +419,7 @@ async fn errors_never_contain_credentials() {
         "http://127.0.0.1:1",
         USER,
         SecretString::new(PASS),
-        false,
+        None,
     )
     .unwrap();
     let e = dead.connect().await.unwrap_err();

@@ -26,7 +26,7 @@ pub struct M3uSource {
     /// Configured XMLTV URL(s); falls back to the header's `url-tvg` list.
     xmltv: Vec<String>,
     fetcher: Arc<dyn Fetcher>,
-    insecure_tls: bool,
+    tls_pin: Option<crate::tls::Pin>,
     cache: tokio::sync::Mutex<Option<Arc<Playlist>>>,
     any_catchup: AtomicBool,
     has_guide: AtomicBool,
@@ -53,14 +53,14 @@ impl M3uSource {
         id: SourceId,
         location: Location,
         xmltv: Vec<String>,
-        insecure_tls: bool,
+        tls_pin: Option<crate::tls::Pin>,
     ) -> Result<Self> {
         Ok(Self::with_fetcher(
             id,
             location,
             xmltv,
-            Arc::new(HttpFetcher::new(insecure_tls)?),
-            insecure_tls,
+            Arc::new(HttpFetcher::new(tls_pin.as_ref())?),
+            tls_pin,
         ))
     }
 
@@ -69,7 +69,7 @@ impl M3uSource {
         location: Location,
         xmltv: Vec<String>,
         fetcher: Arc<dyn Fetcher>,
-        insecure_tls: bool,
+        tls_pin: Option<crate::tls::Pin>,
     ) -> Self {
         Self {
             id: std::sync::atomic::AtomicI64::new(id.0),
@@ -77,7 +77,7 @@ impl M3uSource {
             location,
             xmltv,
             fetcher,
-            insecure_tls,
+            tls_pin,
             cache: tokio::sync::Mutex::new(None),
             any_catchup: AtomicBool::new(false),
             reuse_once: AtomicBool::new(false),
@@ -88,6 +88,9 @@ impl M3uSource {
     /// A probe built before the row exists can be adopted once it has an id.
     pub fn set_id(&self, id: SourceId) {
         self.id.store(id.0, Ordering::Relaxed);
+        if let Some(pin) = &self.tls_pin {
+            pin.set_source_id(id.0);
+        }
         self.reuse_once.store(true, Ordering::Relaxed);
     }
 
@@ -359,7 +362,7 @@ impl Source for M3uSource {
     }
 
     async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {
-        crate::images::fetch_public(&self.vault.resolve(url)?, self.insecure_tls).await
+        crate::images::fetch_public(&self.vault.resolve(url)?, self.tls_pin.as_ref()).await
     }
 }
 

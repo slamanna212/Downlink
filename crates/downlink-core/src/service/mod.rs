@@ -336,8 +336,12 @@ impl Service {
         if let Some(c) = self.clients.read().await.get(&source_id) {
             return Ok(c.clone());
         }
+        let mut clients = self.clients.write().await;
+        if let Some(c) = clients.get(&source_id) {
+            return Ok(c.clone());
+        }
         let row = self.store.source(source_id).await?;
-        self.ensure_pin(&row)?;
+        let tls_pin = self.source_pin(&row)?;
         let kind =
             SourceKind::parse(&row.kind).ok_or_else(|| AppError::local("Unknown source type."))?;
         let c: Arc<dyn SourceClient> = match kind {
@@ -359,7 +363,7 @@ impl Service {
                     base,
                     creds,
                     ClientOptions {
-                        insecure_tls: row.tls_insecure,
+                        tls_pin,
                         ..Default::default()
                     },
                 )?);
@@ -378,7 +382,7 @@ impl Service {
                         base,
                         row.username.as_deref().unwrap_or_default(),
                         pw,
-                        row.tls_insecure,
+                        tls_pin,
                     )?
                     .with_store(self.store.clone()),
                 )
@@ -392,12 +396,7 @@ impl Service {
                     .optional_secret(&row, SecretKind::XmltvUrl)
                     .into_iter()
                     .collect();
-                Arc::new(M3uSource::new(
-                    SourceId(row.id),
-                    location,
-                    xmltv,
-                    row.tls_insecure,
-                )?)
+                Arc::new(M3uSource::new(SourceId(row.id), location, xmltv, tls_pin)?)
             }
         };
         // Restore the credential vault so templated URLs resolve and re-sync keeps placeholders.
@@ -407,7 +406,7 @@ impl Service {
         {
             c.load_credentials(map);
         }
-        self.clients.write().await.insert(source_id, c.clone());
+        clients.insert(source_id, c.clone());
         Ok(c)
     }
 
@@ -425,7 +424,11 @@ impl Service {
     }
 
     /// An unsaved connection for `test_source` / `add_source`.
-    fn probe_client(input: &AddSourceInput, id: i64) -> Result<Arc<dyn SourceClient>> {
+    fn probe_client(
+        input: &AddSourceInput,
+        id: i64,
+        tls_pin: Option<crate::tls::Pin>,
+    ) -> Result<Arc<dyn SourceClient>> {
         match SourceKind::parse(&input.kind) {
             Some(SourceKind::Dispatcharr) => {
                 let creds = match (&input.api_key, &input.username, &input.password) {
@@ -449,7 +452,7 @@ impl Service {
                     &input.url,
                     creds,
                     ClientOptions {
-                        insecure_tls: input.allow_self_signed,
+                        tls_pin,
                         ..Default::default()
                     },
                 )?))
@@ -464,15 +467,19 @@ impl Service {
                     &input.url,
                     u,
                     SecretString::new(p.clone()),
-                    input.allow_self_signed,
+                    tls_pin,
                 )?))
             }
-            Some(SourceKind::M3u) => Ok(Arc::new(Self::m3u_from_input(input, id)?)),
+            Some(SourceKind::M3u) => Ok(Arc::new(Self::m3u_from_input(input, id, tls_pin)?)),
             None => Err(AppError::local("Unknown source type.")),
         }
     }
 
-    fn m3u_from_input(input: &AddSourceInput, id: i64) -> Result<M3uSource> {
+    fn m3u_from_input(
+        input: &AddSourceInput,
+        id: i64,
+        tls_pin: Option<crate::tls::Pin>,
+    ) -> Result<M3uSource> {
         let location = Location::parse(&input.url)?;
         let xmltv = input
             .xmltv_url
@@ -480,22 +487,16 @@ impl Service {
             .map(|u| u.trim().to_owned())
             .filter(|u| !u.is_empty())
             .collect();
-        M3uSource::new(SourceId(id), location, xmltv, input.allow_self_signed)
+        M3uSource::new(SourceId(id), location, xmltv, tls_pin)
     }
 
-    /// PLAN §2.6: with "allow self-signed" on an https address, learn the certificate the server
-    /// presents *now* (at add/test time), register it as the pin for the host and return its
-    /// fingerprint. Plain-http and toggle-off inputs have nothing to pin.
-    async fn pin_for_input(input: &AddSourceInput) -> Result<Option<String>> {
-        if !input.allow_self_signed {
+    /// Learn the certificate for an explicit add/test of an HTTPS source with the toggle on.
+    async fn pin_for_input(input: &AddSourceInput) -> Result<Option<crate::tls::Pin>> {
+        if !input.allow_self_signed || !crate::tls::is_https(&input.url) {
             return Ok(None);
         }
-        let Some(host) = crate::tls::https_host(&input.url) else {
-            return Ok(None);
-        };
         let fp = crate::tls::fetch_fingerprint(&input.url).await?;
-        crate::tls::set_pin(&host, &fp);
-        Ok(Some(fp))
+        Ok(Some(crate::tls::Pin::new(&input.url, fp, None)?))
     }
 
     /// The address whose certificate a stored source is pinned to.
@@ -506,26 +507,18 @@ impl Service {
         row.base_url.clone()
     }
 
-    /// Register the fingerprint a user previously trusted before connecting.
-    fn ensure_pin(&self, row: &SourceRow) -> Result<()> {
+    /// Load the trust decision for this particular source.
+    fn source_pin(&self, row: &SourceRow) -> Result<Option<crate::tls::Pin>> {
         if !row.tls_insecure {
-            return Ok(());
+            return Ok(None);
         }
-        let Some(url) = self.pin_url(row) else {
-            return Ok(());
+        let Some(url) = self.pin_url(row).filter(|url| crate::tls::is_https(url)) else {
+            return Ok(None);
         };
-        let Some(host) = crate::tls::https_host(&url) else {
-            return Ok(());
-        };
-        match &row.tls_pin {
-            Some(p) => crate::tls::set_pin(&host, p),
-            None => {
-                return Err(AppError::auth(
-                    "This source has no trusted certificate. Trust its certificate before connecting.",
-                ));
-            }
-        }
-        Ok(())
+        let fingerprint = row.tls_pin.clone().ok_or_else(|| {
+            AppError::auth("This source has no trusted certificate.").with_source_id(Some(row.id))
+        })?;
+        Ok(Some(crate::tls::Pin::new(&url, fingerprint, Some(row.id))?))
     }
 
     /// The user confirmed that the server's new certificate is fine (after "The server's
@@ -541,12 +534,10 @@ impl Service {
         let url = self
             .pin_url(&row)
             .ok_or_else(|| AppError::local("This source has no address."))?;
-        let host = crate::tls::https_host(&url)
-            .ok_or_else(|| AppError::local("This source does not use https."))?;
         let fp = crate::tls::fetch_fingerprint(&url).await?;
+        let mut clients = self.clients.write().await;
         self.store.set_source_tls_pin(source_id, Some(&fp)).await?;
-        crate::tls::set_pin(&host, &fp);
-        self.clients.write().await.remove(&source_id);
+        clients.remove(&source_id);
         self.dispatcharr.write().await.remove(&source_id);
         Ok(())
     }
@@ -571,8 +562,8 @@ impl Service {
     /// Connect and count what is there, without saving anything.
     pub async fn test_source(&self, input: AddSourceInput) -> Result<TestSourceResult> {
         Self::check_kind(&input)?;
-        Self::pin_for_input(&input).await?;
-        let c = Self::probe_client(&input, 0)?;
+        let pin = Self::pin_for_input(&input).await?;
+        let c = Self::probe_client(&input, 0, pin)?;
         let info = c.connect().await?;
         let groups = c.groups().await?;
         let (channels, _) = all_channels(c.as_ref(), 500).await?;
@@ -618,13 +609,13 @@ impl Service {
         let pin = Self::pin_for_input(&input).await?;
         // Fail fast: nothing is persisted if the server, file or credentials are wrong.
         let m3u_probe = if kind == SourceKind::M3u {
-            Some(Arc::new(Self::m3u_from_input(&input, 0)?))
+            Some(Arc::new(Self::m3u_from_input(&input, 0, pin.clone())?))
         } else {
             None
         };
         let probe: Arc<dyn SourceClient> = match &m3u_probe {
             Some(m) => m.clone(),
-            None => Self::probe_client(&input, 0)?,
+            None => Self::probe_client(&input, 0, pin.clone())?,
         };
         probe.connect().await?;
 
@@ -695,8 +686,10 @@ impl Service {
                 created_at: now_utc(),
             })
             .await?;
-        if let Some(fp) = &pin {
-            self.store.set_source_tls_pin(row.id, Some(fp)).await?;
+        if let Some(pin) = &pin {
+            self.store
+                .set_source_tls_pin(row.id, Some(pin.fingerprint()))
+                .await?;
         }
         let saved = async {
             let mut primary_ref = None;
@@ -1988,7 +1981,7 @@ impl Service {
                 return self.mint_hls_plan(&ch, &src).await;
             }
             let plan = catalog::resolve_play_plan(&self.store, self, channel_id).await?;
-            plan.resolve_at_play(src.tls_insecure).await
+            plan.resolve_at_play(self.source_pin(&src)?.as_ref()).await
         } else {
             if ch.is_drm {
                 return Err(AppError::media("DRM — not supported"));
@@ -2374,7 +2367,7 @@ impl ImageFetcher for ServiceFetcher<'_> {
             && u.scheme() == "https"
             && u.host_str() == Some(crate::tmdb::IMAGE_HOST)
         {
-            return crate::images::fetch_public(url, false).await;
+            return crate::images::fetch_public(url, None).await;
         }
         self.0.client(source_id).await?.fetch_image(url).await
     }

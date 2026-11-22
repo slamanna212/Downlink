@@ -52,6 +52,9 @@ pub struct AppError {
     /// version (PLAN §2.5). Everything else degrades.
     #[serde(default)]
     pub blocking: bool,
+    /// Source that requires a new trust decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<i64>,
     /// Optional detail for stream failures (PLAN §4.9): `limit`, `codec` or `engine`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
@@ -72,6 +75,7 @@ impl AppError {
             message: redact::redact(message.as_ref()),
             retry_after: None,
             blocking: code == ErrorCode::Auth,
+            source_id: None,
             reason: None,
             codec: None,
             crash_id: None,
@@ -85,6 +89,7 @@ impl AppError {
             message: secrets.redact(message.as_ref()),
             retry_after: None,
             blocking: code == ErrorCode::Auth,
+            source_id: None,
             reason: None,
             codec: None,
             crash_id: None,
@@ -129,6 +134,11 @@ impl AppError {
         self.reason = Some(reason.to_owned());
         self.codec = codec;
         self.crash_id = crash_id;
+        self
+    }
+
+    pub(crate) fn with_source_id(mut self, source_id: Option<i64>) -> Self {
+        self.source_id = source_id;
         self
     }
 
@@ -185,8 +195,8 @@ impl From<reqwest::Error> for AppError {
     fn from(e: reqwest::Error) -> Self {
         // Drop the URL first: it may carry credentials, and redaction is a second line of defence.
         let e = e.without_url();
-        if crate::tls::is_cert_changed(&e) {
-            return crate::tls::cert_changed_error();
+        if let Some(error) = crate::tls::certificate_error(&e) {
+            return error;
         }
         if let Some(status) = e.status() {
             return Self::from_status(status.as_u16(), None, "that resource");

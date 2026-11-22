@@ -14,6 +14,7 @@ import classes from './BlockingPrompt.module.css';
  */
 export function BlockingPrompt() {
   const kind = useBlockingStore((s) => s.kind);
+  const sourceId = useBlockingStore((s) => s.sourceId);
   const clear = useBlockingStore((s) => s.clear);
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
@@ -32,11 +33,14 @@ export function BlockingPrompt() {
   };
 
   const newerDb = kind === 'newer-db';
+  const missingCert = kind === 'missing-cert';
+  const title = newerDb ? 'blocking.newerDb.title' : missingCert ? 'blocking.cert.missingTitle' : 'blocking.cert.title';
+  const body = newerDb ? 'blocking.newerDb.body' : missingCert ? 'blocking.cert.missingBody' : 'blocking.cert.body';
   return (
     <div className={classes.scrim} role="alertdialog" aria-modal="true" aria-labelledby="blocking-title" aria-describedby="blocking-body">
       <div className={classes.card}>
-        <h1 id="blocking-title" className={classes.title}>{newerDb ? t('blocking.newerDb.title') : t('blocking.cert.title')}</h1>
-        <p id="blocking-body" className={classes.body}>{newerDb ? t('blocking.newerDb.body') : t('blocking.cert.body')}</p>
+        <h1 id="blocking-title" className={classes.title}>{t(title)}</h1>
+        <p id="blocking-body" className={classes.body}>{t(body)}</p>
         <div className={classes.actions}>
           {newerDb ? (
             <>
@@ -57,26 +61,24 @@ export function BlockingPrompt() {
               <DLButton variant="filled" size="lg" disabled={busy} onClick={clear}>
                 {t('blocking.cert.cancel')}
               </DLButton>
-              <DLButton
-                variant="danger"
-                size="lg"
-                loading={busy}
-                onClick={() =>
-                  void run(
-                    async () => {
-                      const sources = await invoke('list_sources', {});
-                      const id = sources[0]?.id;
-                      if (id != null) await invoke('trust_new_certificate', { sourceId: id });
-                    },
-                    () => {
-                      clear();
-                      void qc.invalidateQueries();
-                    },
-                  )
-                }
-              >
-                {t('blocking.cert.trust')}
-              </DLButton>
+              {sourceId != null && (
+                <DLButton
+                  variant="danger"
+                  size="lg"
+                  loading={busy}
+                  onClick={() =>
+                    void run(
+                      () => invoke('trust_new_certificate', { sourceId }),
+                      () => {
+                        clear();
+                        void qc.invalidateQueries();
+                      },
+                    )
+                  }
+                >
+                  {t('blocking.cert.trust')}
+                </DLButton>
+              )}
             </>
           )}
         </div>

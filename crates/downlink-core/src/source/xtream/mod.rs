@@ -43,7 +43,7 @@ struct AccountState {
 pub struct XtreamClient {
     id: SourceId,
     http: reqwest::Client,
-    insecure_tls: bool,
+    tls_pin: Option<crate::tls::Pin>,
     base: Url,
     username: String,
     password: SecretString,
@@ -169,20 +169,22 @@ impl XtreamClient {
         base_url: &str,
         username: &str,
         password: SecretString,
-        insecure_tls: bool,
+        tls_pin: Option<crate::tls::Pin>,
     ) -> Result<Self> {
+        let base = normalise_base(base_url)?;
         Ok(Self {
             id,
             http: crate::http::authenticated(crate::tls::apply(
                 reqwest::Client::builder(),
-                insecure_tls,
+                &base,
+                tls_pin.as_ref(),
             )?)
             .timeout(Duration::from_secs(60))
             .connect_timeout(Duration::from_secs(20))
             .user_agent(crate::user_agent())
             .build()?,
-            insecure_tls,
-            base: normalise_base(base_url)?,
+            tls_pin,
+            base,
             username: username.to_owned(),
             password,
             sem: Semaphore::new(MAX_CONCURRENT),
@@ -510,7 +512,7 @@ impl XtreamClient {
     }
 
     fn fetcher(&self) -> Result<HttpFetcher> {
-        HttpFetcher::new(self.insecure_tls)
+        HttpFetcher::new(self.tls_pin.as_ref())
     }
 
     async fn movies_cached(&self) -> Result<std::sync::Arc<Vec<VodStreamDto>>> {
@@ -997,7 +999,7 @@ impl Source for XtreamClient {
     }
 
     async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {
-        crate::images::fetch_public(&self.vault.resolve(url)?, self.insecure_tls).await
+        crate::images::fetch_public(&self.vault.resolve(url)?, self.tls_pin.as_ref()).await
     }
 }
 

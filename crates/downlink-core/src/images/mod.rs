@@ -75,11 +75,12 @@ pub const REVALIDATE_AFTER_SECS: i64 = 30 * 86_400;
 const REVALIDATE_RETRY_SECS: i64 = 86_400;
 
 /// Unauthenticated fetch of a public image URL (M3U/Xtream logos). No credentials are sent.
-pub async fn fetch_public(url: &str, insecure_tls: bool) -> Result<RawImage> {
+pub async fn fetch_public(url: &str, pin: Option<&crate::tls::Pin>) -> Result<RawImage> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err(AppError::local("That image address is not supported."));
     }
-    let client = crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
+    let url = reqwest::Url::parse(url)?;
+    let client = crate::tls::apply(reqwest::Client::builder().referer(false), &url, pin)?
         .user_agent(crate::user_agent())
         .timeout(std::time::Duration::from_secs(20))
         .build()?;

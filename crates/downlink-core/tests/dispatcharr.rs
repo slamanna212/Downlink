@@ -775,7 +775,7 @@ async fn resolve_redirect_function_variants() {
         .up_to_n_times(1)
         .mount(&server)
         .await;
-    let loc = resolve_redirect(&url, &h, false).await.unwrap();
+    let loc = resolve_redirect(&url, &h, None).await.unwrap();
     assert_eq!(loc.expose(), format!("{}/relative/out.ts", server.uri()));
     assert_eq!(format!("{loc:?}"), "Location(<redirect-url>)");
 
@@ -786,7 +786,7 @@ async fn resolve_redirect_function_variants() {
         .mount(&server)
         .await;
     assert_eq!(
-        resolve_redirect(&url, &h, false).await.unwrap_err().code,
+        resolve_redirect(&url, &h, None).await.unwrap_err().code,
         ErrorCode::Stream
     );
 
@@ -796,7 +796,7 @@ async fn resolve_redirect_function_variants() {
         .up_to_n_times(1)
         .mount(&server)
         .await;
-    let e = resolve_redirect(&url, &h, false).await.unwrap_err();
+    let e = resolve_redirect(&url, &h, None).await.unwrap_err();
     assert_eq!((e.code, e.retry_after), (ErrorCode::Stream, Some(5)));
 
     Mock::given(method("GET"))
@@ -806,7 +806,7 @@ async fn resolve_redirect_function_variants() {
         .mount(&server)
         .await;
     assert_eq!(
-        resolve_redirect(&url, &h, false).await.unwrap_err().code,
+        resolve_redirect(&url, &h, None).await.unwrap_err().code,
         ErrorCode::Auth
     );
 }

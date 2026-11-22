@@ -2,20 +2,16 @@
 //!
 //! The toggle never turns verification off silently. A source that allows self-signed
 //! certificates is pinned to the SHA-256 of the server's leaf certificate (DER, lowercase hex). It
-//! is stored on the source row (a fingerprint is not a secret) and registered here by host before
-//! the source is used. Every TLS handshake to a host that has a pin must present exactly that
-//! certificate; a different one fails the handshake with a marker that [`is_cert_changed`] turns
-//! into a blocking, auth-class "The server's certificate changed." until the user trusts the new
-//! one (`Service::trust_new_certificate`).
-//!
-//! Pins are keyed by host (a rustls verifier only sees the server name), so two sources on the
-//! same host share a pin. Sources that do not allow self-signed certificates are unaffected and
-//! use normal verification.
+//! is stored on the source row and only used by that source's HTTP clients on its exact HTTPS
+//! origin. Every handshake on that origin must present the pinned certificate. A changed
+//! certificate blocks the source until the user trusts it (`Service::trust_new_certificate`).
 
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex, RwLock};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicI64, Ordering},
+};
 
-use reqwest::ClientBuilder;
+use reqwest::{ClientBuilder, Url};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, WebPkiSupportedAlgorithms};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -27,10 +23,66 @@ use crate::error::{AppError, Result};
 /// Text carried by the handshake error when a pinned certificate changed.
 const CHANGED_MARKER: &str = "downlink-pinned-certificate-changed";
 
-static PINS: LazyLock<RwLock<HashMap<String, String>>> = LazyLock::new(Default::default);
+/// A fingerprint trusted for one source and HTTPS origin.
+#[derive(Clone, Debug)]
+pub struct Pin {
+    origin: url::Origin,
+    server_name: String,
+    fingerprint: String,
+    source_id: Arc<AtomicI64>,
+}
+
+impl Pin {
+    pub fn new(url: &str, fingerprint: String, source_id: Option<i64>) -> Result<Self> {
+        let url = Url::parse(url.trim())?;
+        let server_name = url
+            .host_str()
+            .filter(|_| url.scheme() == "https")
+            .ok_or_else(|| AppError::local("Only https addresses have a certificate."))?;
+        Ok(Self {
+            origin: url.origin(),
+            server_name: server_name.trim_matches(['[', ']']).to_owned(),
+            fingerprint: fingerprint.to_ascii_lowercase(),
+            source_id: Arc::new(AtomicI64::new(source_id.unwrap_or(0))),
+        })
+    }
+
+    pub fn matches(&self, url: &Url) -> bool {
+        self.origin == url.origin()
+    }
+
+    pub fn fingerprint(&self) -> &str {
+        &self.fingerprint
+    }
+
+    pub(crate) fn set_source_id(&self, source_id: i64) {
+        self.source_id.store(source_id, Ordering::Relaxed);
+    }
+
+    fn source_id(&self) -> Option<i64> {
+        let id = self.source_id.load(Ordering::Relaxed);
+        (id != 0).then_some(id)
+    }
+
+    pub(crate) fn apply(&self, builder: ClientBuilder) -> Result<ClientBuilder> {
+        // rustls receives the hostname without a port, so keep redirects within the pinned
+        // request's origin. Callers select this builder only for matching request URLs.
+        Ok(crate::http::authenticated(
+            builder.tls_backend_preconfigured(pinned_config(Verification::Pinned(self.clone()))?),
+        ))
+    }
+}
+
+/// Apply a pin only on its exact origin. Other destinations use ordinary certificate verification.
+pub fn apply(builder: ClientBuilder, url: &Url, pin: Option<&Pin>) -> Result<ClientBuilder> {
+    match pin.filter(|pin| pin.matches(url)) {
+        Some(pin) => pin.apply(builder),
+        None => Ok(builder),
+    }
+}
 
 // Debug carries the marker too: rustls prints wrapped errors with `{:?}` in places.
-struct CertChanged;
+struct CertChanged(Option<i64>);
 
 impl std::fmt::Debug for CertChanged {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -57,44 +109,32 @@ pub fn fingerprint(der: &[u8]) -> String {
         })
 }
 
-fn key(host: &str) -> String {
-    host.trim_matches(|c| c == '[' || c == ']')
-        .to_ascii_lowercase()
-}
-
-/// Register the pinned fingerprint for a host (replaces any earlier one).
-pub fn set_pin(host: &str, fingerprint: &str) {
-    if let Ok(mut g) = PINS.write() {
-        g.insert(key(host), fingerprint.to_ascii_lowercase());
-    }
-}
-
-/// Forget a host's pin.
-pub fn clear_pin(host: &str) {
-    if let Ok(mut g) = PINS.write() {
-        g.remove(&key(host));
-    }
-}
-
-pub fn pin_for(host: &str) -> Option<String> {
-    PINS.read().ok().and_then(|g| g.get(&key(host)).cloned())
-}
-
-/// Whether an error from the HTTP stack is a pinned-certificate mismatch.
-pub fn is_cert_changed(e: &(dyn std::error::Error + 'static)) -> bool {
-    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(e);
+pub(crate) fn certificate_error(e: &(dyn std::error::Error + 'static)) -> Option<AppError> {
+    let mut cur = Some(e);
+    let mut found_marker = false;
     while let Some(err) = cur {
-        if err.to_string().contains(CHANGED_MARKER) || format!("{err:?}").contains(CHANGED_MARKER) {
-            return true;
+        let changed = err.downcast_ref::<CertChanged>().or_else(|| {
+            let rustls::Error::InvalidCertificate(CertificateError::Other(other)) =
+                err.downcast_ref::<rustls::Error>()?
+            else {
+                return None;
+            };
+            other.0.downcast_ref::<CertChanged>()
+        });
+        if let Some(changed) = changed {
+            return Some(
+                AppError::auth("The server's certificate changed.").with_source_id(changed.0),
+            );
         }
-        cur = err.source();
+        found_marker |=
+            err.to_string().contains(CHANGED_MARKER) || format!("{err:?}").contains(CHANGED_MARKER);
+        cur = err
+            .downcast_ref::<std::io::Error>()
+            .and_then(std::io::Error::get_ref)
+            .map(|inner| inner as &(dyn std::error::Error + 'static))
+            .or_else(|| err.source());
     }
-    false
-}
-
-pub fn cert_changed_error() -> AppError {
-    // Blocking and auth-class: nothing else should be tried until the user decides.
-    AppError::auth("The server's certificate changed.")
+    found_marker.then(|| AppError::auth("The server's certificate changed."))
 }
 
 fn provider() -> Arc<CryptoProvider> {
@@ -104,9 +144,14 @@ fn provider() -> Arc<CryptoProvider> {
 #[derive(Debug)]
 struct PinVerifier {
     algs: WebPkiSupportedAlgorithms,
-    /// Record the leaf fingerprint and accept (used only to learn a pin the user is about to
-    /// confirm). Otherwise the host's registered pin is enforced.
-    capture: Option<Arc<Mutex<Option<String>>>>,
+    verification: Verification,
+}
+
+#[derive(Debug)]
+enum Verification {
+    /// Record the certificate without credentials during an explicit trust operation.
+    Capture(Arc<Mutex<Option<String>>>),
+    Pinned(Pin),
 }
 
 impl ServerCertVerifier for PinVerifier {
@@ -119,18 +164,24 @@ impl ServerCertVerifier for PinVerifier {
         _now: UnixTime,
     ) -> std::result::Result<ServerCertVerified, rustls::Error> {
         let fp = fingerprint(end_entity.as_ref());
-        if let Some(c) = &self.capture {
-            if let Ok(mut g) = c.lock() {
-                *g = Some(fp);
+        match &self.verification {
+            Verification::Capture(seen) => {
+                if let Ok(mut recorded) = seen.lock() {
+                    *recorded = Some(fp);
+                }
+                Ok(ServerCertVerified::assertion())
             }
-            return Ok(ServerCertVerified::assertion());
-        }
-        match pin_for(&server_name.to_str()) {
-            Some(expected) if expected == fp => Ok(ServerCertVerified::assertion()),
-            Some(_) => Err(rustls::Error::InvalidCertificate(CertificateError::Other(
-                OtherError(Arc::new(CertChanged)),
-            ))),
-            None => Err(rustls::Error::InvalidCertificate(
+            Verification::Pinned(pin)
+                if pin.server_name.eq_ignore_ascii_case(&server_name.to_str()) =>
+            {
+                if pin.fingerprint == fp {
+                    return Ok(ServerCertVerified::assertion());
+                }
+                Err(rustls::Error::InvalidCertificate(CertificateError::Other(
+                    OtherError(Arc::new(CertChanged(pin.source_id()))),
+                )))
+            }
+            Verification::Pinned(_) => Err(rustls::Error::InvalidCertificate(
                 CertificateError::UnknownIssuer,
             )),
         }
@@ -159,11 +210,11 @@ impl ServerCertVerifier for PinVerifier {
     }
 }
 
-fn pinned_config(capture: Option<Arc<Mutex<Option<String>>>>) -> Result<rustls::ClientConfig> {
+fn pinned_config(verification: Verification) -> Result<rustls::ClientConfig> {
     let p = provider();
     let verifier = PinVerifier {
         algs: p.signature_verification_algorithms,
-        capture,
+        verification,
     };
     let mut cfg = rustls::ClientConfig::builder_with_provider(p)
         .with_safe_default_protocol_versions()
@@ -175,35 +226,22 @@ fn pinned_config(capture: Option<Arc<Mutex<Option<String>>>>) -> Result<rustls::
     Ok(cfg)
 }
 
-/// Apply the source's TLS policy to a client builder: normal verification when the toggle is off,
-/// pin-enforcing verification when it is on.
-pub fn apply(builder: ClientBuilder, allow_self_signed: bool) -> Result<ClientBuilder> {
-    if !allow_self_signed {
-        return Ok(builder);
-    }
-    Ok(builder.tls_backend_preconfigured(pinned_config(None)?))
-}
-
-/// The host (and nothing else) of an `https://` URL; `None` for plain HTTP or anything else, which
-/// has no certificate to pin.
-pub fn https_host(url: &str) -> Option<String> {
-    let u = url::Url::parse(url).ok()?;
-    (u.scheme() == "https")
-        .then(|| u.host_str().map(str::to_owned))
-        .flatten()
+/// Whether an address has an HTTPS certificate.
+pub fn is_https(url: &str) -> bool {
+    Url::parse(url.trim()).is_ok_and(|url| url.scheme() == "https")
 }
 
 /// Connect to `url` and return the SHA-256 fingerprint of the certificate it presents, without
 /// judging it. Sends one request to the URL's origin root; the response is ignored. The caller
 /// shows the fingerprint / asks the user before it is stored.
 pub async fn fetch_fingerprint(url: &str) -> Result<String> {
-    let u = url::Url::parse(url).map_err(|_| AppError::local("That address is not valid."))?;
+    let u = Url::parse(url.trim()).map_err(|_| AppError::local("That address is not valid."))?;
     if u.scheme() != "https" {
         return Err(AppError::local("Only https addresses have a certificate."));
     }
     let seen: Arc<Mutex<Option<String>>> = Arc::default();
     let client = reqwest::Client::builder()
-        .tls_backend_preconfigured(pinned_config(Some(seen.clone()))?)
+        .tls_backend_preconfigured(pinned_config(Verification::Capture(seen.clone()))?)
         .timeout(std::time::Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
@@ -234,14 +272,6 @@ mod tests {
     }
 
     #[test]
-    fn pins_are_keyed_by_lowercased_host() {
-        set_pin("PinHost.Test", "AA");
-        assert_eq!(pin_for("pinhost.test").as_deref(), Some("aa"));
-        clear_pin("pinhost.test");
-        assert_eq!(pin_for("pinhost.test"), None);
-    }
-
-    #[test]
     fn marker_is_found_down_the_error_chain() {
         #[derive(Debug)]
         struct Wrap(Box<dyn std::error::Error + Send + Sync>);
@@ -255,7 +285,11 @@ mod tests {
                 Some(self.0.as_ref())
             }
         }
-        assert!(is_cert_changed(&Wrap(Box::new(CertChanged))));
-        assert!(!is_cert_changed(&Wrap(Box::new(std::fmt::Error))));
+        assert_eq!(
+            certificate_error(&Wrap(Box::new(CertChanged(Some(1)))))
+                .and_then(|error| error.source_id),
+            Some(1)
+        );
+        assert!(certificate_error(&Wrap(Box::new(std::fmt::Error))).is_none());
     }
 }

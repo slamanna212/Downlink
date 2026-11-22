@@ -225,7 +225,7 @@ export async function invoke<C extends CommandName>(cmd: C, args: Commands[C]['a
   try {
     return await (await getBackend()).invoke(cmd, args);
   } catch (e) {
-    if (isAppError(e)) noteBlockingError(e.message);
+    if (isAppError(e)) noteBlockingError(e.message, e.sourceId);
     throw e;
   }
 }

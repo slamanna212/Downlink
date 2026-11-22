@@ -187,7 +187,9 @@ export function createMockBackend(): Backend {
   // `?mock=newerdb` / `?mock=cert`: catalogue calls fail with the blocking messages until the user resolves them.
   let blockedBy: 'newerdb' | 'cert' | null = mode === 'newerdb' || mode === 'cert' ? mode : null;
   const blockedError = (): AppError =>
-    blockedBy === 'newerdb' ? appError('local', 'This library was created by a newer version of Downlink.') : appError('server', 'The server’s certificate changed.');
+    blockedBy === 'newerdb'
+      ? appError('local', 'This library was created by a newer version of Downlink.')
+      : { ...appError('auth', 'The server’s certificate changed.'), sourceId: sources[0]?.id };
   const reconnectFlag = typeof location !== 'undefined' && new URLSearchParams(location.search).has('reconnect');
   const failReason = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('reason') : null;
   const failError = (): AppError =>
