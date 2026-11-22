@@ -69,10 +69,9 @@ pub async fn fetch_release_body(
     if !resp.status().is_success() {
         return Err(format!("status {}", resp.status()));
     }
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
-    if bytes.len() > MAX_BODY_BYTES {
-        return Err("response too large".to_owned());
-    }
+    let bytes = downlink_core::http::read_body(resp, MAX_BODY_BYTES, downlink_core::AppError::from)
+        .await
+        .map_err(|e| e.message)?;
     let rel: ReleaseJson = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     Ok(rel.body.filter(|b| !b.trim().is_empty()))
 }

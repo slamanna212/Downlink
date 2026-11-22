@@ -196,7 +196,8 @@ impl PlexTv {
         if !r.status().is_success() {
             return Err(AppError::from_status(r.status().as_u16(), None, "Plex"));
         }
-        let p: PinReply = r.json().await?;
+        let body = crate::http::read_body(r, 256 * 1024, AppError::from).await?;
+        let p: PinReply = serde_json::from_slice(&body)?;
         match (p.id, p.code) {
             (Some(id), Some(code)) => Ok(Pin { id, code }),
             _ => Err(AppError::server(
@@ -219,7 +220,8 @@ impl PlexTv {
         if !r.status().is_success() {
             return Err(AppError::from_status(r.status().as_u16(), None, "Plex"));
         }
-        let p: PinReply = r.json().await?;
+        let body = crate::http::read_body(r, 256 * 1024, AppError::from).await?;
+        let p: PinReply = serde_json::from_slice(&body)?;
         Ok(p.auth_token
             .filter(|t| !t.is_empty())
             .map(SecretString::new))
@@ -239,7 +241,8 @@ impl PlexTv {
         if !r.status().is_success() {
             return Err(AppError::from_status(r.status().as_u16(), None, "Plex"));
         }
-        let u: UserReply = r.json().await.map_err(|e| redacted(e, &secrets))?;
+        let body = crate::http::read_body(r, 256 * 1024, |e| redacted(e, &secrets)).await?;
+        let u: UserReply = serde_json::from_slice(&body)?;
         Ok(u.username.or(u.title))
     }
 
@@ -262,7 +265,7 @@ impl PlexTv {
         if !r.status().is_success() {
             return Err(AppError::from_status(r.status().as_u16(), None, "Plex"));
         }
-        let body = r.bytes().await.map_err(|e| redacted(e, &secrets))?;
+        let body = crate::http::read_body(r, 4 * 1024 * 1024, |e| redacted(e, &secrets)).await?;
         let rows: Vec<ResourceReply> = serde_json::from_slice(&body)
             .map_err(|_| AppError::server("Plex sent a server list Downlink could not read."))?;
         Ok(rows
@@ -603,7 +606,8 @@ impl PlexServer {
         if !status.is_success() {
             return Err(AppError::from_status(status.as_u16(), None, "Plex"));
         }
-        let body = r.bytes().await.map_err(|e| redacted(e, &self.secrets))?;
+        let body =
+            crate::http::read_body(r, 32 * 1024 * 1024, |e| redacted(e, &self.secrets)).await?;
         let env: Envelope<T> = serde_json::from_slice(&body).map_err(|_| {
             AppError::new(
                 ErrorCode::Server,

@@ -78,7 +78,7 @@ pub const REVALIDATE_AFTER_SECS: i64 = 30 * 86_400;
 /// After a failed re-check, try again this much later rather than on every request.
 const REVALIDATE_RETRY_SECS: i64 = 86_400;
 
-const MAX_PUBLIC_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+pub(crate) const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 static PUBLIC_IMAGE_FETCHES: Semaphore = Semaphore::const_new(8);
 static PUBLIC_IMAGE_CLIENT: LazyLock<Result<reqwest::Client>> =
     LazyLock::new(|| Ok(public_client_builder().build()?));
@@ -114,7 +114,7 @@ pub async fn fetch_public(url: &str, pin: Option<&crate::tls::Pin>) -> Result<Ra
         ));
     }
     if r.content_length()
-        .is_some_and(|bytes| bytes > MAX_PUBLIC_IMAGE_BYTES as u64)
+        .is_some_and(|bytes| bytes > MAX_IMAGE_BYTES as u64)
     {
         return Err(AppError::media("That image is too large."));
     }
@@ -125,7 +125,7 @@ pub async fn fetch_public(url: &str, pin: Option<&crate::tls::Pin>) -> Result<Ra
         .map(str::to_owned);
     let mut bytes = Vec::new();
     while let Some(chunk) = r.chunk().await? {
-        if chunk.len() > MAX_PUBLIC_IMAGE_BYTES - bytes.len() {
+        if chunk.len() > MAX_IMAGE_BYTES - bytes.len() {
             return Err(AppError::media("That image is too large."));
         }
         bytes.extend_from_slice(&chunk);

@@ -333,7 +333,8 @@ impl DispatcharrClient {
                 },
             );
         }
-        let t: TokenDto = resp.json().await?;
+        let bytes = crate::http::read_body(resp, 256 * 1024, AppError::from).await?;
+        let t: TokenDto = serde_json::from_slice(&bytes)?;
         let access = t
             .access
             .ok_or_else(|| AppError::server("The server did not return a token."))?;
@@ -357,7 +358,8 @@ impl DispatcharrClient {
                 .send()
                 .await?;
             if resp.status().is_success() {
-                let t: TokenDto = resp.json().await?;
+                let bytes = crate::http::read_body(resp, 256 * 1024, AppError::from).await?;
+                let t: TokenDto = serde_json::from_slice(&bytes)?;
                 if let Some(a) = t.access {
                     self.remember_secret(&a);
                     tokens.access_exp = jwt_exp(&a);
@@ -407,6 +409,18 @@ impl DispatcharrClient {
         query: &[(&str, String)],
         body: Option<&Value>,
     ) -> Result<Reply> {
+        self.call_bounded(method, path, query, body, 32 * 1024 * 1024)
+            .await
+    }
+
+    async fn call_bounded(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, String)],
+        body: Option<&Value>,
+        max_bytes: usize,
+    ) -> Result<Reply> {
         let url = self.url(path)?;
         for attempt in 0..2 {
             let (hname, hval) = self.auth_header().await?;
@@ -443,7 +457,7 @@ impl DispatcharrClient {
                 .get(CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned);
-            let body = resp.bytes().await?.to_vec();
+            let body = crate::http::read_body(resp, max_bytes, AppError::from).await?;
             return Ok(Reply {
                 status,
                 retry_after,
@@ -1012,11 +1026,12 @@ impl DispatcharrClient {
 
     pub async fn logo(&self, logo_id: &str) -> Result<Logo> {
         let r = self
-            .call(
+            .call_bounded(
                 Method::GET,
                 &format!("api/channels/logos/{logo_id}/cache"),
                 &[],
                 None,
+                crate::images::MAX_IMAGE_BYTES,
             )
             .await?
             .ok("that logo")?;
@@ -1046,7 +1061,7 @@ impl DispatcharrClient {
         let pairs: Vec<(String, String)> = u.query_pairs().into_owned().collect();
         let q: Vec<(&str, String)> = pairs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
         let r = self
-            .call(Method::GET, rel, &q, None)
+            .call_bounded(Method::GET, rel, &q, None, crate::images::MAX_IMAGE_BYTES)
             .await?
             .ok("that image")?;
         Ok(crate::images::RawImage {

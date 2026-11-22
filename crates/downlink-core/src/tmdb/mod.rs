@@ -489,7 +489,7 @@ impl TmdbClient {
                 .and_then(|v| v.to_str().ok()?.trim().parse().ok());
             return Err(AppError::from_status(status.as_u16(), retry, "TMDB"));
         }
-        let bytes = resp.bytes().await.map_err(|e| self.err(e))?;
+        let bytes = crate::http::read_body(resp, 4 * 1024 * 1024, |e| self.err(e)).await?;
         Ok(Some(serde_json::from_slice(&bytes)?))
     }
 

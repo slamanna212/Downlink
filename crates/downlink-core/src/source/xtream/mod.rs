@@ -348,7 +348,14 @@ impl XtreamClient {
                 s => AppError::from_status(s.as_u16(), None, what),
             });
         }
-        let bytes = resp.bytes().await?;
+
+        // Xtream catalogues are delivered as a single unpaginated response.
+        let max_bytes = if action.is_some() {
+            128 * 1024 * 1024
+        } else {
+            256 * 1024
+        };
+        let bytes = crate::http::read_body(resp, max_bytes, AppError::from).await?;
         if bytes.iter().all(u8::is_ascii_whitespace) {
             return Ok(Value::Null);
         }
