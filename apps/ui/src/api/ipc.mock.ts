@@ -18,6 +18,7 @@ import {
   type Transition,
   type MultiviewState,
   type MultiviewTile,
+  type MediaDetails,
 } from './types';
 
 const NAMES = [
@@ -30,6 +31,37 @@ const QUALITIES: Channel['quality'][] = ['HD', 'FHD', '4K', 'SD'];
 const TITLES = ['The Long Field', 'Evening Bulletin', 'Deep Water', 'Paper Planets', 'Robot Garden', 'A Quiet Harbour', 'Inside the Cell', 'Forecast', 'Late Mix', 'Fieldwork S2 E4'];
 
 const nowSec = () => Math.floor(Date.now() / 1000);
+
+/** Synthetic details: the "source" fields always, the TMDB-only extras when a key is set. */
+export function mockDetails(base: Partial<MediaDetails> & Pick<MediaDetails, 'kind' | 'title'>, tmdb: boolean): MediaDetails {
+  const episodic = base.season != null && base.episode != null;
+  return {
+    episodeTitle: null, season: null, episode: null, description: null, overview: null, tagline: null,
+    genres: ['Drama', 'Mystery'], year: 2024, airDate: episodic ? '2024-03-02' : null, runtimeMins: 60,
+    certification: 'TV-14', score: tmdb ? 8.1 : null, country: 'GB', language: 'en', network: tmdb ? 'Synthetic One' : null,
+    status: tmdb && episodic ? 'Returning Series' : null, seasonCount: tmdb && episodic ? 4 : null,
+    cast: [
+      { name: 'Ann Example', role: 'Detective Vale', photo: null, guest: false },
+      { name: 'Bo Sample', role: 'The Keeper', photo: null, guest: true },
+      { name: 'Cy Placeholder', role: 'Harbourmaster', photo: null, guest: false },
+      { name: 'Di Demo', role: 'Dr Moss', photo: null, guest: false },
+      { name: 'Ed Mockley', role: null, photo: null, guest: false },
+    ],
+    crew: [
+      { job: 'creator', names: ['Fay Fiction'] },
+      { job: 'director', names: ['Rae Director'] },
+      { job: 'writer', names: ['Wes Writer', 'Gil Draft'] },
+    ],
+    poster: null, backdrop: null, still: null, logo: null,
+    videoQuality: 'HDTV', aspectRatio: '16:9', audio: 'stereo',
+    isNew: false, isLive: false, isPremiere: false, isFinale: false, isRepeat: !base.isNew && !base.isPremiere, advisories: ['Violence'],
+    trailerUrl: tmdb ? 'https://www.youtube.com/watch?v=trailerKey1' : null,
+    tmdbUrl: tmdb ? 'https://www.themoviedb.org/tv/4242' : null, fromTmdb: tmdb,
+    ...(tmdb && episodic ? { overview: 'A small coastal team untangles the oldest secrets of a town that would rather forget them.', episodeTitle: base.episodeTitle ?? 'The Lantern Keeper' } : {}),
+    ...(tmdb ? { tagline: 'Every light has a keeper.' } : {}),
+    ...Object.fromEntries(Object.entries(base).filter(([, v]) => v != null)),
+  } as MediaDetails;
+}
 
 export function mockSources(empty: boolean, status: Source['status'] = 'connected'): Source[] {
   if (empty) return [];
@@ -77,6 +109,8 @@ const GUIDE_ANCHOR_DAYS = 5;
 const scheduleCache = new Map<number, Programme[]>();
 
 /** Full synthetic schedule for a channel (anchor .. anchor+14d), built once per channel. */
+const EP_TITLES = ['The Lantern Keeper', 'Low Tide', 'A Map of Small Things', 'Signal and Noise', 'The Long Way Round', 'Paper Boats', 'Second Light', 'What the River Kept'];
+
 function fullSchedule(channelId: number): Programme[] {
   const hit = scheduleCache.get(channelId);
   if (hit) return hit;
@@ -89,8 +123,11 @@ function fullSchedule(channelId: number): Programme[] {
       const dur = (DURS[(channelId * 7 + i * 3) % DURS.length] ?? 60) * 60;
       out.push({
         id: `${channelId}:${t}`, channelId, startUtc: t, endUtc: t + dur, title: TITLES[(channelId + i) % TITLES.length] ?? 'Programme',
-        subtitle: null, description: 'Synthetic programme description. Headlines, features and a closing segment, generated for the mock backend.',
-        season: null, episode: null, isNew: i % 7 === 0, isLive: false, isPremiere: false, isFinale: false, isScheduled: false,
+        // Every other slot is an episode of a series, so S/E, episode titles and flags show up in the UI.
+        subtitle: i % 2 === 0 ? EP_TITLES[(channelId + i) % EP_TITLES.length] ?? null : null,
+        description: 'Synthetic programme description. Headlines, features and a closing segment, generated for the mock backend.',
+        season: i % 2 === 0 ? 1 + ((channelId + i) % 4) : null, episode: i % 2 === 0 ? 1 + (i % 12) : null,
+        isNew: i % 7 === 0, isLive: channelId % 6 === 2 && i % 2 === 1, isPremiere: i % 23 === 0, isFinale: i % 29 === 0, isScheduled: false,
       });
       t += dur;
     }
@@ -178,6 +215,7 @@ export function createMockBackend(): Backend {
   };
   let plex: PlexStatus = { signedIn: false, accountName: null, serverId: null, serverName: null };
   let plexPinChecks = 0;
+  let tmdbKey = mode === 'tmdb';
   let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, notes: null, lastChecked: null, ready: false };
   let searchIndex: { programme: Programme; channel: Channel; hay: string }[] | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
@@ -287,7 +325,7 @@ export function createMockBackend(): Backend {
       const [cid] = programmeId.split(':').map(Number);
       const p = genProgrammes(cid ?? 0, 0, 4e9, scheduled).find((x) => x.id === programmeId);
       const ch = channels.find((c) => c.id === cid);
-      if (p && ch) vod.addRecording(nowSec(), { title: p.title ?? ch.name, channelId: ch.id, channelName: ch.name, startUtc: p.startUtc, endUtc: p.endUtc }, kind === 'series');
+      if (p && ch) vod.addRecording(nowSec(), { title: p.title ?? ch.name, subtitle: p.subtitle, description: p.description, season: p.season, episode: p.episode, channelId: ch.id, channelName: ch.name, startUtc: p.startUtc, endUtc: p.endUtc }, kind === 'series');
       emit('catalog://updated', { scope: 'recordings', sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
       return null;
     },
@@ -623,6 +661,32 @@ export function createMockBackend(): Backend {
         : null;
     },
     media_server_open: () => null,
+    media_details: async ({ target }) => {
+      await wait(250);
+      if (target.kind === 'programme') {
+        const [cid] = target.id.split(':').map(Number);
+        const p = genProgrammes(cid ?? 0, 0, 4e9, scheduled).find((x) => x.id === target.id);
+        if (!p) throw appError('local', 'That programme is no longer in the guide.');
+        return mockDetails({ kind: 'programme', title: p.title ?? 'Programme', episodeTitle: p.subtitle, season: p.season, episode: p.episode, description: p.description, isNew: p.isNew, isLive: p.isLive, isPremiere: p.isPremiere, isFinale: p.isFinale, runtimeMins: Math.round((p.endUtc - p.startUtc) / 60) }, tmdbKey);
+      }
+      if (target.kind === 'recording') {
+        const r = vod.getRecording(target.id);
+        if (!r) throw appError('local', 'That recording is gone.');
+        return mockDetails({ kind: 'recording', title: r.title, episodeTitle: r.subtitle, season: r.season, episode: r.episode, description: r.description, runtimeMins: Math.round((r.endUtc - r.startUtc) / 60) }, tmdbKey);
+      }
+      return mockDetails({ kind: 'movie', title: 'Demo title', description: 'Synthetic plot for a demo title.' }, tmdbKey);
+    },
+    tmdb_status: () => ({ configured: tmdbKey, language: 'en-US' }),
+    tmdb_set_key: async ({ key }) => {
+      await wait(500);
+      if (key.trim().length < 8) throw appError('auth', 'TMDB rejected the API key.');
+      tmdbKey = true;
+      return { configured: true, language: 'en-US' };
+    },
+    tmdb_clear_key: () => {
+      tmdbKey = false;
+      return { configured: false, language: 'en-US' };
+    },
   };
 
   // `?mock=update`: a newer version is downloaded and waiting (rail dot, Settings → Updates card).

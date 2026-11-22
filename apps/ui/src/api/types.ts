@@ -587,6 +587,11 @@ export type RecordingStatus = 'scheduled' | 'recording' | 'completed' | 'failed'
 export interface Recording {
   id: number;
   title: string;
+  /** Episode title, when the programme had one. */
+  subtitle: string | null;
+  description: string | null;
+  season: number | null;
+  episode: number | null;
   channelId: number | null;
   channelName: string;
   startUtc: number;
@@ -657,4 +662,75 @@ export interface MediaMatch {
   kind: 'movie' | 'show' | 'episode';
   title: string;
   url: string;
+}
+
+/** A credited person on a details view. */
+export interface Person {
+  name: string;
+  /** Character (cast) or job. */
+  role: string | null;
+  /** `dlimg://` headshot. */
+  photo: string | null;
+  guest: boolean;
+}
+
+export type CrewJob = 'creator' | 'director' | 'writer' | 'producer' | 'presenter';
+
+export interface Crew {
+  job: CrewJob;
+  names: string[];
+}
+
+/** Rich details for a programme, recording or VOD title: the source first, TMDB for the gaps. */
+export interface MediaDetails {
+  kind: 'programme' | 'recording' | 'movie' | 'series' | 'episode';
+  title: string;
+  episodeTitle: string | null;
+  season: number | null;
+  episode: number | null;
+  /** This airing / episode / movie. */
+  description: string | null;
+  /** The show's own overview, when it differs from `description`. */
+  overview: string | null;
+  tagline: string | null;
+  genres: string[];
+  year: number | null;
+  /** Original air date or release date, `YYYY-MM-DD`. */
+  airDate: string | null;
+  runtimeMins: number | null;
+  certification: string | null;
+  /** 0..10. */
+  score: number | null;
+  country: string | null;
+  language: string | null;
+  network: string | null;
+  status: string | null;
+  seasonCount: number | null;
+  cast: Person[];
+  crew: Crew[];
+  poster: string | null;
+  backdrop: string | null;
+  still: string | null;
+  /** Transparent title logo. */
+  logo: string | null;
+  videoQuality: string | null;
+  aspectRatio: string | null;
+  audio: string | null;
+  isNew: boolean;
+  isLive: boolean;
+  isPremiere: boolean;
+  isFinale: boolean;
+  /** Shown before. */
+  isRepeat: boolean;
+  advisories: string[];
+  trailerUrl: string | null;
+  /** The title's TMDB page (attribution link). */
+  tmdbUrl: string | null;
+  fromTmdb: boolean;
+}
+
+export interface TmdbStatus {
+  /** A key is saved (it never comes back to the UI). */
+  configured: boolean;
+  language: string;
 }

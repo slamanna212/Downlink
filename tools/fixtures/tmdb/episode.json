@@ -1,0 +1,7 @@
+{
+  "season_number": 2, "episode_number": 5, "name": "The Lantern Keeper",
+  "overview": "A storm strands the team at the lighthouse.", "air_date": "2024-03-02",
+  "runtime": 46, "still_path": "/still2x5.jpg", "vote_average": 8.4, "vote_count": 40,
+  "guest_stars": [{"name": "Bo Sample", "character": "Keeper", "profile_path": "/bo.jpg"}],
+  "crew": [{"name": "Rae Director", "job": "Director"}, {"name": "Wes Writer", "job": "Writer"}]
+}

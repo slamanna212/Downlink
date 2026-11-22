@@ -18,6 +18,8 @@ import { t } from '../../lib/i18n';
 import { openPalette } from '../../lib/palette';
 import { playCatchup, playChannel, playRecording, playVod, restartProgramme } from '../player/actions';
 import classes from './Home.module.css';
+import { episodeLine } from '../../lib/episode';
+import { openInfo } from '../../store/info';
 
 function Focusable({ children, className, onPlay }: { children: React.ReactNode; className: string | undefined; onPlay: () => void }) {
   const { ref, focusProps } = useDLFocusable<object, HTMLButtonElement>({ onEnterPress: onPlay });
@@ -57,6 +59,7 @@ function Hero({ item, now }: { item: ContinueItem; now: number }) {
         {item.channel && <span>{item.channel.number} · {item.channel.name}</span>}
       </div>
       <h3 className={classes.heroTitle}>{item.title}</h3>
+      {p && episodeLine(p) && <div className={classes.heroEp}>{episodeLine(p)}</div>}
       {p && (
         <div className={classes.heroTimeline}>
           <span>{formatClock(p.startUtc)}</span>
@@ -71,6 +74,11 @@ function Hero({ item, now }: { item: ContinueItem; now: number }) {
         {item.channel && (item.kind === 'live' || item.kind === 'catchup') && (
           <DLButton variant="default" size="lg" onClick={() => void restartProgramme(item.channel!.id)}>
             {t('guide.fromStart')}
+          </DLButton>
+        )}
+        {p && (
+          <DLButton variant="subtle" size="lg" onClick={() => openInfo({ kind: 'programme', programme: p, channel: item.channel ?? undefined })}>
+            {t('guide.moreInfo')}
           </DLButton>
         )}
       </div>
@@ -107,6 +115,7 @@ function OnNowCard({ item, now }: { item: OnNowItem; now: number }) {
         <span>{item.channel.number} · {item.channel.name}</span>
       </span>
       <span className={classes.nowTitle}>{p?.title ?? t('channels.noGuide')}</span>
+      {p && episodeLine(p) && <span className={classes.nowEp}>{episodeLine(p)}</span>}
       {p && (
         <span className={classes.nowFoot}>
           <span className={classes.nowTrack}>

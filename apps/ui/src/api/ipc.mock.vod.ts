@@ -96,7 +96,9 @@ let nextRec = 100;
 function seed(now: number): void {
   if (recs) return;
   const mk = (i: number, status: Recording['status'], off: number, dur: number, extra: Partial<Recording> = {}): Recording => ({
-    id: i, title: title(i * 3), channelId: 100 + (i % 6), channelName: ['Harbor News 24', 'Meridian One', 'Cobalt Sports', 'Lantern Cinema', 'Orchard Kids', 'Northwind Docs'][i % 6]!,
+    id: i, title: title(i * 3), subtitle: i % 2 ? ['Low Tide', 'Second Light', 'Paper Boats', 'Signal and Noise', 'The Lantern Keeper'][i % 5]! : null,
+    description: 'Synthetic recording description from the guide.', season: i % 2 ? 1 + (i % 3) : null, episode: i % 2 ? i : null,
+    channelId: 100 + (i % 6), channelName: ['Harbor News 24', 'Meridian One', 'Cobalt Sports', 'Lantern Cinema', 'Orchard Kids', 'Northwind Docs'][i % 6]!,
     startUtc: now + off, endUtc: now + off + dur, status, ruleId: null, ruleLabel: null, sizeBytes: status === 'completed' ? 800_000_000 + i * 90_000_000 : null, error: null, ...extra,
   });
   recs = [

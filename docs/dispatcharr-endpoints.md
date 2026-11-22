@@ -81,7 +81,16 @@ be refused; the picker then shows no provider names (the refusal is cached for 1
 | `POST /api/epg/current-programs/` | body `{channel_uuids:[…]}` (also `epg_data_ids:[…]`; `{}` = all channels with a current programme) | **bare array** of grid rows plus `channel_uuid` [`epg_current_programs_uuids`, `epg_current_programs_all`]. Channels with no current programme are omitted. Not a `{"data":…}` envelope. |
 | `GET /api/epg/programs/search/` | see below | paginated envelope [`epg_programs_search_*`] |
 
-**Programme search (resolved).** Filters: `title`, `description` (AND/OR, quoted phrases, parentheses;
+**Programme detail.** `GET /api/epg/programs/{id}/` (stored programme id; dummy ids are not rows) returns the grid row plus
+`categories[], rating, rating_system, star_ratings[{value,system}], credits{actors[{name,role?,guest?}],directors[],writers[],producers[],presenters[]},
+video_quality, aspect_ratio, stereo, is_previously_shown, country, language, production_date (XMLTV <date>), original_air_date,
+content_advisory[], content_ratings[], event_details, runtime, runtime_units, imdb_id, tmdb_id, tvdb_id (from <episode-num system=…>),
+icon, images[], poster_url` [`epg_program_detail`; `epg_program_detail_rich` is a hand-written synthetic example of a full guide].
+How much is filled depends entirely on the EPG source (a plain XMLTV dump often has none of it; Schedules Direct fills most). `poster_url`
+is absolute and built from the request Host: map it onto the configured base. A status endpoint; Downlink calls it only when a details
+view opens, cached for 6 h.
+
+ Filters: `title`, `description` (AND/OR, quoted phrases, parentheses;
 `title_regex`, `title_whole_words`, `description_regex`, `description_whole_words`), `channel` (name substring),
 `channel_id` (exact id), `tvg_id` (exact), `group` (channel or stream group substring), `stream` (stream name
 substring), `epg_source` (id), `airing_at` (instant, `start<=t<end`), `start_after`, `start_before`, `end_after`,

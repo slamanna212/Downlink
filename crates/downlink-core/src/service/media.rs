@@ -428,7 +428,9 @@ impl Service {
         let resume = self.resume_of(&row).await?;
         let poster = self.art(row.source_id, row.art_key.as_deref()).await;
         let backdrop = self.art(row.source_id, row.backdrop_key.as_deref()).await;
-        Ok(self.movie_dto(&row, resume.as_ref(), poster, backdrop, false))
+        let mut dto = self.movie_dto(&row, resume.as_ref(), poster, backdrop, false);
+        self.fill_movie(&row, &mut dto).await;
+        Ok(dto)
     }
 
     pub async fn get_series(&self, id: i64) -> Result<SeriesDetailDto> {
@@ -532,11 +534,13 @@ impl Service {
         let poster = self.art(row.source_id, row.art_key.as_deref()).await;
         let backdrop = self.art(row.source_id, row.backdrop_key.as_deref()).await;
         let series = self.series_dto(&row, season_count, poster, backdrop, false);
-        Ok(SeriesDetailDto {
+        let mut dto = SeriesDetailDto {
             series,
             seasons,
             next_episode_id: next,
-        })
+        };
+        self.fill_series(&row, &mut dto).await;
+        Ok(dto)
     }
 
     /// Plan for a movie or episode (`/proxy/vod/…` for Dispatcharr, `/movie|series/…` for Xtream).
@@ -742,6 +746,10 @@ impl Service {
         Ok(RecordingDto {
             id: r.id,
             title,
+            subtitle: r.subtitle.clone(),
+            description: r.description.clone(),
+            season: r.season,
+            episode: r.episode,
             channel_id: r.channel_id,
             channel_name,
             start_utc: r.start_utc,
@@ -795,7 +803,10 @@ impl Service {
             tvg_id: ch.tvg_id.clone(),
             programme_ext_id: prog.ext_id.clone(),
             title: prog.title.clone().unwrap_or_else(|| ch.name.clone()),
+            subtitle: prog.subtitle.clone(),
             description: prog.description.clone(),
+            season: prog.season,
+            episode: prog.episode,
             start_utc: prog.start_utc,
             end_utc: prog.end_utc,
         };
@@ -969,6 +980,11 @@ impl Service {
             file_url: r.file_url.clone(),
             rule_ext: r.rule_ext.clone(),
             tvg_id: r.tvg_id.clone(),
+            subtitle: r.subtitle.clone(),
+            description: r.description.clone(),
+            season: r.season,
+            episode: r.episode,
+            programme_ext: r.programme_ext.clone(),
         };
         let plan = c.recording_plan(&info).await?;
         let resume_secs = self

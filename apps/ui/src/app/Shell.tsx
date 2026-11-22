@@ -16,11 +16,13 @@ import { readTvSignals, wantsTv } from '../lib/tv';
 import { Rail, type RailMode } from './Rail';
 import { preloadRoutes } from './routes';
 import { useDetailStore } from '../store/detail';
+import { useInfoStore } from '../store/info';
 import { whenIdle } from '../lib/perf';
 import { openPalette } from '../lib/palette';
 import classes from './Shell.module.css';
 
 const CommandPalette = lazy(() => import('../features/palette/CommandPalette').then((m) => ({ default: m.CommandPalette })));
+const InfoModal = lazy(() => import('../features/info/InfoModal').then((m) => ({ default: m.InfoModal })));
 const ChannelDetail = lazy(() => import('../features/detail/ChannelDetail').then((m) => ({ default: m.ChannelDetail })));
 
 /** Mounts the code-split palette once the app is idle (a queued open request is replayed on mount). */
@@ -149,6 +151,7 @@ const isVideoRoute = (path: string) => path.startsWith('/player') || path.starts
 export function Shell() {
   useResumeOnLaunch();
   const detailOpen = useDetailStore((s) => s.open !== null);
+  const infoOpen = useInfoStore((s) => s.subject !== null);
   useEffect(() => {
     const id = window.setTimeout(preloadRoutes, 1500);
     return () => window.clearTimeout(id);
@@ -216,6 +219,7 @@ export function Shell() {
         </RouteTransition>
       </main>
       <IdleMount when={detailOpen}><ChannelDetail /></IdleMount>
+      <IdleMount when={infoOpen}><InfoModal /></IdleMount>
       <IdleMount><CommandPalette /></IdleMount>
     </div>
   );

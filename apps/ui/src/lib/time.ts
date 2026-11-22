@@ -205,3 +205,10 @@ export const formatBehindLive = (seconds: number, slack = 5): string => (seconds
 
 /** Coarse bucket of an epoch (default 5 min), for query keys that should not change every second. */
 export const bucketEpoch = (epoch: Epoch, seconds = 300): Epoch => Math.floor(epoch / seconds) * seconds;
+
+/** A calendar date the server sends as `YYYY-MM-DD` (air / release dates): no zone, no shift. */
+export function formatCalendarDate(iso: string | null | undefined): string | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const d = dayjs.utc(iso);
+  return d.isValid() ? d.format('D MMM YYYY') : null;
+}

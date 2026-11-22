@@ -42,9 +42,11 @@ import type {
   Source,
   StreamList,
   MultiviewState,
+  MediaDetails,
   MediaMatch,
   MediaServerStatus,
   MediaTarget,
+  TmdbStatus,
   PlexPin,
   PlexServer,
 } from './types';
@@ -136,6 +138,12 @@ export interface Commands {
   media_server_match: { args: { target: MediaTarget }; result: MediaMatch | null };
   /** Opens a page from `media_server_match` in the browser. */
   media_server_open: { args: { url: string }; result: null };
+  /** Rich details (source first, then TMDB). Never touches a stream. */
+  media_details: { args: { target: MediaTarget }; result: MediaDetails };
+  tmdb_status: { args: Record<string, never>; result: TmdbStatus };
+  /** Checks the key with TMDB, then keeps it in the keychain. */
+  tmdb_set_key: { args: { key: string }; result: TmdbStatus };
+  tmdb_clear_key: { args: Record<string, never>; result: TmdbStatus };
   /** GitHub release body for a version (Markdown), or the latest.json notes if GitHub is unreachable. */
   get_release_notes: { args: { version: string }; result: ReleaseNotes };
   /** Opens a web link from release notes in the system browser. */

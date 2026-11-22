@@ -39,6 +39,7 @@ import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { appendDigit, NUMBER_ENTRY_TIMEOUT_MS } from '../../lib/numberEntry';
 import { bucketEpoch, dayLabel, nowEpoch, formatBehindLive, formatClock, formatClockSeconds, formatDuration, formatRange, progress } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
+import { episodeLine } from '../../lib/episode';
 import { useVideoBounds } from '../../lib/useVideoBounds';
 import { useNowEpoch } from '../../lib/useNow';
 import { usePlayerStore } from '../../store/player';
@@ -588,11 +589,15 @@ export function PlayerPage() {
                   )}
                   {channel?.quality === '4K' && <StatusBadge kind="4k" />}
                   {(channel?.quality === 'HD' || channel?.quality === 'FHD') && <StatusBadge kind="hd" />}
+                  {!player.title && shownProg?.isPremiere && <StatusBadge kind="premiere" />}
+                  {!player.title && shownProg?.isFinale && <StatusBadge kind="finale" />}
+                  {!player.title && shownProg?.isNew && <StatusBadge kind="new" />}
                 </div>
                 <div className={classes.titleRow}>
                   <h1 className={classes.title}>{player.title ?? shownProg?.title ?? (channel ? t('player.noGuide') : '')}</h1>
                   {live && next && <span className={classes.next}>{t('player.next', { time: formatClock(next.startUtc), title: next.title ?? '' })}</span>}
                 </div>
+                {!player.title && shownProg && episodeLine(shownProg) && <div className={classes.epLine}>{episodeLine(shownProg)}</div>}
               </div>
             </div>
             {tl && player.channelId != null ? (

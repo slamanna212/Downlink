@@ -3,6 +3,7 @@
 //! command-level verbs of PLAN §2.5. Returns camelCase serde DTOs matching
 //! `apps/ui/src/api/types.ts`; events go out on a broadcast channel the app forwards.
 
+mod details;
 pub mod dto;
 mod logtail;
 mod media;
@@ -126,6 +127,7 @@ async fn file_sha256(path: PathBuf) -> Result<String> {
     .map_err(|_| AppError::local("Reading the guide was interrupted."))?
 }
 
+pub use details::{CrewDto, MediaDetailsDto, PersonDto, TmdbStatusDto};
 pub use logtail::LogTail;
 pub use media::{RecordingPlay, VodPlay};
 pub use mediaserver::{
@@ -183,6 +185,10 @@ pub struct Service {
     /// The connected Plex server, built lazily from settings + keychain.
     plex: tokio::sync::Mutex<Option<Arc<crate::mediaserver::plex::PlexServer>>>,
     plex_tv_url: std::sync::RwLock<String>,
+    /// TMDB client, built lazily from the keychain: `None` = not looked yet, `Some(None)` = no key.
+    #[allow(clippy::option_option)]
+    tmdb: tokio::sync::Mutex<Option<Option<Arc<crate::tmdb::TmdbClient>>>>,
+    tmdb_api: std::sync::RwLock<String>,
 }
 
 impl Service {
@@ -231,6 +237,8 @@ impl Service {
             app_version,
             plex: tokio::sync::Mutex::new(None),
             plex_tv_url: std::sync::RwLock::new(crate::mediaserver::plex::PLEX_TV.to_owned()),
+            tmdb: tokio::sync::Mutex::new(None),
+            tmdb_api: std::sync::RwLock::new(crate::tmdb::TMDB_API.to_owned()),
         })
     }
 
@@ -2156,6 +2164,9 @@ impl Service {
 
     /// App start: delete sessions persisted by a crashed run.
     pub async fn startup_cleanup(&self) -> Result<sessions::CleanupReport> {
+        if let Err(e) = self.prune_metadata().await {
+            tracing::warn!("metadata cache prune failed: {}", e.message);
+        }
         sessions::cleanup_on_startup(&self.store, self).await
     }
 
@@ -2226,6 +2237,13 @@ struct ServiceFetcher<'a>(&'a Service);
 #[async_trait]
 impl ImageFetcher for ServiceFetcher<'_> {
     async fn fetch(&self, source_id: i64, url: &str) -> Result<RawImage> {
+        // TMDB artwork is public: fetched anonymously, and only from TMDB's image host.
+        if let Ok(u) = reqwest::Url::parse(url)
+            && u.scheme() == "https"
+            && u.host_str() == Some(crate::tmdb::IMAGE_HOST)
+        {
+            return crate::images::fetch_public(url, false).await;
+        }
         self.0.client(source_id).await?.fetch_image(url).await
     }
 }

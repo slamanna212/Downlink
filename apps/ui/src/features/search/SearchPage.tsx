@@ -14,8 +14,9 @@ import { EmptySource } from '../../pages/EmptySource';
 import { nextIndex } from '../../lib/listNav';
 import { dayLabel, formatRange, nowEpoch } from '../../lib/time';
 import { t } from '../../lib/i18n';
-import { useDetailStore } from '../../store/detail';
 import { activateProgramme } from '../guide/activate';
+import { openInfo } from '../../store/info';
+import { episodeLine } from '../../lib/episode';
 import { blockState } from '../guide/guideModel';
 import { playChannel } from '../player/actions';
 import classes from './Search.module.css';
@@ -26,7 +27,6 @@ type Item = { kind: 'channel'; channel: Channel } | { kind: 'programme'; hit: Pr
 
 export function SearchPage() {
   const navigate = useNavigate();
-  const showDetail = useDetailStore((s) => s.show);
   const { loaded, hasSource } = useCaps();
   const [query, setQuery] = useState('');
   const deferred = useDeferredValue(query.trim());
@@ -56,7 +56,7 @@ export function SearchPage() {
   const activate = (it: Item | undefined) => {
     if (!it) return;
     if (it.kind === 'channel') void playChannel(it.channel.id).then((err) => (err ? undefined : navigate('/player')));
-    else activateProgramme(it.hit.programme, it.hit.channel, navigate, showDetail);
+    else activateProgramme(it.hit.programme, it.hit.channel, navigate);
   };
 
   if (loaded && !hasSource) return <EmptySource />;
@@ -124,10 +124,11 @@ export function SearchPage() {
               const p = it.hit.programme;
               const st = blockState(p, it.hit.channel, now);
               return (
-                <div key={p.id} id={`sr-${i}`} role="option" aria-selected={i === active} data-active={i === active || undefined} className={classes.item} onClick={() => activate(it)} onMouseMove={() => i !== active && setActive(i)}>
+                <div key={p.id} id={`sr-${i}`} role="option" aria-selected={i === active} data-active={i === active || undefined} className={classes.item} onClick={() => openInfo({ kind: 'programme', programme: p, channel: it.hit.channel })} onMouseMove={() => i !== active && setActive(i)}>
                   <ChannelLogo channelId={it.hit.channel.id} name={it.hit.channel.name} src={it.hit.channel.logo} density="compact" />
                   <span className={classes.main}>
                     <span className={classes.name}>{p.title}</span>
+                    {episodeLine(p) && <span className={classes.ep}>{episodeLine(p)}</span>}
                     <span className={classes.sub}>
                       {it.hit.channel.number} · {it.hit.channel.name} · {dayLabel(p.startUtc, now)} {formatRange(p.startUtc, p.endUtc)}
                     </span>

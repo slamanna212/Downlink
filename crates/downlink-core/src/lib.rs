@@ -17,6 +17,7 @@ pub mod source;
 pub mod store;
 pub mod sync;
 pub mod tls;
+pub mod tmdb;
 pub mod user_agent;
 pub mod userstate;
 pub mod util;

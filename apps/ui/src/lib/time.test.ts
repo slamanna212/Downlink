@@ -135,3 +135,13 @@ describe('channel timeline', () => {
     expect(bucketEpoch(1234)).toBe(1200);
   });
 });
+
+describe('calendar dates', () => {
+  it('formats server dates without shifting them', async () => {
+    const { formatCalendarDate, setDisplayZone } = await import('./time');
+    setDisplayZone('Pacific/Auckland');
+    expect(formatCalendarDate('2024-03-02')).toBe('2 Mar 2024');
+    expect(formatCalendarDate('2024')).toBeNull();
+    expect(formatCalendarDate(null)).toBeNull();
+  });
+});

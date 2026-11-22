@@ -8,6 +8,7 @@ import { Icon } from '../../components/Icon/Icon';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { formatClock, formatRange, progress } from '../../lib/time';
 import { t } from '../../lib/i18n';
+import { episodeCode, episodeLine } from '../../lib/episode';
 import classes from './Channels.module.css';
 
 export interface ChannelRowProps {
@@ -83,8 +84,9 @@ export const ChannelRow = forwardRef<HTMLDivElement, ChannelRowProps>(function C
       <span className={classes.now}>
         {p ? (
           <>
-            <span className={classes.nowTitle}>
+            <span className={classes.nowTitle} title={episodeLine(p) ?? undefined}>
               <span>{p.title}</span>
+              {episodeCode(p) && <span className={classes.nowCode}>{episodeCode(p)}</span>}
               <span className={classes.nowTime}>{formatRange(p.startUtc, p.endUtc)}</span>
             </span>
             <span className={classes.track} role="progressbar" aria-label={p.title ?? ''} aria-valuenow={Math.round(progress(p.startUtc, p.endUtc, now) * 100)} aria-valuemin={0} aria-valuemax={100}>

@@ -131,7 +131,19 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 
 ## 7. Other components
 - **Badges** (20 px, 11/700 caps, radius 4): LIVE/REC = live tint + dot · CATCH-UP = accent tint +
-  IconHistory · NEW/HD/4K/RADIO = outline (hairline 18%) text-2 · DRM = surface-3 + lock, text-dim.
+  IconHistory · NEW/HD/4K/RADIO/PREMIERE/FINALE = outline (hairline 18%) text-2 · content rating (`cert`, text as
+  broadcast, e.g. TV-14) = outline · DRM/REPEAT = surface-3, text-dim.
+- **Episode labels** (`lib/episode.ts`): `S2 E5`, and `S2 E5 · Episode title` wherever a programme, recording or
+  episode is listed (guide block time line, preview, channel rows, channel drawer, search, recordings, home, player).
+- **Details modal** (`features/info`, one instance in the shell, opened via `store/info`): 880 px, radius 12,
+  surface-1. Hero = episode still or backdrop under `--dl-scrim` (none: compact header with the channel logo
+  plate); title or TMDB title logo; the **slate** (episode code 40/650 tabular, episode title 18/600 text-2) is the
+  one large element; slot line (channel, day + range, minutes left). A 2 px ribbon on the hero's lower edge shows
+  progress (accent) only while airing. Body: badge row, actions (one primary: Watch live / Play from start / Play
+  recording, focused on open), then prose (tagline, description, About the show, crew, cast strip of 2:3
+  portraits, radius 8, initials fallback) beside a 14 rem facts list (12/600 text-faint label, 14/500 text-2 value,
+  hairline left rule). TMDB attribution line at the foot whenever TMDB contributed. Clicking a guide block opens
+  it; Enter still plays; `I` opens it from the keyboard.
 - **Inputs**: 40 px (md), surface-2, hairline 10% border; focused = accent border + 3 px glow.
 - **Segmented**: track surface-2 (or surface-0 inside cards), 3 px padding, active `--dl-border` bg.
 - **Nav rows** (rail, groups, settings): 36–40 px, radius 6, active = surface-3 + 600 + accent icon (rail).

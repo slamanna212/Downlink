@@ -20,6 +20,7 @@ import { useDLFocusable } from '../../lib/spatial';
 import { useInteractive } from '../../lib/perf';
 import { t } from '../../lib/i18n';
 import { useDetailStore } from '../../store/detail';
+import { openInfo } from '../../store/info';
 import { useUiStore } from '../../store/ui';
 import { playCatchup, playChannel, restartProgramme } from '../player/actions';
 import { GuideBlock } from './GuideBlock';
@@ -394,9 +395,9 @@ export function GuidePage() {
       const action = enterAction(blockState(p, ch, nowEpoch()));
       if (action === 'play-live') void playChannel(p.channelId).then((err) => (err ? undefined : navigate('/player')));
       else if (action === 'play-catchup') void playCatchup(p.id).then((err) => (err ? undefined : navigate('/player')));
-      else if (action === 'details') showDetail(p.channelId, p.id);
+      else if (action === 'details') openInfo({ kind: 'programme', programme: p, channel: ch });
     },
-    [rowChannel, focus.row, navigate, showDetail, tuneRow],
+    [rowChannel, focus.row, navigate, tuneRow],
   );
 
   const pageRows = Math.max(1, Math.floor((size.h - HEADER_H) / rowH) - 1);
@@ -419,6 +420,9 @@ export function GuidePage() {
     } else if ((e.key === 'r' || e.key === 'R') && caps.dvr && focusState && (focusState === 'now' || focusState === 'future')) {
       e.preventDefault();
       setRecordOpen(true);
+    } else if ((e.key === 'i' || e.key === 'I') && focusProgramme) {
+      e.preventDefault();
+      openInfo({ kind: 'programme', programme: focusProgramme, channel: focusChannel ?? undefined });
     } else if ((e.key === 'f' || e.key === 'F') && focusChannel) {
       e.preventDefault();
       favourite.mutate({ channelId: focusChannel.id, favourite: !focusChannel.isFavourite });
@@ -450,11 +454,8 @@ export function GuidePage() {
     if (!p) return;
     setFocusState({ row, t: p.startUtc });
     el.focus({ preventScroll: true });
-    const ch = channelFor(row);
-    const action = enterAction(blockState(p, ch, nowEpoch()));
-    if (action === 'play-live') void playChannel(p.channelId).then((err) => (err ? undefined : navigate('/player')));
-    else if (action === 'play-catchup') void playCatchup(p.id).then((err) => (err ? undefined : navigate('/player')));
-    else if (action === 'details') showDetail(p.channelId, p.id);
+    // A click opens the details (play from there); Enter on a focused block still plays straight away.
+    openInfo({ kind: 'programme', programme: p, channel: channelFor(row) });
   };
   const onContextMenu = (e: React.MouseEvent) => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-pid]');
@@ -475,6 +476,7 @@ export function GuidePage() {
   const onPrimary = useStable(() => activate(focusProgramme));
   const onFromStart = useStable(() => focusChannel && void restartProgramme(focusChannel.id).then((err) => (err ? undefined : navigate('/player'))));
   const onDetails = useStable(() => focusProgramme && showDetail(focusProgramme.channelId, focusProgramme.id));
+  const onInfo = useStable(() => focusProgramme && openInfo({ kind: 'programme', programme: focusProgramme, channel: focusChannel ?? undefined }));
   const onFavourite = useStable(() => focusChannel && favourite.mutate({ channelId: focusChannel.id, favourite: !focusChannel.isFavourite }));
   const onGroup = useStable((id: number | null) => {
     setGroupId(id);
@@ -545,6 +547,7 @@ export function GuidePage() {
         onPrimary={onPrimary}
         onFromStart={onFromStart}
         onDetails={onDetails}
+        onInfo={onInfo}
         onFavourite={onFavourite}
       />
       <GuideControls

@@ -555,6 +555,11 @@ pub enum RecordKindArg {
 pub struct RecordingDto {
     pub id: i64,
     pub title: String,
+    /// Episode title, when the programme had one.
+    pub subtitle: Option<String>,
+    pub description: Option<String>,
+    pub season: Option<i64>,
+    pub episode: Option<i64>,
     pub channel_id: Option<i64>,
     pub channel_name: String,
     pub start_utc: i64,

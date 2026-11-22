@@ -121,6 +121,24 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.epRow {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  min-width: 0;
+  margin-bottom: var(--mantine-spacing-xs);
+}
+.epLine {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--mantine-font-size-md);
+  font-weight: 600;
+  color: var(--dl-text-2);
+}
+/* The episode line takes a row: keep the pane's height by trimming the description. */
+.epRow + .desc { -webkit-line-clamp: 2; }
 .actions {
   display: flex;
   gap: var(--mantine-spacing-sm);
@@ -327,6 +345,8 @@
   white-space: nowrap;
 }
 .block[data-state='past-none'] .blockTime { color: var(--dl-text-disabled); }
+.blockCode { margin-right: var(--mantine-spacing-sm); font-weight: 600; color: var(--dl-text-2); }
+.block[data-state='past-none'] .blockCode { color: var(--dl-text-disabled); }
 .histIcon { color: var(--dl-accent-text); display: inline-flex; flex: none; }
 .recDot {
   width: 7px;

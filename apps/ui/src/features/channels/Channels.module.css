@@ -178,6 +178,12 @@
   overflow: hidden;
 }
 .nowTitle > :first-child { overflow: hidden; text-overflow: ellipsis; }
+.nowCode {
+  flex: none;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 600;
+  color: var(--dl-text-2);
+}
 .nowTime {
   font-size: var(--mantine-font-size-xs);
   color: var(--dl-text-dim);

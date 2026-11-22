@@ -2,6 +2,7 @@
 //! migrations. Nothing secret is ever written here: sources hold only a keychain reference.
 
 mod channels;
+mod meta;
 mod programmes;
 mod sessions;
 mod sources;

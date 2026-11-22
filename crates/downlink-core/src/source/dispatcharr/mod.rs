@@ -1436,6 +1436,13 @@ impl Source for DispatcharrClient {
         self.provider_info(kind, ext_id).await
     }
 
+    async fn programme_detail(
+        &self,
+        ext_id: &str,
+    ) -> Result<Option<crate::source::ProgrammeExtra>> {
+        self.program_detail(ext_id).await
+    }
+
     async fn play_vod(&self, item: &VodItem) -> Result<PlayPlan> {
         self.vod_plan(item).await
     }

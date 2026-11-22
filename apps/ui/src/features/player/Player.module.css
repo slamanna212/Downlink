@@ -106,6 +106,14 @@
   font-weight: 650;
   color: var(--dl-on-video);
 }
+.epLine {
+  margin-top: calc(var(--mantine-spacing-xs) * -1);
+  margin-bottom: var(--mantine-spacing-sm);
+  font-size: var(--mantine-font-size-lg);
+  font-weight: 600;
+  color: var(--dl-on-video);
+  opacity: 0.85;
+}
 .next {
   font-size: var(--mantine-font-size-sm);
   color: var(--dl-text-dim);

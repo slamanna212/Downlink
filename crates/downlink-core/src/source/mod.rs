@@ -3,6 +3,7 @@
 
 pub mod dispatcharr;
 pub mod m3u;
+pub mod meta;
 pub mod play;
 pub mod vod;
 pub mod xtream;
@@ -15,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
 
+pub use meta::{Credit, ProgrammeExtra, VodExtra};
 pub use play::{
     Location, PlayPlan, PlayProfile, RedactedPlan, RedirectOutcome, SessionId, Surface,
     probe_redirect, resolve_redirect,
@@ -427,6 +429,11 @@ pub trait Source: Send + Sync {
     }
     async fn series_episodes(&self, _series_ext_id: &str) -> Result<Vec<VodItem>> {
         Err(no_vod())
+    }
+    /// Extra details for one guide row (`Programme::ext_id`): credits, ratings, artwork, external
+    /// ids. A status call, never a stream. `None` when the source has nothing more to say.
+    async fn programme_detail(&self, _ext_id: &str) -> Result<Option<ProgrammeExtra>> {
+        Ok(None)
     }
     /// A play plan for a movie or episode. `item.uuid`/`container` come from the cached row.
     async fn play_vod(&self, _item: &VodItem) -> Result<PlayPlan> {

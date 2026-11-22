@@ -14,6 +14,7 @@ import { t } from '../../lib/i18n';
 import { formatDuration } from '../../lib/time';
 import { playVod } from '../player/actions';
 import { progressOf, ratingLabel, resumeUseful, runtimeLabel } from './vod';
+import { VodExtras } from './VodExtras';
 import classes from './Vod.module.css';
 
 function useStart() {
@@ -89,6 +90,9 @@ export function MovieDetail() {
         </div>
         {error && <p className={classes.msg} role="alert">{error}</p>}
       </Hero>
+      <div className={classes.body}>
+        <VodExtras id={m.id} />
+      </div>
     </div>
   );
 }
@@ -103,6 +107,7 @@ function EpisodeRow({ ep, season, next, onPlay }: { ep: Episode; season: number;
       </span>
       <span className={classes.epMain}>
         <span className={classes.epTitle}>{ep.title}</span>
+        {ep.plot && <span className={classes.epPlot}>{ep.plot}</span>}
         <span className={classes.epSub}>{runtimeLabel(ep.durationSecs)}</span>
       </span>
       <span className={classes.epState}>
@@ -143,6 +148,7 @@ export function SeriesDetailPage() {
         {error && <p className={classes.msg} role="alert">{error}</p>}
       </Hero>
       <div className={classes.body}>
+        <VodExtras id={s.id} />
         <div className={classes.seasonTabs}>
           <Select
             size="sm"

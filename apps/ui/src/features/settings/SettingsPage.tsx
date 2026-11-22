@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Modal, NavLink, SegmentedControl, Select, Slider, Switch, Text } from '@mantine/core';
-import { IconPalette, IconPlayerPlay, IconPlugConnected, IconRefresh, IconServer2, IconStethoscope } from '@tabler/icons-react';
-import { invoke } from '../../api/ipc';
+import { Modal, NavLink, PasswordInput, SegmentedControl, Select, Slider, Switch, Text } from '@mantine/core';
+import { IconInfoSquareRounded, IconPalette, IconPlayerPlay, IconPlugConnected, IconRefresh, IconServer2, IconStethoscope } from '@tabler/icons-react';
+import { invoke, toAppError } from '../../api/ipc';
 import { useMediaServerStatus, useSettings, useSources, useUpdateStatus, useUpdateWaiting } from '../../api/queries';
 import type { AudioOutput, Deinterlace, DensitySetting, HdrOutput, HwdecSetting, PlexPin, Source, UpdateChannel } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
@@ -22,6 +22,7 @@ import classes from './Settings.module.css';
 const SECTIONS: { id: string; label: MessageKey; icon: TablerIcon }[] = [
   { id: 'sources', label: 'settings.sources', icon: IconPlugConnected },
   { id: 'playback', label: 'settings.playback', icon: IconPlayerPlay },
+  { id: 'metadata', label: 'settings.metadata', icon: IconInfoSquareRounded },
   { id: 'mediaserver', label: 'settings.mediaServer', icon: IconServer2 },
   { id: 'appearance', label: 'settings.appearance', icon: IconPalette },
   { id: 'updates', label: 'settings.updates', icon: IconRefresh },
@@ -565,6 +566,72 @@ function MediaServerSection() {
   );
 }
 
+const TMDB_SIGNUP = 'https://www.themoviedb.org/settings/api';
+
+function MetadataSection() {
+  const qc = useQueryClient();
+  const status = useQuery({ queryKey: ['tmdb', 'status'], queryFn: () => invoke('tmdb_status', {}) });
+  const [key, setKey] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const done = () => {
+    void qc.invalidateQueries({ queryKey: ['tmdb'] });
+    // Details and VOD pages fetched without (or with another) key should look again.
+    void qc.invalidateQueries({ queryKey: ['details'] });
+    void qc.invalidateQueries({ queryKey: ['catalog'] });
+  };
+  const save = useMutation({
+    mutationFn: (k: string) => invoke('tmdb_set_key', { key: k }),
+    onSuccess: () => {
+      setKey('');
+      setError(null);
+      done();
+    },
+    onError: (e: unknown) => setError(toAppError(e).message),
+  });
+  const remove = useMutation({ mutationFn: () => invoke('tmdb_clear_key', {}), onSuccess: done, onError: notifyError });
+  if (!status.data) return <SkeletonList rows={1} label={t('loading.generic')} />;
+  const configured = status.data.configured;
+  return (
+    <Section title={t('settings.metadata')} help={t('settings.metadata.help')}>
+      <SettingRow label={t('settings.tmdb')} help={error ?? (configured ? t('settings.tmdb.saved') : t('settings.tmdb.help'))} wide>
+        {configured ? (
+          <DLButton variant="danger" size="sm" loading={remove.isPending} onClick={() => remove.mutate()}>
+            {t('settings.tmdb.remove')}
+          </DLButton>
+        ) : (
+          <form
+            className={classes.inlineForm}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (key.trim()) save.mutate(key.trim());
+            }}
+          >
+            <PasswordInput
+              aria-label={t('settings.tmdb')}
+              placeholder={t('settings.tmdb.placeholder')}
+              value={key}
+              error={!!error}
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(e) => {
+                setKey(e.currentTarget.value);
+                setError(null);
+              }}
+            />
+            <DLButton type="submit" variant="filled" loading={save.isPending} disabled={!key.trim()}>
+              {t('settings.tmdb.save')}
+            </DLButton>
+            <DLButton variant="subtle" onClick={() => void invoke('open_external_link', { url: TMDB_SIGNUP }).catch(notifyError)}>
+              {t('settings.tmdb.getKey')}
+            </DLButton>
+          </form>
+        )}
+      </SettingRow>
+      <p className={classes.attribution}>{t('details.tmdbAttribution')}</p>
+    </Section>
+  );
+}
+
 function AppearanceSection() {
   const density = useUiStore((s) => s.density);
   const setDensity = useUiStore((s) => s.setDensity);
@@ -679,6 +746,7 @@ export function SettingsPage() {
         <div className={classes.inner}>
           {section === 'sources' && <SourcesSection />}
           {section === 'playback' && <PlaybackSection />}
+          {section === 'metadata' && <MetadataSection />}
           {section === 'mediaserver' && <MediaServerSection />}
           {section === 'appearance' && <AppearanceSection />}
           {section === 'updates' && <UpdatesSection />}

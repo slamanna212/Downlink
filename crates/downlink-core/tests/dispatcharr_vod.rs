@@ -438,6 +438,9 @@ async fn endpoint_schedule_one_off_and_series_rule() {
         programme_ext_id: Some("p".into()),
         title: "Fieldwork".into(),
         description: None,
+        subtitle: None,
+        season: None,
+        episode: None,
         start_utc: 1_767_297_600,
         end_utc: 1_767_301_200,
     };
@@ -1064,6 +1067,9 @@ async fn a_past_one_off_gets_a_plain_sentence() {
         programme_ext_id: None,
         title: "T".into(),
         description: None,
+        subtitle: None,
+        season: None,
+        episode: None,
         start_utc: 1,
         end_utc: 2,
     };
@@ -1097,6 +1103,9 @@ async fn series_rule_create_is_followed_by_an_evaluate() {
         programme_ext_id: None,
         title: "Pattern Playhouse".into(),
         description: None,
+        subtitle: None,
+        season: None,
+        episode: None,
         start_utc: 1,
         end_utc: 2,
     };
@@ -1264,6 +1273,9 @@ async fn series_rule_carries_the_epg_source_of_the_channels_guide_data() {
         programme_ext_id: None,
         title: "Pattern Playhouse".into(),
         description: None,
+        subtitle: None,
+        season: None,
+        episode: None,
         start_utc: 1,
         end_utc: 2,
     };
@@ -1290,6 +1302,9 @@ async fn series_rule_omits_epg_source_when_it_is_unknown() {
         programme_ext_id: None,
         title: "Pattern Playhouse".into(),
         description: None,
+        subtitle: None,
+        season: None,
+        episode: None,
         start_utc: 1,
         end_utc: 2,
     };

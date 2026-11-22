@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Menu } from '@mantine/core';
+import { Menu, UnstyledButton } from '@mantine/core';
 import { IconChevronDown, IconRepeat } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
 import { invalidateRecordings, useCaps, useOffline } from '../../api/queries';
@@ -15,6 +15,8 @@ import { dayLabel, formatClock, formatRange } from '../../lib/time';
 import { useNowEpoch } from '../../lib/useNow';
 import { t } from '../../lib/i18n';
 import { playRecording } from '../player/actions';
+import { openInfo } from '../../store/info';
+import { episodeLine } from '../../lib/episode';
 import classes from './Recordings.module.css';
 
 type Tab = 'upcoming' | 'inProgress' | 'completed' | 'rules';
@@ -34,7 +36,10 @@ export function RecordingRow({ r, now, tab, run, busy, demo }: { r: Recording; n
       <span className={classes.day}>{dayLabel(r.startUtc, now)}</span>
       <span className={classes.ini} aria-hidden>{initials(r.channelName)}</span>
       <span className={classes.main}>
-        <span className={classes.title}>{r.title}</span>
+        <UnstyledButton className={classes.titleLink} onClick={() => openInfo({ kind: 'recording', recording: r })}>
+          <span className={classes.title}>{r.title}</span>
+        </UnstyledButton>
+        {episodeLine(r) && <span className={classes.ep}>{episodeLine(r)}</span>}
         <span className={classes.sub}>{r.channelName}</span>
         {r.status === 'failed' && r.error && <span className={classes.err}>{r.error}</span>}
       </span>

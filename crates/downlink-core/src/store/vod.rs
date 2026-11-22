@@ -31,10 +31,22 @@ pub struct VodRow {
     pub category_ext: Option<String>,
     pub tmdb_id: Option<String>,
     pub imdb_id: Option<String>,
+    /// JSON [`crate::source::VodExtra`], when the source reported any.
+    pub meta: Option<String>,
+}
+
+impl VodRow {
+    /// The extra fields the source reported (empty when none or unreadable).
+    pub fn extra(&self) -> crate::source::VodExtra {
+        self.meta
+            .as_deref()
+            .and_then(|m| serde_json::from_str(m).ok())
+            .unwrap_or_default()
+    }
 }
 
 const VOD_COLS: &str = "id, source_id, kind, ext_id, parent_ext, name, year, rating, genre, description, \
-    season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext, tmdb_id, imdb_id";
+    season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext, tmdb_id, imdb_id, meta";
 
 #[derive(Debug, Clone, PartialEq, FromRow)]
 pub struct RecordingRow {
@@ -52,9 +64,14 @@ pub struct RecordingRow {
     pub file_url: Option<String>,
     pub rule_ext: Option<String>,
     pub tvg_id: Option<String>,
+    pub subtitle: Option<String>,
+    pub description: Option<String>,
+    pub season: Option<i64>,
+    pub episode: Option<i64>,
+    pub programme_ext: Option<String>,
 }
 
-const REC_COLS: &str = "id, source_id, ext_id, channel_id, start_utc, end_utc, state, title, rule_label, size_bytes, error, file_url, rule_ext, tvg_id";
+const REC_COLS: &str = "id, source_id, ext_id, channel_id, start_utc, end_utc, state, title, rule_label, size_bytes, error, file_url, rule_ext, tvg_id, subtitle, description, season, episode, programme_ext";
 
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct RuleRow {
@@ -109,7 +126,7 @@ impl Store {
     ) -> Result<Vec<VodRow>> {
         let mut query = sqlx::QueryBuilder::new(
             "INSERT INTO vod_item (source_id, kind, ext_id, parent_ext, name, year, rating, genre, description,
-                   season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext, tmdb_id, imdb_id, updated_at) ",
+                   season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext, tmdb_id, imdb_id, meta, updated_at) ",
         );
         query.push_values(items, |mut b, &(kind, it)| {
             b.push_bind(source_id)
@@ -131,6 +148,12 @@ impl Store {
                 .push_bind(&it.category_ext)
                 .push_bind(&it.tmdb_id)
                 .push_bind(&it.imdb_id)
+                .push_bind(
+                    it.extra
+                        .as_ref()
+                        .filter(|x| !x.is_empty())
+                        .and_then(|x| serde_json::to_string(x).ok()),
+                )
                 .push_bind(now);
         });
         query.push(format!(
@@ -146,6 +169,7 @@ impl Store {
                    uuid = coalesce(excluded.uuid, vod_item.uuid), container = coalesce(excluded.container, vod_item.container),
                    category_ext = coalesce(excluded.category_ext, vod_item.category_ext),
                    tmdb_id = coalesce(excluded.tmdb_id, vod_item.tmdb_id), imdb_id = coalesce(excluded.imdb_id, vod_item.imdb_id),
+                   meta = coalesce(excluded.meta, vod_item.meta),
                    updated_at = excluded.updated_at
 
                  RETURNING {VOD_COLS}",
@@ -305,13 +329,17 @@ impl Store {
                     .await?;
             let id: i64 = sqlx::query_scalar(
                 "INSERT INTO recording (source_id, ext_id, channel_id, start_utc, end_utc, state, title,
-                   rule_label, size_bytes, error, file_url, rule_ext, tvg_id)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   rule_label, size_bytes, error, file_url, rule_ext, tvg_id,
+                   subtitle, description, season, episode, programme_ext)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                  ON CONFLICT(source_id, ext_id) DO UPDATE SET channel_id = excluded.channel_id,
                    start_utc = excluded.start_utc, end_utc = excluded.end_utc, state = excluded.state,
                    title = excluded.title, rule_label = excluded.rule_label, size_bytes = excluded.size_bytes,
                    error = excluded.error, file_url = excluded.file_url,
-                   rule_ext = excluded.rule_ext, tvg_id = excluded.tvg_id
+                   rule_ext = excluded.rule_ext, tvg_id = excluded.tvg_id,
+                   subtitle = excluded.subtitle, description = excluded.description,
+                   season = excluded.season, episode = excluded.episode,
+                   programme_ext = excluded.programme_ext
                  RETURNING id",
             )
             .bind(source_id)
@@ -327,6 +355,11 @@ impl Store {
             .bind(&r.file_url)
             .bind(&r.rule_ext)
             .bind(&r.tvg_id)
+            .bind(&r.subtitle)
+            .bind(&r.description)
+            .bind(r.season)
+            .bind(r.episode)
+            .bind(&r.programme_ext)
             .fetch_one(&mut *tx)
             .await?;
             ids.push(id);

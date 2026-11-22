@@ -63,6 +63,8 @@ pub struct VodItem {
     pub tmdb_id: Option<String>,
     /// IMDb id (`tt…`), for media-server matching.
     pub imdb_id: Option<String>,
+    /// Cast, director, release date… when the source reports them.
+    pub extra: Option<super::VodExtra>,
 }
 
 /// A TMDB id as sources send it (`"1616400"`, `1616400`, `"0"`, `""`): digits only, not zero.
@@ -155,6 +157,13 @@ pub struct RecordingInfo {
     pub rule_ext: Option<String>,
     /// Guide id of the programme (matches series rules by title + tvg_id).
     pub tvg_id: Option<String>,
+    /// What the programme said, when the recording carries it.
+    pub subtitle: Option<String>,
+    pub description: Option<String>,
+    pub season: Option<i64>,
+    pub episode: Option<i64>,
+    /// The guide row's id on the server.
+    pub programme_ext: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,7 +202,10 @@ pub struct RecordRequest {
     pub tvg_id: Option<String>,
     pub programme_ext_id: Option<String>,
     pub title: String,
+    pub subtitle: Option<String>,
     pub description: Option<String>,
+    pub season: Option<i64>,
+    pub episode: Option<i64>,
     pub start_utc: i64,
     pub end_utc: i64,
 }
