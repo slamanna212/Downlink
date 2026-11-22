@@ -478,17 +478,22 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
 }
 
 /// Profile options, applied per file via `loadfile`.
+///
+/// Subtitles and closed captions are off for every play: mpv's default `sid=auto` would otherwise
+/// pick a caption track (EIA-608/708 in the video, DVB/teletext) matching `slang` or the forced
+/// flag on its own. The player's subtitle menu turns one on after load (`SubtitleTrack`), and
+/// because this is a per-file option the choice never carries over to the next channel.
 pub fn profile_options(profile: Profile, prefs: &Preferences) -> Opts {
+    let mut o = vec![kv("sid", "no")];
+    o.extend(profile_cache_options(profile, prefs));
+    o
+}
+
+fn profile_cache_options(profile: Profile, prefs: &Preferences) -> Opts {
     match profile {
-        // Tiles never show subtitles or closed captions: they have no subtitle menu, and a caption
-        // track matching `slang` (or EIA-608 in the video) would otherwise be picked on its own.
-        Profile::Multiview => {
-            let mut o = profile_options(Profile::Live, prefs);
-            o.push(kv("sid", "no"));
-            o
-        }
+        Profile::Multiview => profile_cache_options(Profile::Live, prefs),
         Profile::MultiviewDense => {
-            let mut o = profile_options(Profile::Multiview, prefs);
+            let mut o = profile_cache_options(Profile::Multiview, prefs);
             o.push(kv("vd-lavc-skiploopfilter", "nonkey"));
             o
         }
@@ -501,7 +506,7 @@ pub fn profile_options(profile: Profile, prefs: &Preferences) -> Opts {
         ],
         Profile::Timeshift => {
             let Some(secs) = prefs.timeshift_secs_effective() else {
-                return profile_options(Profile::Live, prefs);
+                return profile_cache_options(Profile::Live, prefs);
             };
             let bytes = u64::from(secs) * TIMESHIFT_BYTES_PER_SEC;
             // Reading continues while paused (cache-secs covers the whole buffer) and seeking
@@ -676,12 +681,28 @@ mod tests {
     }
 
     #[test]
+    fn every_profile_starts_with_subtitles_off() {
+        let p = Preferences::default();
+        for prof in [
+            Profile::Live,
+            Profile::Timeshift,
+            Profile::Seekable,
+            Profile::Multiview,
+            Profile::MultiviewDense,
+        ] {
+            let o = profile_options(prof, &p);
+            assert_eq!(o.iter().filter(|(k, _)| k == "sid").count(), 1);
+            assert!(has(&o, "sid", "no"), "{prof:?}");
+            assert!(loadfile_options(prof, &p, &[], None).contains("sid=%2%no"));
+        }
+    }
+
+    #[test]
     fn multiview_profiles() {
         let p = Preferences::default();
         let mv = profile_options(Profile::Multiview, &p);
-        assert_eq!(mv[..mv.len() - 1], profile_options(Profile::Live, &p)[..]);
+        assert_eq!(mv, profile_options(Profile::Live, &p));
         assert!(has(&mv, "sid", "no"));
-        assert!(!has(&profile_options(Profile::Live, &p), "sid", "no"));
         let dense = profile_options(Profile::MultiviewDense, &p);
         assert!(has(&dense, "vd-lavc-skiploopfilter", "nonkey"));
         assert!(has(&dense, "sid", "no"));
