@@ -337,7 +337,7 @@ impl Service {
             return Ok(c.clone());
         }
         let row = self.store.source(source_id).await?;
-        self.ensure_pin(&row).await?;
+        self.ensure_pin(&row)?;
         let kind =
             SourceKind::parse(&row.kind).ok_or_else(|| AppError::local("Unknown source type."))?;
         let c: Arc<dyn SourceClient> = match kind {
@@ -506,9 +506,8 @@ impl Service {
         row.base_url.clone()
     }
 
-    /// Register a stored source's pin before it is used. A row that allows self-signed but was
-    /// never pinned (older data) is pinned to what the server presents now, once.
-    async fn ensure_pin(&self, row: &SourceRow) -> Result<()> {
+    /// Register the fingerprint a user previously trusted before connecting.
+    fn ensure_pin(&self, row: &SourceRow) -> Result<()> {
         if !row.tls_insecure {
             return Ok(());
         }
@@ -521,9 +520,9 @@ impl Service {
         match &row.tls_pin {
             Some(p) => crate::tls::set_pin(&host, p),
             None => {
-                let fp = crate::tls::fetch_fingerprint(&url).await?;
-                self.store.set_source_tls_pin(row.id, Some(&fp)).await?;
-                crate::tls::set_pin(&host, &fp);
+                return Err(AppError::auth(
+                    "This source has no trusted certificate. Trust its certificate before connecting.",
+                ));
             }
         }
         Ok(())

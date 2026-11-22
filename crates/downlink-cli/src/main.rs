@@ -68,6 +68,13 @@ async fn setup(cli: &Cli) -> Result<(Ctx, Option<downlink_core::source::UserLeve
         .await?;
     let key = SecretString::new(cli.key.clone());
     secrets.set("cli/api_key", &key)?;
+    // The explicit flag enrolls a pin for this process only.
+    if cli.insecure
+        && let Some(host) = downlink_core::tls::https_host(&cli.source)
+    {
+        let pin = downlink_core::tls::fetch_fingerprint(&cli.source).await?;
+        downlink_core::tls::set_pin(&host, &pin);
+    }
     let client = DispatcharrClient::new(
         SourceId(row.id),
         &cli.source,

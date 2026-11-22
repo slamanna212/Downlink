@@ -130,10 +130,9 @@ impl ServerCertVerifier for PinVerifier {
             Some(_) => Err(rustls::Error::InvalidCertificate(CertificateError::Other(
                 OtherError(Arc::new(CertChanged)),
             ))),
-            // No pin registered for this host: only reachable from code that built a client
-            // directly with the toggle on (the CLI's explicit --insecure). The Service always
-            // registers a pin before using a source.
-            None => Ok(ServerCertVerified::assertion()),
+            None => Err(rustls::Error::InvalidCertificate(
+                CertificateError::UnknownIssuer,
+            )),
         }
     }
 

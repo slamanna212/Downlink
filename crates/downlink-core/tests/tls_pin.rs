@@ -186,3 +186,28 @@ async fn trust_new_certificate_refuses_a_source_that_does_not_allow_self_signed(
         .unwrap();
     assert!(svc.trust_new_certificate(id).await.is_err());
 }
+
+#[tokio::test]
+async fn a_missing_pin_rejects_a_self_signed_certificate() {
+    let _g = SERIAL.lock().await;
+    let s = TlsServer::start("a");
+    tls::clear_pin(HOST);
+    assert!(get(&s.url()).await.is_err());
+}
+
+#[tokio::test]
+async fn a_saved_https_source_does_not_enroll_a_missing_pin() {
+    let _g = SERIAL.lock().await;
+    let s = TlsServer::start("a");
+    let (svc, id) = service_with_source(&s.url(), None).await;
+    let error = svc.sync_source(id).await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::Auth);
+    assert!(error.message.contains("no trusted certificate"));
+    assert!(svc.store().source(id).await.unwrap().tls_pin.is_none());
+    svc.trust_new_certificate(id).await.unwrap();
+    assert_eq!(
+        svc.store().source(id).await.unwrap().tls_pin,
+        Some(fp("a.sha256"))
+    );
+    tls::clear_pin(HOST);
+}
