@@ -10,10 +10,10 @@ use std::io::{Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
-use tokio::sync::{Mutex as AsyncMutex, Semaphore};
+use tokio::sync::{Mutex as AsyncMutex, Semaphore, SemaphorePermit};
 
 use async_trait::async_trait;
-use image::{DynamicImage, ImageError, ImageFormat, ImageReader, Limits};
+use image::{DynamicImage, ImageDecoder, ImageError, ImageFormat, ImageReader, Limits};
 use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, Result};
@@ -78,8 +78,13 @@ pub const REVALIDATE_AFTER_SECS: i64 = 30 * 86_400;
 /// After a failed re-check, try again this much later rather than on every request.
 const REVALIDATE_RETRY_SECS: i64 = 86_400;
 const MAX_IMAGE_DIMENSION: u32 = 8192;
-const MAX_DECODE_BYTES: u64 = 64 * 1024 * 1024;
-static IMAGE_DECODERS: Semaphore = Semaphore::const_new(2);
+const MIB: u64 = 1024 * 1024;
+const MAX_DECODE_MIB: u32 = 64;
+// Room for thumbnail pixels, conversions, and both encoded sizes.
+const RESIZE_MIB: u32 = 12;
+static IMAGE_PIPELINES: Semaphore = Semaphore::const_new(8);
+static IMAGE_DECODERS: Semaphore = Semaphore::const_new(4);
+static IMAGE_MEMORY_MIB: Semaphore = Semaphore::const_new(128);
 
 pub(crate) const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 static PUBLIC_IMAGE_FETCHES: Semaphore = Semaphore::const_new(8);
@@ -416,31 +421,29 @@ impl ImageCache {
         .await?;
         let (source_id, source_uuid, url) =
             origin.ok_or_else(|| AppError::local("That image is no longer available."))?;
-        let permit = IMAGE_DECODERS
+        let pipeline = IMAGE_PIPELINES
             .acquire()
             .await
-            .map_err(|_| AppError::local("The artwork cache is shutting down."))?;
+            .map_err(|_| artwork_interrupted())?;
         let raw = fetcher.fetch_for(source_id, &source_uuid, &url).await?;
-        let encoded = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            encode_sizes(&raw.bytes)
-        })
-        .await
-        .map_err(|_| AppError::local("Image processing was interrupted."))??;
+        let (encoded, pipeline) = prepare_image(raw.bytes, pipeline).await?;
         let cache = self.clone();
         let hash = hash.to_owned();
         // Finish publication even when the requesting view cancels. A committed row must
         // keep its file, while an unsuccessful transaction drops its temporary files.
-        tokio::spawn(async move { cache.publish(&hash, size, encoded).await })
-            .await
-            .map_err(|_| AppError::local("Saving the artwork was interrupted."))?
+        tokio::spawn(async move {
+            let _pipeline = pipeline;
+            cache.publish(&hash, size, encoded).await
+        })
+        .await
+        .map_err(|_| AppError::local("Saving the artwork was interrupted."))?
     }
 
     async fn publish(
         &self,
         hash: &str,
         size: ImageSize,
-        encoded: Vec<(ImageSize, Vec<u8>, &'static str)>,
+        encoded: EncodedImages,
     ) -> Result<ImageBytes> {
         let shard = hash[..2].to_owned();
         let dir = self.dir.join(&shard);
@@ -680,24 +683,83 @@ impl ImageCache {
     }
 }
 
-/// Decode once, produce both sizes. Never upscales. PNG when the image has transparency (logos),
-/// JPEG otherwise.
-fn encode_sizes(bytes: &[u8]) -> Result<Vec<(ImageSize, Vec<u8>, &'static str)>> {
+type EncodedImages = Vec<(ImageSize, Vec<u8>, &'static str)>;
+
+fn artwork_interrupted() -> AppError {
+    AppError::local("Image processing was interrupted.")
+}
+
+async fn prepare_image(
+    bytes: Vec<u8>,
+    pipeline: SemaphorePermit<'static>,
+) -> Result<(EncodedImages, SemaphorePermit<'static>)> {
     if bytes.len() > MAX_IMAGE_BYTES {
         return Err(AppError::media("That image is too large."));
     }
+    let decoder = IMAGE_DECODERS
+        .acquire()
+        .await
+        .map_err(|_| artwork_interrupted())?;
+    // Constructing a decoder may allocate before its dimensions are known.
+    let memory = IMAGE_MEMORY_MIB
+        .acquire_many(MAX_DECODE_MIB + RESIZE_MIB)
+        .await
+        .map_err(|_| artwork_interrupted())?;
+    tokio::task::spawn_blocking(move || {
+        let _decoder = decoder;
+        let images = encode_sizes(&bytes, memory)?;
+        Ok((images, pipeline))
+    })
+    .await
+    .map_err(|_| artwork_interrupted())?
+}
+
+fn decode_error(error: ImageError) -> AppError {
+    match error {
+        ImageError::Limits(_) => AppError::media("That image is too large."),
+        _ => AppError::media("That image is not in a format Downlink can show."),
+    }
+}
+
+fn image_reader(bytes: &[u8], allocation_mib: u32) -> Result<ImageReader<Cursor<&[u8]>>> {
     let mut reader = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|_| AppError::media("That image is not in a format Downlink can show."))?;
     let mut limits = Limits::default();
     limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
     limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
-    limits.max_alloc = Some(MAX_DECODE_BYTES);
+    limits.max_alloc = Some(u64::from(allocation_mib) * MIB);
     reader.limits(limits);
-    let img = reader.decode().map_err(|error| match error {
-        ImageError::Limits(_) => AppError::media("That image is too large."),
-        _ => AppError::media("That image is not in a format Downlink can show."),
-    })?;
+    Ok(reader)
+}
+
+fn codec_allocation_mib(decoded_bytes: u64) -> u32 {
+    // Keep the decoded buffer plus an allowance for decoder scratch space. Large decodes
+    // retain the full ticket, while small artwork lets other workers make progress.
+    let requested = decoded_bytes
+        .saturating_mul(2)
+        .div_ceil(MIB)
+        .saturating_add(2);
+    requested.min(u64::from(MAX_DECODE_MIB)) as u32
+}
+
+/// Decode once, produce both sizes. Never upscales. PNG when the image has transparency (logos),
+/// JPEG otherwise.
+fn encode_sizes(bytes: &[u8], mut memory: SemaphorePermit<'static>) -> Result<EncodedImages> {
+    let decoded_bytes = image_reader(bytes, MAX_DECODE_MIB)?
+        .into_decoder()
+        .map_err(decode_error)?
+        .total_bytes();
+    if decoded_bytes > u64::from(MAX_DECODE_MIB) * MIB {
+        return Err(AppError::media("That image is too large."));
+    }
+    let allocation_mib = codec_allocation_mib(decoded_bytes);
+    drop(memory.split((MAX_DECODE_MIB - allocation_mib) as usize));
+    // Reopen with the reduced allocation limit. PNG applies its allocation limit when the
+    // decoder is constructed, so changing the limit on the probe would leave the old one active.
+    let img = image_reader(bytes, allocation_mib)?
+        .decode()
+        .map_err(decode_error)?;
     let alpha = img.color().has_alpha();
     let mut out = Vec::new();
     for size in [ImageSize::Grid, ImageSize::Detail] {

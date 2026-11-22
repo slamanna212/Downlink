@@ -416,13 +416,22 @@ async fn reconciliation_removes_old_orphaned_files() {
     assert_eq!(cache.total_bytes().await.unwrap(), 0);
 }
 
-#[test]
-fn rejects_oversized_images_before_resizing() {
+#[tokio::test]
+async fn rejects_oversized_images_before_resizing() {
     let image = image::RgbImage::new(MAX_IMAGE_DIMENSION + 1, 1);
     let mut bytes = Cursor::new(Vec::new());
     DynamicImage::ImageRgb8(image)
         .write_to(&mut bytes, ImageFormat::Png)
         .unwrap();
-    let error = encode_sizes(bytes.get_ref()).unwrap_err();
+    let pipeline = IMAGE_PIPELINES.acquire().await.unwrap();
+    let error = prepare_image(bytes.into_inner(), pipeline)
+        .await
+        .unwrap_err();
     assert_eq!(error.message, "That image is too large.");
+}
+
+#[test]
+fn decode_reservations_scale_with_decoded_pixels() {
+    assert_eq!(codec_allocation_mib(800 * 450 * 3), 5);
+    assert_eq!(codec_allocation_mib(64 * MIB), MAX_DECODE_MIB);
 }
