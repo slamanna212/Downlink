@@ -117,8 +117,8 @@ async fn miss_fetches_once_resizes_both_sizes_then_hits_disk() {
 async fn simultaneous_requests_for_two_sizes_share_the_download() {
     let (cache, sid, _d) = setup(DEFAULT_MAX_BYTES).await;
     let url = "https://d.test/shared";
-    cache.register(sid, url, ImageSize::Grid).await.unwrap();
-    let hash = hash_url(url);
+    let dl = cache.register(sid, url, ImageSize::Grid).await.unwrap();
+    let (hash, _) = parse_dlimg(&dl).unwrap();
     let stub = Stub {
         calls: AtomicUsize::new(0),
         bytes: png(600, 400, true),
@@ -319,4 +319,58 @@ async fn a_failed_recheck_keeps_the_copy_and_waits_a_day() {
     let hit = cache.get(&hash, size, &logo).await.unwrap();
     assert!(!hit.stale, "not retried on every request");
     assert_eq!(hit.mime, "image/png", "cached copy kept");
+}
+
+#[tokio::test]
+async fn identical_artwork_urls_are_scoped_to_the_account_uuid() {
+    let (cache, first, _dir) = setup(DEFAULT_MAX_BYTES).await;
+    let second = cache
+        .store
+        .insert_source(&NewSource {
+            kind: "m3u".into(),
+            name: "Second account".into(),
+            base_url: None,
+            secret_ref: None,
+            username: None,
+            tls_insecure: false,
+            created_at: 1,
+        })
+        .await
+        .unwrap()
+        .id;
+    let url = "https://source.test/image?token={dl:token}";
+    let page = cache
+        .register_page(&[(first, url), (second, url)])
+        .await
+        .unwrap();
+    assert_ne!(page[&first][url], page[&second][url]);
+    let stub = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(80, 40, true),
+    };
+    let old_hash = parse_dlimg(&page[&second][url]).unwrap().0;
+    cache.get(&old_hash, ImageSize::Grid, &stub).await.unwrap();
+    cache.store.delete_source(second).await.unwrap();
+    assert!(cache.get(&old_hash, ImageSize::Grid, &stub).await.is_err());
+
+    let replacement = cache
+        .store
+        .insert_source(&NewSource {
+            kind: "m3u".into(),
+            name: "Replacement account".into(),
+            base_url: None,
+            secret_ref: None,
+            username: None,
+            tls_insecure: false,
+            created_at: 1,
+        })
+        .await
+        .unwrap()
+        .id;
+    assert_eq!(second, replacement);
+    let icon = cache
+        .register(replacement, url, ImageSize::Grid)
+        .await
+        .unwrap();
+    assert_ne!(parse_dlimg(&icon).unwrap().0, old_hash);
 }

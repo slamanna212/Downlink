@@ -287,7 +287,11 @@ impl Service {
         }
     }
 
-    async fn page_art(&self, rows: &[VodRow], compact: bool) -> HashMap<String, String> {
+    async fn page_art(
+        &self,
+        rows: &[VodRow],
+        compact: bool,
+    ) -> HashMap<i64, HashMap<String, String>> {
         let entries: Vec<_> = rows
             .iter()
             .flat_map(|r| {
@@ -307,10 +311,12 @@ impl Service {
         match self.images.register_page(&entries).await {
             Ok(art) => art,
             Err(_) => {
-                let mut art = HashMap::new();
+                let mut art: HashMap<i64, HashMap<String, String>> = HashMap::new();
                 for (source_id, url) in entries {
                     if let Some(registered) = self.art(source_id, Some(url)).await {
-                        art.insert(url.to_owned(), registered);
+                        art.entry(source_id)
+                            .or_default()
+                            .insert(url.to_owned(), registered);
                     }
                 }
                 art
@@ -334,12 +340,16 @@ impl Service {
         Ok(rows
             .iter()
             .map(|r| {
-                let poster = r.art_key.as_ref().and_then(|url| art.get(url)).cloned();
+                let poster = r
+                    .art_key
+                    .as_ref()
+                    .and_then(|url| art.get(&r.source_id)?.get(url))
+                    .cloned();
                 let backdrop = (!compact)
                     .then(|| {
                         r.backdrop_key
                             .as_ref()
-                            .and_then(|url| art.get(url))
+                            .and_then(|url| art.get(&r.source_id)?.get(url))
                             .cloned()
                     })
                     .flatten();
@@ -366,12 +376,16 @@ impl Service {
         Ok(rows
             .iter()
             .map(|r| {
-                let poster = r.art_key.as_ref().and_then(|url| art.get(url)).cloned();
+                let poster = r
+                    .art_key
+                    .as_ref()
+                    .and_then(|url| art.get(&r.source_id)?.get(url))
+                    .cloned();
                 let backdrop = (!compact)
                     .then(|| {
                         r.backdrop_key
                             .as_ref()
-                            .and_then(|url| art.get(url))
+                            .and_then(|url| art.get(&r.source_id)?.get(url))
                             .cloned()
                     })
                     .flatten();

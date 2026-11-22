@@ -1,7 +1,7 @@
 //! Images (PLAN §3.6). Logos and VOD art come from authenticated endpoints; the UI never sees the
 //! server URL. Flow: [`ImageCache::register`] turns a source URL into `dlimg://<hash>/<size>`; the
 //! custom protocol handler calls [`ImageCache::get`], which serves from the content-addressed
-//! disk cache (`sha256(url)`) or fetches with auth, resizes to 160/512 px, stores both sizes and
+//! disk cache keyed by source UUID and URL or fetches with auth, resizes to 160/512 px, stores both sizes and
 //! evicts least-recently-used files beyond the cap (512 MB by default).
 
 use std::collections::HashMap;
@@ -56,6 +56,10 @@ pub struct RawImage {
 #[async_trait]
 pub trait ImageFetcher: Send + Sync {
     async fn fetch(&self, source_id: i64, url: &str) -> Result<RawImage>;
+
+    async fn fetch_for(&self, source_id: i64, _source_uuid: &str, url: &str) -> Result<RawImage> {
+        self.fetch(source_id, url).await
+    }
 }
 
 /// What the protocol handler serves.
@@ -112,6 +116,10 @@ pub fn hash_url(url: &str) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
+}
+
+pub(crate) fn account_hash(source_uuid: &str, url: &str) -> String {
+    hash_url(&format!("downlink-artwork-v2\0{source_uuid}\0{url}"))
 }
 
 pub fn dlimg_url(hash: &str, size: ImageSize) -> String {
@@ -182,13 +190,29 @@ impl ImageCache {
 
     /// Remember where `url` lives and return its `dlimg://` URL at `size`.
     pub async fn register(&self, source_id: i64, url: &str, size: ImageSize) -> Result<String> {
-        let hash = hash_url(url);
-        sqlx::query("INSERT OR IGNORE INTO image_origin (hash, source_id, url) VALUES (?, ?, ?)")
-            .bind(&hash)
-            .bind(source_id)
-            .bind(url)
-            .execute(self.store.pool())
-            .await?;
+        let source = self.store.source(source_id).await?;
+        self.register_scoped(source_id, &source.uuid, url, size)
+            .await
+    }
+
+    pub(crate) async fn register_scoped(
+        &self,
+        source_id: i64,
+        source_uuid: &str,
+        url: &str,
+        size: ImageSize,
+    ) -> Result<String> {
+        let hash = account_hash(source_uuid, url);
+        sqlx::query(
+            "INSERT OR IGNORE INTO image_origin (hash, source_id, url)
+             SELECT ?, id, ? FROM source WHERE id = ? AND uuid = ?",
+        )
+        .bind(&hash)
+        .bind(url)
+        .bind(source_id)
+        .bind(source_uuid)
+        .execute(self.store.pool())
+        .await?;
         Ok(dlimg_url(&hash, size))
     }
 
@@ -196,26 +220,41 @@ impl ImageCache {
     pub(crate) async fn register_page(
         &self,
         images: &[(i64, &str)],
-    ) -> Result<HashMap<String, String>> {
+    ) -> Result<HashMap<i64, HashMap<String, String>>> {
         if images.is_empty() {
             return Ok(HashMap::new());
         }
+        let sources: HashMap<_, _> = self
+            .store
+            .list_sources()
+            .await?
+            .into_iter()
+            .map(|source| (source.id, source.uuid))
+            .collect();
         let entries: Vec<_> = images
             .iter()
-            .map(|&(source, url)| (hash_url(url), source, url))
+            .filter_map(|&(source, url)| {
+                let uuid = sources.get(&source)?;
+                Some((account_hash(uuid, url), source, url, uuid))
+            })
             .collect();
         sqlx::query(
             "INSERT OR IGNORE INTO image_origin (hash, source_id, url)
              SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'), json_extract(value, '$[2]')
-             FROM json_each(?)",
+             FROM json_each(?) JOIN source ON source.id = json_extract(value, '$[1]')
+                                  AND source.uuid = json_extract(value, '$[3]')",
         )
         .bind(serde_json::to_string(&entries)?)
         .execute(self.store.pool())
         .await?;
-        Ok(entries
-            .into_iter()
-            .map(|(hash, _, url)| (url.to_owned(), dlimg_url(&hash, ImageSize::Detail)))
-            .collect())
+        let mut artwork: HashMap<i64, HashMap<String, String>> = HashMap::new();
+        for (hash, source, url, _) in entries {
+            artwork
+                .entry(source)
+                .or_default()
+                .insert(url.to_owned(), dlimg_url(&hash, ImageSize::Detail));
+        }
+        Ok(artwork)
     }
 
     fn key(hash: &str, size: ImageSize) -> String {
@@ -232,11 +271,14 @@ impl ImageCache {
 
     async fn cached(&self, hash: &str, size: ImageSize) -> Result<Option<ImageBytes>> {
         let key = Self::key(hash, size);
-        let row: Option<(String, i64, i64)> =
-            sqlx::query_as("SELECT path, last_used, fetched_at FROM image_cache WHERE key = ?")
-                .bind(&key)
-                .fetch_optional(self.store.pool())
-                .await?;
+        let row: Option<(String, i64, i64)> = sqlx::query_as(
+            "SELECT path, last_used, fetched_at FROM image_cache WHERE key = ?
+                 AND EXISTS (SELECT 1 FROM image_origin WHERE hash = ?)",
+        )
+        .bind(&key)
+        .bind(hash)
+        .fetch_optional(self.store.pool())
+        .await?;
         let Some((rel, last_used, fetched_at)) = row else {
             return Ok(None);
         };
@@ -328,14 +370,16 @@ impl ImageCache {
         size: ImageSize,
         fetcher: &dyn ImageFetcher,
     ) -> Result<ImageBytes> {
-        let origin: Option<(i64, String)> =
-            sqlx::query_as("SELECT source_id, url FROM image_origin WHERE hash = ?")
-                .bind(hash)
-                .fetch_optional(self.store.pool())
-                .await?;
-        let (source_id, url) =
+        let origin: Option<(i64, String, String)> = sqlx::query_as(
+            "SELECT source_id, source.uuid, url FROM image_origin
+             JOIN source ON source.id = image_origin.source_id WHERE hash = ?",
+        )
+        .bind(hash)
+        .fetch_optional(self.store.pool())
+        .await?;
+        let (source_id, source_uuid, url) =
             origin.ok_or_else(|| AppError::local("That image is no longer available."))?;
-        let raw = fetcher.fetch(source_id, &url).await?;
+        let raw = fetcher.fetch_for(source_id, &source_uuid, &url).await?;
         let encoded = tokio::task::spawn_blocking(move || encode_sizes(&raw.bytes))
             .await
             .map_err(|_| AppError::local("Image processing was interrupted."))??;

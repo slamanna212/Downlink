@@ -1404,35 +1404,34 @@ impl Service {
 
     async fn logo_for(
         &self,
-        bases: &HashMap<i64, url::Url>,
+        sources: &HashMap<i64, (String, Option<url::Url>)>,
         c: &crate::store::ChannelRow,
     ) -> Option<String> {
         let logo_id = c.logo_key.as_deref()?;
+        let (source_uuid, base) = sources.get(&c.source_id)?;
         // M3U/Xtream logos are absolute public URLs; Dispatcharr's are ids on its own server.
         let url = if logo_id.starts_with("http://") || logo_id.starts_with("https://") {
             logo_id.to_owned()
         } else {
-            logo_url(bases.get(&c.source_id)?, logo_id).ok()?
+            logo_url(base.as_ref()?, logo_id).ok()?
         };
+        let hash = crate::images::account_hash(source_uuid, &url);
         let known = self
             .registered_logos
             .lock()
             .ok()
-            .is_some_and(|g| g.contains(&url));
+            .is_some_and(|g| g.contains(&hash));
         if known {
             // Already in image_origin: no write on the read path.
-            return Some(crate::images::dlimg_url(
-                &crate::images::hash_url(&url),
-                ImageSize::Grid,
-            ));
+            return Some(crate::images::dlimg_url(&hash, ImageSize::Grid));
         }
         let dl = self
             .images
-            .register(c.source_id, &url, ImageSize::Grid)
+            .register_scoped(c.source_id, source_uuid, &url, ImageSize::Grid)
             .await
             .ok()?;
         if !known && let Ok(mut g) = self.registered_logos.lock() {
-            g.insert(url);
+            g.insert(hash);
         }
         Some(dl)
     }
@@ -1444,16 +1443,22 @@ impl Service {
             .await?
             .into_iter()
             .collect();
-        let bases: HashMap<i64, url::Url> = self
+        let sources = self
             .store
             .list_sources()
             .await?
             .into_iter()
-            .filter_map(|s| Some((s.id, normalise_base_url(s.base_url.as_deref()?).ok()?)))
+            .map(|s| {
+                let base = s
+                    .base_url
+                    .as_deref()
+                    .and_then(|base| normalise_base_url(base).ok());
+                (s.id, (s.uuid, base))
+            })
             .collect();
         let mut out = Vec::with_capacity(rows.len());
         for r in rows {
-            let logo = self.logo_for(&bases, r).await;
+            let logo = self.logo_for(&sources, r).await;
             out.push(ChannelDto::from_row(r, logo, favs.contains(&r.id)));
         }
         Ok(out)
@@ -2345,14 +2350,26 @@ struct ServiceFetcher<'a>(&'a Service);
 
 #[async_trait]
 impl ImageFetcher for ServiceFetcher<'_> {
+    async fn fetch_for(&self, source_id: i64, source_uuid: &str, url: &str) -> Result<RawImage> {
+        if is_tmdb_artwork(url) {
+            return crate::images::fetch_public(url, None).await;
+        }
+        let client = self.0.client(source_id).await?;
+        if self.0.store.source(source_id).await?.uuid != source_uuid {
+            return Err(AppError::local("That image is no longer available."));
+        }
+        client.fetch_image(url).await
+    }
+
     async fn fetch(&self, source_id: i64, url: &str) -> Result<RawImage> {
-        // TMDB artwork is public: fetched anonymously, and only from TMDB's image host.
-        if let Ok(u) = reqwest::Url::parse(url)
-            && u.scheme() == "https"
-            && u.host_str() == Some(crate::tmdb::IMAGE_HOST)
-        {
+        if is_tmdb_artwork(url) {
             return crate::images::fetch_public(url, None).await;
         }
         self.0.client(source_id).await?.fetch_image(url).await
     }
+}
+
+fn is_tmdb_artwork(url: &str) -> bool {
+    reqwest::Url::parse(url)
+        .is_ok_and(|u| u.scheme() == "https" && u.host_str() == Some(crate::tmdb::IMAGE_HOST))
 }
