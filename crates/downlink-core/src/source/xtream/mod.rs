@@ -203,6 +203,14 @@ impl XtreamClient {
         self
     }
 
+    pub(crate) fn attach_credentials(
+        &self,
+        secrets: std::sync::Arc<dyn crate::auth::SecretStore>,
+        uuid: &str,
+    ) -> Result<()> {
+        self.vault.attach(secrets, uuid)
+    }
+
     pub fn base_url(&self) -> &Url {
         &self.base
     }
@@ -568,6 +576,7 @@ impl XtreamClient {
         match fetch().await {
             Ok(mut rows) => {
                 rows.iter_mut().for_each(|r| r.template(&self.vault));
+                self.vault.persist().await?;
                 if let Some(store) = &self.store {
                     match serde_json::to_string(&rows) {
                         Ok(body) => {
@@ -740,6 +749,7 @@ impl Source for XtreamClient {
             .iter()
             .map(|s| self.live_to_channel(s, tz.as_deref()))
             .collect();
+        self.vault.persist().await?;
         Ok(ChannelPage {
             count: Some(channels.len() as u64),
             channels,

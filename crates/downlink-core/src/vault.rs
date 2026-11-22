@@ -8,11 +8,12 @@
 //! suffixed placeholder). Placeholders are resolved in Rust at play/fetch time only.
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use regex::{Captures, Regex};
 use sha2::{Digest, Sha256};
 
+use crate::auth::{SecretKind, SecretStore, SecretString, secret_ref};
 use crate::error::{AppError, Result};
 
 static USERINFO: LazyLock<Option<Regex>> =
@@ -42,7 +43,17 @@ fn short_hash(v: &str) -> String {
 
 /// The credential store for one source. Cheap to clone (shared).
 #[derive(Clone, Default)]
-pub struct Vault(Arc<Mutex<HashMap<String, String>>>);
+pub struct Vault {
+    entries: Arc<Mutex<HashMap<String, String>>>,
+    backend: Arc<OnceLock<VaultBackend>>,
+}
+
+struct VaultBackend {
+    secrets: Arc<dyn SecretStore>,
+    reference: String,
+    // Read and written with entries held, so a slower write cannot overwrite a newer snapshot.
+    persisted: std::sync::atomic::AtomicUsize,
+}
 
 impl std::fmt::Debug for Vault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -84,7 +95,49 @@ impl Vault {
     fn lock(&self) -> MutexGuard<'_, HashMap<String, String>> {
         // A poisoned lock must never push raw credentials into a template. The map's
         // individual entries remain valid and can still resolve earlier placeholders.
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub(crate) fn attach(&self, secrets: Arc<dyn SecretStore>, uuid: &str) -> Result<()> {
+        let reference = secret_ref(uuid, SecretKind::Credentials);
+        let entries = secrets
+            .get(&reference)?
+            .map(|value| serde_json::from_str::<HashMap<String, String>>(value.expose()))
+            .transpose()?
+            .unwrap_or_default();
+        let persisted = entries.len().into();
+        self.load(entries);
+        let _ = self.backend.set(VaultBackend {
+            secrets,
+            reference,
+            persisted,
+        });
+        Ok(())
+    }
+
+    pub(crate) async fn persist(&self) -> Result<()> {
+        let Some(backend) = self.backend.get() else {
+            return Ok(());
+        };
+        use std::sync::atomic::Ordering::Relaxed;
+        if self.lock().len() == backend.persisted.load(Relaxed) {
+            return Ok(());
+        }
+        let vault = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let Some(backend) = vault.backend.get() else {
+                return Ok(());
+            };
+            let entries = vault.lock();
+            if entries.len() != backend.persisted.load(Relaxed) {
+                let value = SecretString::new(serde_json::to_string(&*entries)?);
+                backend.secrets.set(&backend.reference, &value)?;
+                backend.persisted.store(entries.len(), Relaxed);
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| AppError::local("Saving credentials was interrupted."))?
     }
 
     fn credential(&self, base: &str, value: &str) -> String {
@@ -353,10 +406,10 @@ mod tests {
     #[test]
     fn a_poisoned_lock_still_templates_and_resolves() {
         let v = Vault::new();
-        let _ = std::panic::catch_unwind(|| {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = v.lock();
             panic!("poison test");
-        });
+        }));
         let template = v.template_header("Authorization", "Bearer secret");
         assert_eq!(template, "{dl:hdr}");
         assert_eq!(v.resolve(&template).unwrap(), "Bearer secret");

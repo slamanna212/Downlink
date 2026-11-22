@@ -199,7 +199,9 @@ pub struct Service {
 impl Service {
     pub async fn new(cfg: ServiceConfig) -> Result<Arc<Self>> {
         std::fs::create_dir_all(&cfg.data_dir)?;
-        let store = Store::open(cfg.data_dir.join("downlink.sqlite")).await?;
+        let store =
+            Store::open_with_secrets(&cfg.data_dir.join("downlink.sqlite"), cfg.secrets.as_ref())
+                .await?;
         Ok(Self::with_store(
             store,
             cfg.secrets,
@@ -376,16 +378,16 @@ impl Service {
                     .as_deref()
                     .ok_or_else(|| AppError::local("This source has no address."))?;
                 let pw = self.secret_of(&row).await?;
-                Arc::new(
-                    XtreamClient::new(
-                        SourceId(row.id),
-                        base,
-                        row.username.as_deref().unwrap_or_default(),
-                        pw,
-                        tls_pin,
-                    )?
-                    .with_store(self.store.clone()),
-                )
+                let client = XtreamClient::new(
+                    SourceId(row.id),
+                    base,
+                    row.username.as_deref().unwrap_or_default(),
+                    pw,
+                    tls_pin,
+                )?
+                .with_store(self.store.clone());
+                client.attach_credentials(self.secrets.clone(), &row.uuid)?;
+                Arc::new(client)
             }
             SourceKind::M3u => {
                 let location = match row.secret_ref.as_deref() {
@@ -396,31 +398,13 @@ impl Service {
                     .optional_secret(&row, SecretKind::XmltvUrl)
                     .into_iter()
                     .collect();
-                Arc::new(M3uSource::new(SourceId(row.id), location, xmltv, tls_pin)?)
+                let client = M3uSource::new(SourceId(row.id), location, xmltv, tls_pin)?;
+                client.attach_credentials(self.secrets.clone(), &row.uuid)?;
+                Arc::new(client)
             }
         };
-        // Restore the credential vault so templated URLs resolve and re-sync keeps placeholders.
-        if kind != SourceKind::Dispatcharr
-            && let Some(j) = self.optional_secret(&row, SecretKind::Credentials)
-            && let Ok(map) = serde_json::from_str(&j)
-        {
-            c.load_credentials(map);
-        }
         clients.insert(source_id, c.clone());
         Ok(c)
-    }
-
-    /// Persist credentials the source extracted from URLs (rule 7: keychain, never SQLite).
-    fn persist_credentials(&self, row_uuid: &str, client: &dyn SourceClient) -> Result<()> {
-        let creds = client.credentials();
-        if creds.is_empty() {
-            return Ok(());
-        }
-        let json = serde_json::to_string(&creds)?;
-        self.secrets.set(
-            &crate::auth::secret_ref(row_uuid, SecretKind::Credentials),
-            &SecretString::new(json),
-        )
     }
 
     /// An unsaved connection for `test_source` / `add_source`.
@@ -712,6 +696,7 @@ impl Service {
         // Reuse the verified probe for M3U so a large playlist is not downloaded twice.
         if let Some(m) = m3u_probe {
             m.set_id(SourceId(row.id));
+            m.attach_credentials(self.secrets.clone(), &row.uuid)?;
             self.clients.write().await.insert(row.id, m);
         }
         self.sync_source(row.id).await?;
@@ -975,8 +960,6 @@ impl Service {
             },
         )
         .await?;
-        let uuid = self.store.source(source_id).await?.uuid;
-        self.persist_credentials(&uuid, client.as_ref())?;
         // The channel list is complete and committed: show it now, the guide fills in behind it.
         self.emit(Event::CatalogUpdated(
             self.counts(source_id, CatalogChange::Channels).await?,

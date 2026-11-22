@@ -94,6 +94,14 @@ impl M3uSource {
         self.reuse_once.store(true, Ordering::Relaxed);
     }
 
+    pub(crate) fn attach_credentials(
+        &self,
+        secrets: std::sync::Arc<dyn crate::auth::SecretStore>,
+        uuid: &str,
+    ) -> Result<()> {
+        self.vault.attach(secrets, uuid)
+    }
+
     async fn playlist(&self, refresh: bool) -> Result<Arc<Playlist>> {
         let mut g = self.cache.lock().await;
         // The first refresh after adoption reuses the copy `add_source` just verified; every
@@ -251,6 +259,7 @@ impl Source for M3uSource {
             .zip(ids)
             .map(|(e, id)| self.to_channel(e, id, &pl))
             .collect();
+        self.vault.persist().await?;
         Ok(ChannelPage {
             count: Some(channels.len() as u64),
             channels,
