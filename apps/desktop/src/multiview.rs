@@ -79,6 +79,7 @@ fn failure_name(k: FailureKind) -> &'static str {
 struct Tile {
     player: Arc<Player>,
     surface: Arc<Mutex<Surface>>,
+    hls: Option<crate::hls_proxy::HlsProxy>,
 }
 
 #[derive(Default)]
@@ -223,7 +224,7 @@ impl Multiview {
         let player = tile.player.clone();
         drop(tiles);
         player.begin_resolving();
-        let plan = match self.service.tile_plan(channel_id).await {
+        let mut plan = match self.service.tile_plan(channel_id).await {
             Ok(p) => p,
             Err(e) => {
                 player.mark_failed(e.message.clone());
@@ -231,6 +232,23 @@ impl Multiview {
                 return Err(e);
             }
         };
+        let proxy = match crate::hls_proxy::prepare(&mut plan, false, Some(self.app.clone())).await
+        {
+            Ok(proxy) => proxy,
+            Err(error) => {
+                player.mark_failed(error.message.clone());
+                self.emit(main_channel).await;
+                return Err(error);
+            }
+        };
+        let mut tiles = self.tiles.lock().await;
+        let Some(tile) = tiles
+            .get_mut(&slot)
+            .filter(|tile| Arc::ptr_eq(&tile.player, &player))
+        else {
+            return Ok(());
+        };
+        tile.hls = proxy;
         let mut req = crate::player_glue::plan_request(&plan, PlayMode::Live, false);
         req.profile = if dense {
             Profile::MultiviewDense
@@ -241,6 +259,7 @@ impl Multiview {
             .play(req)
             .map(|_| ())
             .map_err(|e| mv_err(e.to_string()));
+        drop(tiles);
         self.emit(main_channel).await;
         r
     }
@@ -267,7 +286,11 @@ impl Multiview {
         let surface = Arc::new(Mutex::new(surface));
         let for_rebind = surface.clone();
         player.on_engine_replaced(move |engine| lock(&for_rebind).rebind(engine));
-        Ok(Tile { player, surface })
+        Ok(Tile {
+            player,
+            surface,
+            hls: None,
+        })
     }
 
     /// Stop the tile's stream, free its surface (main thread), then its engine.

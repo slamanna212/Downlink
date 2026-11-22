@@ -1895,6 +1895,7 @@ impl Service {
         let mut redact = RedactionSet::new();
         redact.add(&token);
         Ok(PlayPlan {
+            tls_pin: None,
             url,
             headers: Vec::new(),
             surface: Surface::Hls,

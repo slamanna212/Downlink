@@ -156,6 +156,7 @@ export type CommandName = keyof Commands;
 export interface Events {
   'catalog://updated': CatalogUpdated;
   'player://state': PlayerState;
+  'source://certificate': AppError;
   'task://progress': TaskProgress;
   'session://stats': SessionStats;
   'update://status': UpdateStatus;

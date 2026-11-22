@@ -9,7 +9,7 @@ use url::Url;
 /// First absolute http(s) URI in a playlist (segment lines or `URI="…"` attributes).
 pub fn playlist_origin(body: &str) -> Option<Url> {
     let mut found = None;
-    visit(body, &mut |uri| {
+    map_uris(body, &mut |uri| {
         if found.is_none()
             && let Some(u) = absolute(uri)
         {
@@ -30,7 +30,7 @@ pub fn needs_playlist_rewrite(base: &Url, playlist_origin: &Url) -> bool {
 /// sub-path) the prefix is added if the path lacks it. Relative URIs, other schemes, comments and
 /// line endings are untouched.
 pub fn rewrite_playlist(body: &str, base: &Url) -> String {
-    visit(body, &mut |uri| {
+    map_uris(body, &mut |uri| {
         let u = absolute(uri)?;
         if !needs_playlist_rewrite(base, &u) {
             return None;
@@ -63,9 +63,8 @@ fn absolute(uri: &str) -> Option<Url> {
     matches!(u.scheme(), "http" | "https").then_some(u)
 }
 
-/// Walk the URIs of a playlist (URI lines and `URI="…"` attributes). `f` may return a
-/// replacement; the rebuilt text is returned.
-fn visit(body: &str, f: &mut dyn FnMut(&str) -> Option<String>) -> String {
+//// Replace segment lines and `URI="…"` attributes while preserving playlist formatting.
+pub fn map_uris(body: &str, f: &mut dyn FnMut(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(body.len());
     for raw in body.split_inclusive('\n') {
         let (line, eol) = match raw.strip_suffix("\r\n") {

@@ -685,7 +685,7 @@ Ingestion is separate from the source:
 | Thing | Handling |
 |---|---|
 | Extended M3U playlist (`#EXTM3U`/`#EXTINF`) | Parsed by `m3u/` |
-| HLS manifest (`#EXT-X-*`) | Never parsed by us; mpv consumes it |
+| HLS manifest (`#EXT-X-*`) | mpv consumes it. For authenticated playback the loopback proxy rewrites resource URIs and applies credentials only to the configured stream origin. |
 | Dispatcharr's `/output/m3u` | Just another M3U URL; has no catch-up tags |
 | Xtream Codes (`player_api.php`, `get.php`, `/live/`) | `xtream/` adapter; covers Dispatcharr's XC surface and third-party panels |
 

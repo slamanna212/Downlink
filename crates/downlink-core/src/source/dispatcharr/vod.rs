@@ -515,6 +515,7 @@ impl DispatcharrClient {
             headers.push(("X-API-Key".to_owned(), k.clone()));
         }
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url: url.to_string(),
             headers,
             surface: Surface::Direct,
@@ -817,6 +818,7 @@ impl DispatcharrClient {
         redact.add(auth.1.expose());
         let hls = url.contains(".m3u8");
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url,
             headers: vec![auth],
             surface: if hls { Surface::Hls } else { Surface::Direct },

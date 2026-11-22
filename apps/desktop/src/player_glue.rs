@@ -46,7 +46,7 @@ struct Active {
     hls_reminted: bool,
     /// VOD / recording being played, for position reports.
     media: Option<Media>,
-    /// Loopback playlist proxy for the current recording (aborted when dropped).
+    /// Loopback proxy for the current authenticated playlist.
     hls: Option<crate::hls_proxy::HlsProxy>,
     /// 1-based provider stream in use and how many the channel has (0 = unknown).
     source_index: u32,
@@ -63,6 +63,7 @@ pub struct Playback {
     /// Self-reference for background tasks that start new playbacks (catch-up roll-over).
     me: Weak<Playback>,
     service: Arc<Service>,
+    app: AppHandle,
     player: Arc<Player>,
     active: Arc<Mutex<Active>>,
     /// Multiview tiles (PLAN §4.11); set once at boot.
@@ -373,6 +374,7 @@ impl Playback {
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
             service,
+            app: ctx.app.clone(),
             player,
             active: ctx.active.clone(),
             multiview: OnceLock::new(),
@@ -481,6 +483,16 @@ impl Playback {
         self.player.mark_failed(e.message.clone());
     }
 
+    async fn prepare_hls(&self, plan: &mut PlayPlan, recording: bool) -> Result<(), AppError> {
+        if let Some(proxy) = crate::hls_proxy::prepare(plan, recording, Some(self.app.clone()))
+            .await
+            .inspect_err(|error| self.fail(error))?
+        {
+            lock(&self.active).hls = Some(proxy);
+        }
+        Ok(())
+    }
+
     pub async fn play_channel(&self, channel_id: i64) -> Result<(), AppError> {
         self.begin(
             Some(channel_id),
@@ -488,14 +500,16 @@ impl Playback {
             None,
             LastPlay::Channel(channel_id),
         );
-        let plan = match self.service.play_channel(channel_id).await {
+        let mut plan = match self.service.play_channel(channel_id).await {
             Ok(p) => p,
             Err(e) => {
                 self.fail(&e);
                 return Err(e);
             }
         };
-        lock(&self.active).live_hls = plan.surface == downlink_core::source::Surface::Hls;
+        lock(&self.active).live_hls =
+            plan.surface == downlink_core::source::Surface::Hls && plan.headers.is_empty();
+        self.prepare_hls(&mut plan, false).await?;
         let row = self
             .service
             .store()
@@ -556,7 +570,9 @@ impl Playback {
             a.info.catchup_start_utc = Some(play.start_utc);
         }
         let failover = self.failover_capable(play.source_id).await;
-        let mut req = self.to_request(&play.plan, PlayMode::Catchup, failover);
+        let mut plan = play.plan.clone();
+        self.prepare_hls(&mut plan, false).await?;
+        let mut req = self.to_request(&plan, PlayMode::Catchup, failover);
         req.start_secs = start_secs;
         let generation = {
             let mut a = lock(&self.active);
@@ -778,7 +794,9 @@ impl Playback {
             }
         };
         let start = vp.resume_secs.map(|s| s as f64);
-        self.start_media(&vp.plan, PlayMode::Vod, vp.title, start, Media::Vod(vp.id))
+        let mut plan = vp.plan;
+        self.prepare_hls(&mut plan, false).await?;
+        self.start_media(&plan, PlayMode::Vod, vp.title, start, Media::Vod(vp.id))
     }
 
     pub async fn play_recording(&self, id: i64) -> Result<(), AppError> {
@@ -791,16 +809,8 @@ impl Playback {
             }
         };
         let start = rp.resume_secs.map(|s| s as f64);
-        let mut plan = rp.plan.clone();
-        if plan.surface == downlink_core::source::Surface::Hls {
-            let proxy = crate::hls_proxy::prepare(&plan, rp.tls_pin.as_ref())
-                .await
-                .inspect_err(|error| self.fail(error))?;
-            if let Some((local, proxy)) = proxy {
-                plan.url = local;
-                lock(&self.active).hls = Some(proxy);
-            }
-        }
+        let mut plan = rp.plan;
+        self.prepare_hls(&mut plan, true).await?;
         self.start_media(
             &plan,
             PlayMode::Recording,

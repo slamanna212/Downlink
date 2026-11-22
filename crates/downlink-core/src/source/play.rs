@@ -40,6 +40,7 @@ impl fmt::Debug for SessionId {
 #[derive(Clone)]
 pub struct PlayPlan {
     pub url: String,
+    pub tls_pin: Option<crate::tls::Pin>,
     /// Passed to mpv as per-file options, never global (CLAUDE.md rule 5).
     pub headers: Vec<(String, SecretString)>,
     pub surface: Surface,

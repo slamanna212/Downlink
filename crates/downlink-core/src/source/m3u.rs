@@ -186,6 +186,7 @@ impl M3uSource {
         }
         let hls = url.contains(".m3u8");
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url,
             headers: hdrs
                 .into_iter()

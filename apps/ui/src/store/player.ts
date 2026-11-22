@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { invoke, listen } from '../api/ipc';
+import { noteBlockingError } from '../lib/blocking';
 import type { PlayerState } from '../api/types';
 
 const IDLE: PlayerState = {
@@ -37,6 +38,9 @@ export async function startPlayerBridge(): Promise<() => void> {
     pending = p;
     schedule();
   });
+  const unlistenCertificate = await listen('source://certificate', (error) => {
+    noteBlockingError(error.message, error.sourceId);
+  });
   try {
     usePlayerStore.getState().setPlayer(await invoke('get_player_state', {}));
   } catch {
@@ -44,6 +48,7 @@ export async function startPlayerBridge(): Promise<() => void> {
   }
   return () => {
     unlisten();
+    unlistenCertificate();
     if (raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf);
   };
 }

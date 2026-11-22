@@ -28,7 +28,6 @@ pub struct VodPlay {
 #[derive(Debug)]
 pub struct RecordingPlay {
     pub plan: PlayPlan,
-    pub tls_pin: Option<crate::tls::Pin>,
     pub resume_secs: Option<i64>,
     pub title: String,
     pub id: i64,
@@ -994,10 +993,8 @@ impl Service {
             .await?
             .filter(ResumeRow::resumable)
             .map(|x| x.position_ms / 1000);
-        let source = self.store.source(r.source_id).await?;
         Ok(RecordingPlay {
             plan,
-            tls_pin: self.source_pin(&source)?,
             resume_secs,
             title: info.title,
             id: r.id,

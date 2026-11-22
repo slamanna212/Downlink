@@ -1298,6 +1298,7 @@ pub fn build_live_plan(
         redact.add(v.expose());
     }
     Ok(PlayPlan {
+        tls_pin: None,
         url: url.to_string(),
         headers: auth.into_iter().collect(),
         surface: Surface::Ts,
@@ -1385,6 +1386,7 @@ impl Source for DispatcharrClient {
         redact.add(s.id.0.clone());
         redact.add(auth.1.expose());
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url: s.url,
             headers: vec![auth],
             surface: Surface::Direct,

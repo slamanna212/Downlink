@@ -793,6 +793,7 @@ impl Source for XtreamClient {
         let mut redact = self.redaction_set();
         redact.add(url.clone());
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url,
             headers: vec![],
             surface: if hls { Surface::Hls } else { Surface::Ts },
@@ -840,6 +841,7 @@ impl Source for XtreamClient {
         redact.add(url.clone());
         // Template-path sessions have no server session to delete.
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url,
             headers: vec![],
             surface: Surface::Direct,
@@ -975,6 +977,7 @@ impl Source for XtreamClient {
         let mut redact = self.redaction_set();
         redact.add(url.clone());
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             surface: if ext == "m3u8" {
                 Surface::Hls
             } else {
