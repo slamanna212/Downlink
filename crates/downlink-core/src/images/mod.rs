@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::Cursor;
+use std::io::{Cursor, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -383,47 +383,81 @@ impl ImageCache {
         let encoded = tokio::task::spawn_blocking(move || encode_sizes(&raw.bytes))
             .await
             .map_err(|_| AppError::local("Image processing was interrupted."))??;
+        let cache = self.clone();
+        let hash = hash.to_owned();
+        // Finish publication even when the requesting view cancels. A committed row must
+        // keep its file, while an unsuccessful transaction drops its temporary files.
+        tokio::spawn(async move { cache.publish(&hash, size, encoded).await })
+            .await
+            .map_err(|_| AppError::local("Saving the artwork was interrupted."))?
+    }
+
+    async fn publish(
+        &self,
+        hash: &str,
+        size: ImageSize,
+        encoded: Vec<(ImageSize, Vec<u8>, &'static str)>,
+    ) -> Result<ImageBytes> {
         let _writes = self.locks.writes.lock().await;
-        let mut wanted = None;
-        let mut entries = Vec::with_capacity(encoded.len());
-        for (sz, bytes, ext) in encoded {
-            let rel = format!("{}/{hash}-{}.{ext}", &hash[..2], sz.px());
-            let abs = self.dir.join(&rel);
-            if let Some(parent) = abs.parent() {
-                tokio::fs::create_dir_all(parent).await?;
+        let shard = hash[..2].to_owned();
+        let dir = self.dir.join(&shard);
+        let (entries, wanted) = tokio::task::spawn_blocking(move || {
+            std::fs::create_dir_all(&dir)?;
+            let mut wanted = None;
+            let mut entries = Vec::with_capacity(encoded.len());
+            for (sz, bytes, ext) in encoded {
+                let mut file = tempfile::Builder::new()
+                    .prefix("image-")
+                    .suffix(&format!(".{ext}"))
+                    .tempfile_in(&dir)?;
+                file.write_all(&bytes)?;
+                let path = file
+                    .path()
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| AppError::local("The image cache path is invalid."))?;
+                let rel = format!("{shard}/{path}");
+                entries.push((
+                    sz,
+                    rel.clone(),
+                    i64::try_from(bytes.len()).unwrap_or(i64::MAX),
+                    file.into_temp_path(),
+                ));
+                if sz == size {
+                    wanted = Some(ImageBytes {
+                        bytes,
+                        mime: Self::mime_of(&rel),
+                        stale: false,
+                    });
+                }
             }
-            // Write then rename, so a reader never sees half of a replaced (re-checked) file.
-            let tmp = abs.with_extension(format!("{ext}.part"));
-            tokio::fs::write(&tmp, &bytes).await?;
-            tokio::fs::rename(&tmp, &abs).await?;
-            entries.push((
-                Self::key(hash, sz),
-                rel.clone(),
-                i64::try_from(bytes.len()).unwrap_or(i64::MAX),
-            ));
-            if sz == size {
-                wanted = Some(ImageBytes {
-                    bytes,
-                    mime: Self::mime_of(&rel),
-                    stale: false,
-                });
-            }
-        }
-        // A re-download may change the format (png <-> jpg): the old file is removed below.
-        let old_paths: Vec<String> =
-            sqlx::query_scalar("SELECT path FROM image_cache WHERE key IN (?, ?)")
-                .bind(Self::key(hash, ImageSize::Grid))
-                .bind(Self::key(hash, ImageSize::Detail))
-                .fetch_all(self.store.pool())
+            Ok::<_, AppError>((entries, wanted))
+        })
+        .await
+        .map_err(|_| AppError::local("Saving the artwork was interrupted."))??;
+
+        let mut tx = self.store.pool().begin_with("BEGIN IMMEDIATE").await?;
+        let active: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM image_origin WHERE hash = ?)")
+                .bind(hash)
+                .fetch_one(&mut *tx)
                 .await?;
-        let mut tx = self.store.pool().begin().await?;
-        for (key, rel, bytes) in &entries {
+        if !active {
+            return Err(AppError::local("That image is no longer available."));
+        }
+        for (size, rel, bytes, _) in &entries {
+            let key = Self::key(hash, *size);
+            // Obsolete files stay accounted for until removal succeeds, including after a crash.
+            sqlx::query(
+                "UPDATE image_cache SET key = 'garbage:' || path, last_used = ? WHERE key = ?",
+            )
+            .bind(i64::MIN)
+            .bind(&key)
+            .execute(&mut *tx)
+            .await?;
             sqlx::query(
                 "INSERT INTO image_cache (key, path, bytes, last_used, fetched_at)
-                 VALUES (?1, ?2, ?3, ?4, ?4)
-                 ON CONFLICT(key) DO UPDATE SET path = excluded.path, bytes = excluded.bytes,
-                                                last_used = excluded.last_used,
-                                                fetched_at = excluded.fetched_at",
+                         VALUES (?1, ?2, ?3, ?4, ?4)",
             )
             .bind(key)
             .bind(rel)
@@ -433,14 +467,93 @@ impl ImageCache {
             .await?;
         }
         tx.commit().await?;
-        for old in old_paths
-            .iter()
-            .filter(|p| !entries.iter().any(|(_, rel, _)| rel == *p))
-        {
-            let _ = tokio::fs::remove_file(self.dir.join(old)).await;
+        for (_, _, _, path) in entries {
+            path.keep().map_err(|e| e.error)?;
         }
-        self.evict_locked().await?;
+        if let Err(error) = self.evict_locked().await {
+            tracing::warn!(%error, "artwork eviction will be retried");
+        }
         wanted.ok_or_else(|| AppError::media("The image could not be prepared."))
+    }
+
+    /// Account for files left behind after interruption and remove stale cache entries.
+    pub(crate) async fn reconcile(&self) -> Result<()> {
+        let _writes = self.locks.writes.lock().await;
+        let dir = self.dir.clone();
+        let disk = tokio::task::spawn_blocking(move || -> std::io::Result<HashMap<String, i64>> {
+            let mut disk = HashMap::new();
+            let shards = match std::fs::read_dir(&dir) {
+                Ok(shards) => shards,
+                Err(e) if e.kind() == ErrorKind::NotFound => return Ok(disk),
+                Err(e) => return Err(e),
+            };
+            for shard in shards {
+                let shard = shard?;
+                let name = shard.file_name();
+                let Some(name) = name.to_str() else {
+                    continue;
+                };
+                if name.len() != 2
+                    || !name.bytes().all(|b| b.is_ascii_hexdigit())
+                    || !shard.file_type()?.is_dir()
+                {
+                    continue;
+                }
+                for entry in std::fs::read_dir(shard.path())? {
+                    let entry = entry?;
+                    if entry.file_type()?.is_file()
+                        && let Some(file) = entry.file_name().to_str()
+                    {
+                        let bytes = i64::try_from(entry.metadata()?.len()).unwrap_or(i64::MAX);
+                        disk.insert(format!("{name}/{file}"), bytes);
+                    }
+                }
+            }
+            Ok(disk)
+        })
+        .await
+        .map_err(|_| AppError::local("Checking the artwork cache was interrupted."))??;
+        let mut disk = disk;
+        let mut tx = self.store.pool().begin_with("BEGIN IMMEDIATE").await?;
+        let rows: Vec<(String, String, i64, bool)> = sqlx::query_as(
+            "SELECT key, path, bytes, EXISTS (
+                 SELECT 1 FROM image_origin WHERE hash = substr(image_cache.key, 1, 64)
+             ) FROM image_cache",
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+        for (key, path, bytes, active) in rows {
+            match disk.remove(&path) {
+                None => {
+                    sqlx::query("DELETE FROM image_cache WHERE key = ?")
+                        .bind(key)
+                        .execute(&mut *tx)
+                        .await?;
+                }
+                Some(actual) if !active || actual != bytes => {
+                    let obsolete = !active;
+                    let next_key = if obsolete {
+                        format!("garbage:{path}")
+                    } else {
+                        key.clone()
+                    };
+                    sqlx::query("UPDATE image_cache SET key = ?, bytes = ?, last_used = CASE WHEN ? THEN ? ELSE last_used END WHERE key = ?")
+                        .bind(next_key).bind(actual).bind(obsolete).bind(i64::MIN).bind(key).execute(&mut *tx).await?;
+                }
+                _ => {}
+            }
+        }
+        for (path, bytes) in disk {
+            sqlx::query("INSERT INTO image_cache (key, path, bytes, last_used, fetched_at) VALUES (?, ?, ?, ?, 0)")
+                .bind(format!("garbage:{path}")).bind(path).bind(bytes).bind(i64::MIN)
+                .execute(&mut *tx).await?;
+        }
+        // Repair the total even if a previous version or an old recovery backup had drifted.
+        sqlx::query("UPDATE image_cache_size SET bytes = (SELECT coalesce(sum(bytes), 0) FROM image_cache) WHERE id = 1")
+            .execute(&mut *tx).await?;
+        tx.commit().await?;
+        self.evict_locked().await?;
+        Ok(())
     }
 
     /// Total cached bytes.
@@ -460,35 +573,57 @@ impl ImageCache {
     async fn evict_locked(&self) -> Result<usize> {
         let mut total = self.total_bytes().await?;
         let mut removed = 0;
-        while total > self.max_bytes {
-            let mut tx = self.store.pool().begin_with("BEGIN IMMEDIATE").await?;
-            let rows: Vec<(String, String, i64)> = sqlx::query_as(
-                "SELECT key, path, bytes FROM image_cache ORDER BY last_used, key LIMIT ?",
+        let mut cursor = (i64::MIN, String::new());
+        let mut failure = None;
+        loop {
+            let rows: Vec<(String, String, i64, i64)> = sqlx::query_as(
+                "SELECT key, path, bytes, last_used FROM image_cache
+                 WHERE (last_used, key) > (?, ?) AND (? OR last_used = ?)
+                 ORDER BY last_used, key LIMIT ?",
             )
+            .bind(cursor.0)
+            .bind(&cursor.1)
+            .bind(total > self.max_bytes)
+            .bind(i64::MIN)
             .bind(EVICTION_BATCH)
-            .fetch_all(&mut *tx)
+            .fetch_all(self.store.pool())
             .await?;
             if rows.is_empty() {
                 break;
             }
-            let mut evicted = Vec::new();
-            for (key, rel, bytes) in rows {
-                evicted.push((key, rel));
-                total = total.saturating_sub(u64::try_from(bytes).unwrap_or(0));
-                if total <= self.max_bytes {
+            for (key, rel, bytes, last_used) in rows {
+                cursor = (last_used, key);
+                if total <= self.max_bytes && last_used != i64::MIN {
                     break;
                 }
-            }
-            let keys: Vec<_> = evicted.iter().map(|(key, _)| key).collect();
-            sqlx::query("DELETE FROM image_cache WHERE key IN (SELECT value FROM json_each(?))")
-                .bind(serde_json::to_string(&keys)?)
-                .execute(&mut *tx)
-                .await?;
-            tx.commit().await?;
-            for (_, rel) in evicted {
-                let _ = tokio::fs::remove_file(self.dir.join(rel)).await;
+                let path = Path::new(&rel);
+                if path.components().count() != 2
+                    || !path
+                        .components()
+                        .all(|part| matches!(part, std::path::Component::Normal(_)))
+                {
+                    failure.get_or_insert_with(|| {
+                        std::io::Error::new(ErrorKind::InvalidData, "Invalid cache path")
+                    });
+                    continue;
+                }
+                let result = tokio::fs::remove_file(self.dir.join(path)).await;
+                if let Err(error) = result
+                    && error.kind() != ErrorKind::NotFound
+                {
+                    failure.get_or_insert(error);
+                    continue;
+                }
+                sqlx::query("DELETE FROM image_cache WHERE key = ?")
+                    .bind(&cursor.1)
+                    .execute(self.store.pool())
+                    .await?;
+                total = total.saturating_sub(u64::try_from(bytes).unwrap_or(0));
                 removed += 1;
             }
+        }
+        if let Some(error) = failure {
+            return Err(error.into());
         }
         Ok(removed)
     }

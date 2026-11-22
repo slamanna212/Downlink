@@ -101,14 +101,12 @@ async fn miss_fetches_once_resizes_both_sizes_then_hits_disk() {
         "second size came from the same fetch"
     );
 
-    // Files are content-addressed on disk.
-    assert!(
-        cache
-            .dir()
-            .join(&hash[..2])
-            .join(format!("{hash}-160.png"))
-            .exists()
-    );
+    let path: String = sqlx::query_scalar("SELECT path FROM image_cache WHERE key = ?")
+        .bind(ImageCache::key(&hash, size))
+        .fetch_one(cache.store.pool())
+        .await
+        .unwrap();
+    assert!(cache.dir().join(path).exists());
     assert_eq!(cache.get(&hash, size, &stub).await.unwrap(), g);
     assert_eq!(stub.calls.load(Ordering::SeqCst), 1);
 }
@@ -221,13 +219,11 @@ async fn lru_eviction_drops_oldest_first() {
         "only the most recent hash survives: {left:?}"
     );
     assert!(capped.total_bytes().await.unwrap() <= per_hash + per_hash / 2);
-    assert!(
-        !cache
-            .dir()
-            .join(&hashes[0][..2])
-            .join(format!("{}-160.png", hashes[0]))
-            .exists()
-    );
+    let remaining = std::fs::read_dir(cache.dir())
+        .unwrap()
+        .map(|entry| std::fs::read_dir(entry.unwrap().path()).unwrap().count())
+        .sum::<usize>();
+    assert_eq!(remaining, left.len());
 }
 
 struct Failing;
@@ -373,4 +369,49 @@ async fn identical_artwork_urls_are_scoped_to_the_account_uuid() {
         .await
         .unwrap();
     assert_ne!(parse_dlimg(&icon).unwrap().0, old_hash);
+}
+
+#[tokio::test]
+async fn eviction_keeps_failed_removals_accounted_until_retry() {
+    let (cache, sid, _dir) = setup(DEFAULT_MAX_BYTES).await;
+    let dl = cache
+        .register(sid, "https://source.test/art", ImageSize::Grid)
+        .await
+        .unwrap();
+    let (hash, size) = parse_dlimg(&dl).unwrap();
+    let stub = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(64, 64, true),
+    };
+    let image = cache.get(&hash, size, &stub).await.unwrap();
+    let path: String = sqlx::query_scalar("SELECT path FROM image_cache WHERE key = ?")
+        .bind(ImageCache::key(&hash, size))
+        .fetch_one(cache.store.pool())
+        .await
+        .unwrap();
+    let path = cache.dir().join(path);
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let cache = cache.with_max_bytes(0);
+    assert!(cache.evict().await.is_err());
+    assert_eq!(cache.total_bytes().await.unwrap(), image.bytes.len() as u64);
+    std::fs::remove_dir(path).unwrap();
+    assert_eq!(cache.evict().await.unwrap(), 1);
+    assert_eq!(cache.total_bytes().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn reconciliation_removes_old_orphaned_files() {
+    let (cache, _sid, _dir) = setup(DEFAULT_MAX_BYTES).await;
+    let path = cache.dir().join("ab");
+    std::fs::create_dir_all(&path).unwrap();
+    let orphan = path.join("old-or-interrupted.part");
+    std::fs::write(&orphan, b"orphaned").unwrap();
+    sqlx::query("UPDATE image_cache_size SET bytes = 100")
+        .execute(cache.store.pool())
+        .await
+        .unwrap();
+    cache.reconcile().await.unwrap();
+    assert!(!orphan.exists());
+    assert_eq!(cache.total_bytes().await.unwrap(), 0);
 }

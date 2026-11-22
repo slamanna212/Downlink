@@ -202,12 +202,16 @@ impl Service {
         let store =
             Store::open_with_secrets(&cfg.data_dir.join("downlink.sqlite"), cfg.secrets.as_ref())
                 .await?;
-        Ok(Self::with_store(
+        let service = Self::with_store(
             store,
             cfg.secrets,
             cfg.data_dir.join("images"),
             cfg.app_version,
-        ))
+        );
+        if let Err(error) = service.images.reconcile().await {
+            tracing::warn!(%error, "artwork cache reconciliation will be retried");
+        }
+        Ok(service)
     }
 
     /// After `new` failed with "created by a newer version": move that library aside (kept as
