@@ -1244,7 +1244,9 @@ impl DispatcharrClient {
     /// play-time resolve and carry no headers into the plan the player sees.
     pub async fn live_plan(&self, ch: &ChannelKey) -> Result<PlayPlan> {
         let auth = self.auth_header().await?;
-        build_live_plan(&self.base, ch, Some(auth), self.redaction_set())
+        let mut plan = build_live_plan(&self.base, ch, Some(auth), self.redaction_set())?;
+        plan.tls_pin = self.tls_pin.clone();
+        Ok(plan)
     }
 }
 

@@ -46,7 +46,7 @@ struct Active {
     hls_reminted: bool,
     /// VOD / recording being played, for position reports.
     media: Option<Media>,
-    /// Loopback proxy for the current authenticated playlist.
+    /// Loopback proxy for the current authenticated playback.
     hls: Option<crate::hls_proxy::HlsProxy>,
     /// 1-based provider stream in use and how many the channel has (0 = unknown).
     source_index: u32,
@@ -75,6 +75,25 @@ fn lock(a: &Mutex<Active>) -> MutexGuard<'_, Active> {
         Ok(g) => g,
         Err(p) => p.into_inner(),
     }
+}
+
+async fn prepare_playback_proxy(
+    active: &Mutex<Active>,
+    app: &AppHandle,
+    plan: &mut PlayPlan,
+    recording: bool,
+    generation: u64,
+) -> Result<bool, AppError> {
+    if lock(active).generation != generation {
+        return Ok(false);
+    }
+    let prepared = crate::hls_proxy::prepare(plan, recording, Some(app.clone())).await;
+    let mut state = lock(active);
+    if state.generation != generation {
+        return Ok(false);
+    }
+    state.hls = prepared?;
+    Ok(true)
 }
 
 pub(crate) fn plan_request(plan: &PlayPlan, mode: PlayMode, failover: bool) -> PlayRequest {
@@ -231,7 +250,23 @@ impl SinkContext {
         player.begin_resolving();
         match self.service.failover_next(channel, attempt).await {
             _ if superseded() => {}
-            Ok(step) => {
+            Ok(mut step) => {
+                match prepare_playback_proxy(
+                    &self.active,
+                    &self.app,
+                    &mut step.plan,
+                    false,
+                    generation,
+                )
+                .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => return,
+                    Err(error) => {
+                        self.publish_failure(&player, error);
+                        return;
+                    }
+                }
                 {
                     let mut a = lock(&self.active);
                     a.source_index = u32::try_from(step.source_index).unwrap_or(0);
@@ -485,32 +520,15 @@ impl Playback {
         self.player.mark_failed(e.message.clone());
     }
 
-    async fn prepare_hls(
+    async fn prepare_current_proxy(
         &self,
         plan: &mut PlayPlan,
         recording: bool,
         generation: u64,
     ) -> Result<bool, AppError> {
-        if lock(&self.active).generation != generation {
-            return Ok(false);
-        }
-        let prepared = crate::hls_proxy::prepare(plan, recording, Some(self.app.clone())).await;
-        let mut active = lock(&self.active);
-        if active.generation != generation {
-            return Ok(false);
-        }
-        match prepared {
-            Ok(proxy) => {
-                active.hls = proxy;
-                Ok(true)
-            }
-            Err(error) => {
-                active.info.failure = Some(error.clone());
-                drop(active);
-                self.player.mark_failed(error.message.clone());
-                Err(error)
-            }
-        }
+        prepare_playback_proxy(&self.active, &self.app, plan, recording, generation)
+            .await
+            .inspect_err(|error| self.fail(error))
     }
 
     pub async fn play_channel(&self, channel_id: i64) -> Result<(), AppError> {
@@ -540,7 +558,10 @@ impl Playback {
             Some(s) => self.failover_capable(s).await,
             None => false,
         };
-        if !self.prepare_hls(&mut plan, false, generation).await? {
+        if !self
+            .prepare_current_proxy(&mut plan, false, generation)
+            .await?
+        {
             return Ok(());
         }
         let req = live_request(&self.player, &plan, failover);
@@ -597,7 +618,9 @@ impl Playback {
         }
         let failover = self.failover_capable(play.source_id).await;
         let mut plan = play.plan.clone();
-        let ready = self.prepare_hls(&mut plan, false, generation).await;
+        let ready = self
+            .prepare_current_proxy(&mut plan, false, generation)
+            .await;
         if !matches!(ready, Ok(true)) {
             let _ = self.service.stop_catchup(&play).await;
             return ready.map(|_| ());
@@ -821,7 +844,10 @@ impl Playback {
         };
         let start = vp.resume_secs.map(|s| s as f64);
         let mut plan = vp.plan;
-        if !self.prepare_hls(&mut plan, false, generation).await? {
+        if !self
+            .prepare_current_proxy(&mut plan, false, generation)
+            .await?
+        {
             return Ok(());
         }
         self.start_media(&plan, PlayMode::Vod, vp.title, start, Media::Vod(vp.id))
@@ -838,7 +864,10 @@ impl Playback {
         };
         let start = rp.resume_secs.map(|s| s as f64);
         let mut plan = rp.plan;
-        if !self.prepare_hls(&mut plan, true, generation).await? {
+        if !self
+            .prepare_current_proxy(&mut plan, true, generation)
+            .await?
+        {
             return Ok(());
         }
         self.start_media(

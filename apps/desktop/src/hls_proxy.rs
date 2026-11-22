@@ -1,4 +1,4 @@
-//! Loopback proxy for authenticated HLS. The player receives only local, tokenized URLs.
+//! Loopback proxy for authenticated HTTP playback. The player receives only local, tokenized URLs.
 //! Credentials stay inside reqwest and are attached only on the playlist's configured origin.
 
 use std::collections::{HashMap, HashSet};
@@ -13,8 +13,8 @@ use downlink_core::source::{PlayPlan, Surface};
 use downlink_core::{AppError, Result, tls};
 use hashlink::LinkedHashMap;
 use reqwest::header::{
-    ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue,
-    LOCATION, RANGE,
+    ACCEPT_RANGES, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, HeaderMap,
+    HeaderName, HeaderValue, LOCATION, RANGE,
 };
 use reqwest::{Client, Response, StatusCode};
 use tauri::{AppHandle, Emitter};
@@ -30,7 +30,8 @@ const MAX_RESOURCE_COUNT: usize = 32_768;
 const MAX_REGISTRY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_HANDLERS: usize = 16;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-const RESOURCE_TIMEOUT: Duration = Duration::from_secs(90);
+const RESPONSE_TIMEOUT: Duration = Duration::from_secs(15);
+const IO_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 const PLAYLIST_CONTENT_TYPE: &str = "application/vnd.apple.mpegurl";
 
 /// Aborts the listener and all active upstream requests when dropped.
@@ -78,16 +79,7 @@ impl Resources {
         }
         let id = self.next_id;
         self.next_id += 1;
-        let name = url.path().rsplit('/').next().unwrap_or_default();
-        let extension = name.rsplit_once('.').map(|(_, ext)| ext).filter(|ext| {
-            !ext.is_empty()
-                && ext.len() <= 12
-                && ext.bytes().all(|byte| byte.is_ascii_alphanumeric())
-        });
-        let route = match extension {
-            Some(ext) => format!("{id}.{ext}"),
-            None => id.to_string(),
-        };
+        let route = with_extension(id.to_string(), &url);
         self.by_url.insert(url.clone(), route.clone());
         self.by_route.insert(route.clone(), url);
         self.url_bytes += url_len;
@@ -103,6 +95,8 @@ impl Resources {
 
 struct Upstream {
     root: Url,
+    root_route: String,
+    expected_playlist: bool,
     recording_base: Option<Url>,
     headers: HeaderMap,
     pinned: Client,
@@ -116,7 +110,13 @@ struct Upstream {
 }
 
 impl Upstream {
-    async fn fetch(&self, mut url: Url, range: Option<HeaderValue>) -> Result<Response> {
+    async fn fetch(&self, url: Url, range: Option<HeaderValue>) -> Result<Response> {
+        tokio::time::timeout(RESPONSE_TIMEOUT, self.follow_redirects(url, range))
+            .await
+            .map_err(|_| AppError::network("The stream server took too long to answer."))?
+    }
+
+    async fn follow_redirects(&self, mut url: Url, range: Option<HeaderValue>) -> Result<Response> {
         let mut send_credentials = true;
         for hop in 0..=MAX_REDIRECTS {
             let same_origin = url.origin() == self.root.origin();
@@ -245,7 +245,7 @@ impl Upstream {
 
     fn get(&self, path: &str) -> Option<(Url, bool)> {
         let resource = path.strip_prefix(&self.route_prefix)?;
-        if resource == "index.m3u8" {
+        if resource == self.root_route {
             return Some((self.root.clone(), true));
         }
         let url = self.resources.lock().ok()?.resolve(resource)?;
@@ -279,7 +279,13 @@ fn media_headers(response: &Response) -> String {
     if !status.is_success() {
         head.push_str("Content-Length: 0\r\n");
     }
-    for name in [CONTENT_TYPE, CONTENT_LENGTH, CONTENT_RANGE, ACCEPT_RANGES] {
+    for name in [
+        CONTENT_TYPE,
+        CONTENT_LENGTH,
+        CONTENT_RANGE,
+        ACCEPT_RANGES,
+        CONTENT_ENCODING,
+    ] {
         if name == CONTENT_LENGTH && !status.is_success() {
             continue;
         }
@@ -300,12 +306,15 @@ async fn serve(
     range: Option<HeaderValue>,
     started: &mut bool,
 ) -> Result<()> {
-    let initial = if root && range.is_none() {
+    let initial = if root {
+        // libmpv probes the entire representation as an open-ended range. The un-ranged
+        // prefetched response already contains everything requested by that first GET.
         upstream
             .initial_playlist
             .lock()
             .ok()
             .and_then(|mut cached| cached.take())
+            .filter(|_| range.as_ref().is_none_or(|range| range == "bytes=0-"))
     } else {
         None
     };
@@ -313,7 +322,7 @@ async fn serve(
         Some(response) => response,
         None => upstream.fetch(url, range).await?,
     };
-    let known_playlist = root
+    let known_playlist = (root && upstream.expected_playlist)
         || is_playlist_url(response.url())
         || response
             .headers()
@@ -321,15 +330,19 @@ async fn serve(
             .and_then(|value| value.to_str().ok())
             .is_some_and(|kind| kind.to_ascii_lowercase().contains("mpegurl"));
     let mut bytes = Vec::new();
+    const PREFIXES: [&[u8]; 2] = [b"#EXTM3U", b"\xef\xbb\xbf#EXTM3U"];
     if !known_playlist && response.status().is_success() {
-        while bytes.len() < b"#EXTM3U".len() {
+        while PREFIXES
+            .iter()
+            .any(|prefix| bytes.len() < prefix.len() && prefix.starts_with(&bytes))
+        {
             let Some(chunk) = response.chunk().await? else {
                 break;
             };
             bytes.extend_from_slice(&chunk);
         }
     }
-    let playlist = known_playlist || bytes.starts_with(b"#EXTM3U");
+    let playlist = known_playlist || PREFIXES.iter().any(|prefix| bytes.starts_with(prefix));
     if playlist && response.status().is_success() {
         while let Some(chunk) = response.chunk().await? {
             if bytes.len() + chunk.len() > MAX_PLAYLIST_BYTES {
@@ -342,24 +355,38 @@ async fn serve(
         }
         let text = std::str::from_utf8(&bytes)
             .map_err(|_| AppError::stream("The server returned an invalid playlist."))?;
-        let body = upstream.playlist(text, response.url())?;
+        let body = upstream.playlist(
+            text.strip_prefix('\u{feff}').unwrap_or(text),
+            response.url(),
+        )?;
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: {PLAYLIST_CONTENT_TYPE}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
             body.len(),
         );
         *started = true;
-        socket.write_all(response.as_bytes()).await?;
+        write_downstream(socket, response.as_bytes()).await?;
     } else {
         *started = true;
-        socket
-            .write_all(media_headers(&response).as_bytes())
-            .await?;
+        write_downstream(socket, media_headers(&response).as_bytes()).await?;
         if response.status().is_success() {
-            socket.write_all(&bytes).await?;
+            write_downstream(socket, &bytes).await?;
             while let Some(chunk) = response.chunk().await? {
-                socket.write_all(&chunk).await?;
+                write_downstream(socket, &chunk).await?;
             }
         }
+    }
+    Ok(())
+}
+
+async fn write_downstream(socket: &mut TcpStream, mut bytes: &[u8]) -> Result<()> {
+    while !bytes.is_empty() {
+        let count = tokio::time::timeout(IO_IDLE_TIMEOUT, socket.write(bytes))
+            .await
+            .map_err(|_| AppError::network("The player stopped reading the stream."))??;
+        if count == 0 {
+            return Err(std::io::Error::from(std::io::ErrorKind::WriteZero).into());
+        }
+        bytes = &bytes[count..];
     }
     Ok(())
 }
@@ -401,19 +428,34 @@ async fn handle(mut socket: TcpStream, upstream: Arc<Upstream>) {
                 let _ = app.emit("source://certificate", &error);
             }
             if !started {
-                let _ = socket
-                    .write_all(
-                        b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                    )
-                    .await;
+                let _ = write_downstream(
+                    &mut socket,
+                    b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .await;
             }
         }
     } else {
-        let _ = socket
-            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-            .await;
+        let _ = write_downstream(
+            &mut socket,
+            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        )
+        .await;
     }
     let _ = socket.shutdown().await;
+}
+
+fn with_extension(mut route: String, url: &Url) -> String {
+    let name = url.path().rsplit('/').next().unwrap_or_default();
+    if let Some((_, extension)) = name.rsplit_once('.')
+        && !extension.is_empty()
+        && extension.len() <= 12
+        && extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    {
+        route.push('.');
+        route.push_str(extension);
+    }
+    route
 }
 
 fn is_playlist_url(url: &Url) -> bool {
@@ -441,26 +483,39 @@ pub async fn prepare(
     if plan.headers.is_empty() && !recording {
         return Ok(None);
     }
-    let root = Url::parse(&plan.url);
-    if plan.surface != Surface::Hls && !root.as_ref().is_ok_and(is_playlist_url) {
+    let root = match Url::parse(&plan.url) {
+        Ok(url) => url,
+        Err(error)
+            if plan.url.split_once("://").is_some_and(|(scheme, _)| {
+                scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https")
+            }) =>
+        {
+            return Err(error.into());
+        }
+        Err(_) => return Ok(None),
+    };
+    let expected_playlist = plan.surface == Surface::Hls || is_playlist_url(&root);
+    if !matches!(root.scheme(), "https" | "http") || (plan.headers.is_empty() && !expected_playlist)
+    {
         return Ok(None);
-    }
-    let root = root?;
-    if !matches!(root.scheme(), "https" | "http") {
-        return Err(AppError::stream("The playlist address is invalid."));
     }
     let mut headers = HeaderMap::new();
     for (name, value) in &plan.headers {
         let name = HeaderName::from_bytes(name.as_bytes())
-            .map_err(|_| AppError::stream("The playlist has an invalid request header."))?;
+            .map_err(|_| AppError::stream("The stream has an invalid request header."))?;
         if matches!(
             name.as_str(),
-            "host" | "connection" | "proxy-authorization" | "content-length" | "transfer-encoding"
+            "host"
+                | "connection"
+                | "proxy-authorization"
+                | "content-length"
+                | "transfer-encoding"
+                | "accept-encoding"
         ) {
             continue;
         }
         let mut value = HeaderValue::from_str(value.expose())
-            .map_err(|_| AppError::stream("The playlist has an invalid request header."))?;
+            .map_err(|_| AppError::stream("The stream has an invalid request header."))?;
         value.set_sensitive(true);
         headers.insert(name, value);
     }
@@ -468,23 +523,33 @@ pub async fn prepare(
         Client::builder()
             .user_agent(downlink_core::user_agent())
             .connect_timeout(Duration::from_secs(10))
-            .read_timeout(Duration::from_secs(30))
+            .read_timeout(IO_IDLE_TIMEOUT)
             .referer(false)
+            .redirect(reqwest::redirect::Policy::none())
     };
-    let pinned = tls::apply(builder(), &root, plan.tls_pin.as_ref())?
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
-    let anonymous = builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
+    let anonymous = builder().build()?;
+    let pin = plan.tls_pin.as_ref().filter(|pin| pin.matches(&root));
+    let pinned = match pin {
+        Some(pin) => tls::apply(builder(), &root, Some(pin))?
+            .redirect(reqwest::redirect::Policy::none())
+            .build()?,
+        None => anonymous.clone(),
+    };
     let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
     let port = listener.local_addr()?.port();
     let route_prefix = format!("/{}/", uuid::Uuid::new_v4().simple());
     let local_base = format!("http://127.0.0.1:{port}{route_prefix}");
-    let local = format!("{local_base}index.m3u8");
+    let root_route = if expected_playlist {
+        "index.m3u8".to_owned()
+    } else {
+        with_extension("source".to_owned(), &root)
+    };
+    let local = format!("{local_base}{root_route}");
     let mut upstream = Upstream {
         recording_base: recording.then(|| recording_base(&root)),
         root,
+        root_route,
+        expected_playlist,
         headers,
         pinned,
         anonymous,
@@ -495,18 +560,10 @@ pub async fn prepare(
         app,
         certificate_reported: AtomicBool::new(false),
     };
-    if plan
-        .tls_pin
-        .as_ref()
-        .is_some_and(|pin| pin.matches(&upstream.root))
-    {
-        // Surface any changed certificate before handing the player its loopback URL.
-        let response = tokio::time::timeout(
-            Duration::from_secs(15),
-            upstream.fetch(upstream.root.clone(), None),
-        )
-        .await
-        .map_err(|_| AppError::network("The playlist server took too long to answer."))??;
+    if expected_playlist && pin.is_some() {
+        // Surface a changed certificate before starting a known playlist. Generic streams
+        // are classified only when the player requests them.
+        let response = upstream.fetch(upstream.root.clone(), None).await?;
         upstream.initial_playlist = Mutex::new(Some(response));
     }
     let upstream = Arc::new(upstream);
@@ -516,10 +573,7 @@ pub async fn prepare(
             tokio::select! {
                 connection = listener.accept(), if handlers.len() < MAX_HANDLERS => {
                     let Ok((socket, _)) = connection else { break };
-                    handlers.spawn(tokio::time::timeout(
-                        RESOURCE_TIMEOUT,
-                        handle(socket, upstream.clone()),
-                    ));
+                    handlers.spawn(handle(socket, upstream.clone()));
                 }
                 _ = handlers.join_next(), if !handlers.is_empty() => {}
             }
@@ -571,6 +625,66 @@ mod tests {
             .split_once('"')
             .unwrap()
             .0
+    }
+
+    #[tokio::test]
+    async fn extensionless_playlist_is_detected_on_the_first_player_request() {
+        let source = MockServer::start().await;
+        Mock::given(path("/watch"))
+            .and(header("x-api-key", "fixture-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_raw(
+                b"\xef\xbb\xbf#EXTM3U\n#EXTINF:1,\npart.ts\n".to_vec(),
+                "application/octet-stream",
+            ))
+            .expect(1)
+            .mount(&source)
+            .await;
+        Mock::given(path("/part.ts"))
+            .and(header("x-api-key", "fixture-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("segment"))
+            .expect(1)
+            .mount(&source)
+            .await;
+        let mut plan = plan(format!("{}/watch", source.uri()));
+        plan.surface = Surface::Direct;
+        let _proxy = prepare(&mut plan, false, None).await.unwrap().unwrap();
+        assert!(plan.headers.is_empty());
+        assert!(source.received_requests().await.unwrap().is_empty());
+        let body = get(&plan.url).await;
+        assert!(body.starts_with("#EXTM3U\n"));
+        assert_eq!(get(body.lines().last().unwrap()).await, "segment");
+    }
+
+    #[tokio::test]
+    async fn direct_media_keeps_binary_bytes_and_range_semantics() {
+        let source = MockServer::start().await;
+        let data = [0, 255, 17, 23];
+        Mock::given(path("/watch"))
+            .and(header("x-api-key", "fixture-key"))
+            .and(header("range", "bytes=2-5"))
+            .respond_with(
+                ResponseTemplate::new(206)
+                    .insert_header("content-range", "bytes 2-5/10")
+                    .insert_header("accept-ranges", "bytes")
+                    .set_body_raw(data.to_vec(), "video/mp2t"),
+            )
+            .expect(1)
+            .mount(&source)
+            .await;
+        let mut plan = plan(format!("{}/watch", source.uri()));
+        plan.surface = Surface::Ts;
+        let _proxy = prepare(&mut plan, false, None).await.unwrap().unwrap();
+        assert!(source.received_requests().await.unwrap().is_empty());
+        let response = Client::new()
+            .get(&plan.url)
+            .header(RANGE, "bytes=2-5")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(response.headers()[CONTENT_RANGE], "bytes 2-5/10");
+        assert_eq!(response.headers()[ACCEPT_RANGES], "bytes");
+        assert_eq!(response.bytes().await.unwrap().as_ref(), data);
     }
 
     #[test]

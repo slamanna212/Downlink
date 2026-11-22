@@ -1991,8 +1991,10 @@ impl Service {
             {
                 return self.mint_hls_plan(&ch, &src).await;
             }
-            let plan = catalog::resolve_play_plan(&self.store, self, channel_id).await?;
-            plan.resolve_at_play(self.source_pin(&src)?.as_ref()).await
+            let mut plan = catalog::resolve_play_plan(&self.store, self, channel_id).await?;
+            let pin = self.source_pin(&src)?;
+            plan.tls_pin = pin.clone();
+            plan.resolve_at_play(pin.as_ref()).await
         } else {
             if ch.is_drm {
                 return Err(AppError::media("DRM — not supported"));
