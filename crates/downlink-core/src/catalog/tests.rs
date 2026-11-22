@@ -407,3 +407,45 @@ async fn favourites_only_filter_orders_by_user_position_and_respects_visibility(
     };
     assert_eq!(list_channels(&store, &fs, 10, 0).await.unwrap().len(), 2);
 }
+
+#[tokio::test]
+async fn broad_search_reaches_eligible_rows_beyond_the_old_candidate_windows() {
+    let (store, sid, groups) = seeded("m3u").await;
+    let mut channels: Vec<_> = (0..2100)
+        .map(|i| {
+            let mut row = ch(&i.to_string(), "Common hidden", i as f64, "1");
+            row.is_adult = true;
+            row
+        })
+        .collect();
+    channels.push(ch("visible", "Common visible", 2101.0, "1"));
+    store.sync_channels(sid, &channels, &groups).await.unwrap();
+    let filter = ChannelFilter {
+        search: Some("common".into()),
+        ..Default::default()
+    };
+    let results = list_channels(&store, &filter, 10, 0).await.unwrap();
+    assert_eq!(names(&results), ["Common visible"]);
+    let rows: Vec<_> = (0..5100)
+        .map(|i| ProgrammeRow {
+            channel_id: results[0].id,
+            start_utc: i,
+            end_utc: i + 1,
+            ext_id: None,
+            title: Some("Common programme".into()),
+            subtitle: None,
+            description: None,
+            season: None,
+            episode: None,
+            flags: 0,
+        })
+        .collect();
+    store.upsert_programmes(&rows).await.unwrap();
+    assert_eq!(
+        search_programmes(&store, &filter, "common", 5098, 10)
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+}

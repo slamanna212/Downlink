@@ -156,23 +156,25 @@ pub async fn list_channels(
             .push_bind(offset);
         return Ok(sql.build_query_as().fetch_all(store.pool()).await?);
     }
+    let eligible = format!(
+        "{vis} AND (?2 IS NULL OR c.source_id = ?2)
+        AND (?3 IS NULL OR c.group_id = ?3)
+        AND (?7 = 0 OR c.id IN (SELECT channel_id FROM favourite WHERE deleted = 0))"
+    );
     let sql = {
-        // Two stages so a broad prefix ("ne") never sorts every match: FTS yields up to CANDIDATES
-        // matches (bm25 `rank` is evaluated only for those, never for every match of a broad prefix); exact number matches are added via the number index; the
-        // outer query then orders by number proximity, then rank.
         format!(
             "SELECT {COLS} FROM (
                  SELECT rowid AS id, min(rank) AS rank FROM (
                    SELECT rowid, rank FROM (
-                     SELECT rowid, rank FROM channel_fts WHERE channel_fts MATCH ?1
-                       LIMIT {CANDIDATES})
+                     SELECT channel_fts.rowid AS rowid, rank FROM channel_fts
+                       CROSS JOIN channel c ON c.id = channel_fts.rowid
+                       WHERE channel_fts MATCH ?1 AND {eligible}
+                       LIMIT max({CANDIDATES}, ?5 + ?6))
                    UNION ALL
                    SELECT id, -1e9 FROM channel WHERE ?4 IS NOT NULL AND number = ?4
                  ) GROUP BY rowid
                ) m JOIN channel c ON c.id = m.id
-             WHERE {vis}
-               AND (?2 IS NULL OR c.source_id = ?2) AND (?3 IS NULL OR c.group_id = ?3)
-               AND (?7 = 0 OR c.id IN (SELECT channel_id FROM favourite WHERE deleted = 0))
+             WHERE {eligible}
              ORDER BY CASE WHEN ?4 IS NOT NULL AND c.number = ?4 THEN 0 ELSE 1 END,
                       CASE WHEN ?4 IS NULL THEN 0 ELSE abs(coalesce(c.number, 1e9) - ?4) END,
                       m.rank, c.number, c.sort_key, c.id
@@ -235,16 +237,8 @@ pub async fn channels_by_ids(
     .await?)
 }
 
-/// Programme candidates taken from FTS before the time/visibility filter. A narrow query has
-/// fewer matches than this, so its result is exact; a very broad prefix ("n") is judged on its
-/// first candidates, which is fine because the user keeps typing. Ranking every match (bm25 over
-/// ~100k rows) was what made this leg slow.
-const PROGRAMME_CANDIDATES: i64 = 5_000;
-
-/// Local guide search (FTS5 over title/subtitle/description), restricted to visible channels and
-/// to programmes that have not ended before `from_utc` and start within the next 7 days. The
-/// FTS leg only yields rowids (limit applied inside FTS); the rest is a primary-key probe per
-/// candidate. Ordered by what is on or next first: airing now, then soonest upcoming.
+/// Rank a bounded set of eligible FTS hits by start time. Scan past expired or
+/// hidden hits so broad terms can still fill the requested result window.
 pub async fn search_programmes(
     store: &Store,
     f: &ChannelFilter,
@@ -259,11 +253,17 @@ pub async fn search_programmes(
     let sql = format!(
         "SELECT p.channel_id, p.start_utc, p.end_utc, p.ext_id, p.title, p.subtitle, p.description,
                 p.season, p.episode, p.flags
-         FROM (SELECT rowid FROM programme_fts WHERE programme_fts MATCH ?1 LIMIT ?5) f
-         JOIN programme p ON p.rowid = f.rowid
-         JOIN channel c ON c.id = p.channel_id
-         WHERE {vis} AND p.end_utc >= ?2 AND p.start_utc <= ?6
-           AND (?3 IS NULL OR c.source_id = ?3)
+         FROM (
+             SELECT candidate.rowid FROM programme_fts
+             CROSS JOIN programme candidate ON candidate.rowid = programme_fts.rowid
+             CROSS JOIN channel c ON c.id = candidate.channel_id
+             WHERE programme_fts MATCH ?1 AND {vis}
+               AND candidate.end_utc >= ?2 AND candidate.start_utc <= ?6
+               AND (?3 IS NULL OR c.source_id = ?3)
+               AND (?7 IS NULL OR c.group_id = ?7)
+               AND (?8 = 0 OR c.id IN (SELECT channel_id FROM favourite WHERE deleted = 0))
+             LIMIT ?5
+         ) f JOIN programme p ON p.rowid = f.rowid
          ORDER BY p.start_utc, p.channel_id LIMIT ?4"
     );
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
@@ -271,8 +271,10 @@ pub async fn search_programmes(
         .bind(from_utc)
         .bind(f.source_id)
         .bind(limit)
-        .bind(PROGRAMME_CANDIDATES)
-        .bind(from_utc + 7 * 86_400)
+        .bind(limit.max(256))
+        .bind(from_utc.saturating_add(7 * 86_400))
+        .bind(f.group_id)
+        .bind(f.favourites_only)
         .fetch_all(store.pool())
         .await?)
 }
