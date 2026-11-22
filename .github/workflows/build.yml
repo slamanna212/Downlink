@@ -200,9 +200,9 @@ jobs:
 
       - name: Install updater signer
         if: needs.prepare.outputs.signed == 'true'
-        uses: taiki-e/install-action@fe3acb53a98b62c772db35de75ce0e4595e7ca8c # v2
-        with:
-          tool: tauri-cli@2
+        run: cargo install tauri-cli --version '=2.12.6' --locked
+        env:
+          GH_TOKEN: ""
 
       - name: Sign and upload updater signatures
         if: needs.prepare.outputs.signed == 'true'
@@ -212,7 +212,7 @@ jobs:
         run: |
           for asset in assets/*_x64-setup.exe assets/*_amd64.AppImage assets/*_amd64.deb; do
             test -s "$asset"
-            cargo tauri signer sign "$asset"
+            cargo tauri signer sign --app-version "$VERSION" "$asset"
             test -s "$asset.sig"
           done
           gh release upload "$TAG" --clobber -- assets/*.sig
