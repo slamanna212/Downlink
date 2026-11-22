@@ -45,7 +45,8 @@ fn compose_cat(source_id: i64, ext: &str) -> i64 {
 
 fn rating_of(r: Option<&str>) -> Option<f64> {
     let v: f64 = r?.trim().parse().ok()?;
-    (0.0..=10.0).contains(&v).then_some(v)
+    // 0 means "no rating" to every source; NaN/inf and out-of-scale values are garbage.
+    (v > 0.0 && v <= 10.0).then_some(v)
 }
 
 fn genres_of(g: Option<&str>) -> Vec<String> {
@@ -244,11 +245,7 @@ impl Service {
             id: r.id,
             title: r.name.clone(),
             year: r.year,
-            rating: if compact {
-                None
-            } else {
-                rating_of(r.rating.as_deref())
-            },
+            rating: rating_of(r.rating.as_deref()),
             duration_secs: r.duration_secs,
             poster,
             backdrop,
@@ -276,11 +273,7 @@ impl Service {
             id: r.id,
             title: r.name.clone(),
             year: r.year,
-            rating: if compact {
-                None
-            } else {
-                rating_of(r.rating.as_deref())
-            },
+            rating: rating_of(r.rating.as_deref()),
             poster,
             backdrop,
             plot: if compact { None } else { r.description.clone() },
@@ -1028,5 +1021,20 @@ impl Service {
             p.is_scheduled = set.contains(&(p.channel_id, p.start_utc));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rating_of;
+
+    #[test]
+    fn rating_of_accepts_only_a_real_ten_point_score() {
+        assert_eq!(rating_of(Some(" 7.4 ")), Some(7.4));
+        assert_eq!(rating_of(Some("10")), Some(10.0));
+        for bad in ["0", "0.0", "-1", "11", "n/a", "NaN", "inf", ""] {
+            assert_eq!(rating_of(Some(bad)), None, "{bad}");
+        }
+        assert_eq!(rating_of(None), None);
     }
 }

@@ -22,3 +22,8 @@ export const clock = formatDuration;
 export function gridColumns(width: number, minTile: number, gap: number): number {
   return Math.max(1, Math.floor((width + gap) / (minTile + gap)));
 }
+
+/** Critic/audience score as shown on tiles and detail pages: one decimal, hidden when absent. */
+export function ratingLabel(rating: number | null | undefined): string | null {
+  return rating != null && Number.isFinite(rating) && rating > 0 ? rating.toFixed(1) : null;
+}

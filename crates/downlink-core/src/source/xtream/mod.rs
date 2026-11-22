@@ -111,6 +111,14 @@ fn real_rating(r: Option<&str>) -> Option<String> {
     }
 }
 
+/// The 0-10 `rating`, or `rating_5based` doubled when the panel only fills that one.
+fn pick_rating(ten: Option<&str>, five: Option<&str>) -> Option<String> {
+    real_rating(ten).or_else(|| {
+        let v: f64 = real_rating(five)?.parse().ok()?;
+        (v <= 5.0).then(|| format!("{:.1}", v * 2.0))
+    })
+}
+
 fn year_in_title(name: &str) -> Option<i64> {
     let t = name.trim_end();
     let inner = t.strip_suffix(')')?.rsplit_once('(')?.1;
@@ -513,7 +521,7 @@ impl XtreamClient {
             ext_id: m.stream_id.clone(),
             title: m.name.clone(),
             year,
-            rating: real_rating(m.rating.as_deref()),
+            rating: pick_rating(m.rating.as_deref(), m.rating_5based.as_deref()),
             poster: m
                 .icon
                 .as_deref()
@@ -536,7 +544,7 @@ impl XtreamClient {
                 .as_deref()
                 .and_then(|d| d.get(..4))
                 .and_then(|y| y.parse().ok()),
-            rating: real_rating(s.rating.as_deref()),
+            rating: pick_rating(s.rating.as_deref(), s.rating_5based.as_deref()),
             genre: s.genre.clone().filter(|g| !g.is_empty()),
             plot: s.plot.clone().filter(|p| !p.is_empty()),
             poster: s

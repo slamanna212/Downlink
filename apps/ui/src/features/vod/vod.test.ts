@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { gridColumns, progressOf, resumeUseful, runtimeLabel } from './vod';
+import { gridColumns, ratingLabel, progressOf, resumeUseful, runtimeLabel } from './vod';
 
 describe('vod helpers', () => {
+  it('rating label hides absent and zero scores', () => {
+    expect(ratingLabel(7.44)).toBe('7.4');
+    expect(ratingLabel(10)).toBe('10.0');
+    expect(ratingLabel(0)).toBeNull();
+    expect(ratingLabel(null)).toBeNull();
+    expect(ratingLabel(undefined)).toBeNull();
+    expect(ratingLabel(Number.NaN)).toBeNull();
+  });
   it('offers resume only between 2 s from start and 2 s from end', () => {
     expect(resumeUseful(null, 100)).toBe(false);
     expect(resumeUseful(2, 100)).toBe(false);

@@ -95,6 +95,9 @@ pub struct VodStreamDto {
     pub container_extension: Option<String>,
     #[serde(default, deserialize_with = "opt_str")]
     pub rating: Option<String>,
+    /// The same score on a 0-5 scale; the fallback when `rating` is absent or zero.
+    #[serde(default, deserialize_with = "opt_str")]
+    pub rating_5based: Option<String>,
     #[serde(default, deserialize_with = "opt_i64")]
     pub added: Option<i64>,
     #[serde(default, deserialize_with = "opt_i64")]
@@ -121,6 +124,9 @@ pub struct SeriesDto {
     pub category_id: Option<String>,
     #[serde(default, deserialize_with = "opt_str")]
     pub rating: Option<String>,
+    /// The same score on a 0-5 scale; the fallback when `rating` is absent or zero.
+    #[serde(default, deserialize_with = "opt_str")]
+    pub rating_5based: Option<String>,
     #[serde(default, deserialize_with = "opt_str")]
     pub genre: Option<String>,
     #[serde(rename = "releaseDate", default, deserialize_with = "opt_str")]

@@ -437,6 +437,7 @@ export const en = {
   'vod.playEpisode': 'Play S{s} E{e}',
   'vod.resumeEpisode': 'Resume S{s} E{e} {time}',
   'vod.watched': 'Watched',
+  'vod.rating': 'Rating {value} out of 10',
   'vod.next': 'Up next',
   'vod.season': 'Season {n}',
   'vod.episodes': 'Episodes',

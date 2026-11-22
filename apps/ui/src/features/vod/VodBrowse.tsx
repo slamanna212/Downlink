@@ -24,9 +24,9 @@ const TEXT_H = 52;
 /** Titles fetched per request; the next page loads as the grid nears the end. */
 const PAGE = 200;
 
-const movieTile = (m: Movie): Tile => ({ id: m.id, title: m.title, poster: m.poster, sub: m.year ? String(m.year) : null, progress: progressOf(m.resumeSecs, m.durationSecs), watched: m.watched });
+const movieTile = (m: Movie): Tile => ({ id: m.id, title: m.title, poster: m.poster, sub: m.year ? String(m.year) : null, progress: progressOf(m.resumeSecs, m.durationSecs), watched: m.watched, rating: m.rating });
 const seriesTile = (s: Series): Tile => ({
-  id: s.id, title: s.title, poster: s.poster, sub: [s.year, s.seasonCount === 1 ? t('vod.season1') : t('vod.seasons', { count: s.seasonCount })].filter(Boolean).join(' · '), progress: null, watched: false,
+  id: s.id, title: s.title, poster: s.poster, sub: [s.year, s.seasonCount === 1 ? t('vod.season1') : t('vod.seasons', { count: s.seasonCount })].filter(Boolean).join(' · '), progress: null, watched: false, rating: s.rating,
 });
 
 /** Movies / Series browse: categories sidebar + virtualised poster grid (keyboard: arrows, Enter). */
