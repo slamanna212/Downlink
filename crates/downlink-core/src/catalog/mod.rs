@@ -249,12 +249,26 @@ pub async fn search_programmes(
     let Some(q) = fts_query(query) else {
         return Ok(Vec::new());
     };
+    // FTS5 can expand a common prefix even when another word has no matches.
+    if let Some((first, _)) = q.split_once(' ') {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT CASE WHEN EXISTS(SELECT 1 FROM programme_fts WHERE programme_fts MATCH ?1)
+             THEN 1 ELSE EXISTS(SELECT 1 FROM programme_fts WHERE programme_fts MATCH ?2) END",
+        )
+        .bind(first.trim_end_matches('*'))
+        .bind(first)
+        .fetch_one(store.pool())
+        .await?;
+        if !exists {
+            return Ok(Vec::new());
+        }
+    }
     let vis = visibility_sql(f);
     let sql = format!(
         "SELECT p.channel_id, p.start_utc, p.end_utc, p.ext_id, p.title, p.subtitle, p.description,
                 p.season, p.episode, p.flags
-         FROM (
-             SELECT candidate.rowid FROM programme_fts
+         FROM (SELECT rowid FROM (
+             SELECT candidate.rowid, candidate.start_utc, candidate.channel_id FROM programme_fts
              CROSS JOIN programme candidate ON candidate.rowid = programme_fts.rowid
              CROSS JOIN channel c ON c.id = candidate.channel_id
              WHERE programme_fts MATCH ?1 AND {vis}
@@ -263,7 +277,7 @@ pub async fn search_programmes(
                AND (?7 IS NULL OR c.group_id = ?7)
                AND (?8 = 0 OR c.id IN (SELECT channel_id FROM favourite WHERE deleted = 0))
              LIMIT ?5
-         ) f JOIN programme p ON p.rowid = f.rowid
+         ) ORDER BY start_utc, channel_id LIMIT ?4) f JOIN programme p ON p.rowid = f.rowid
          ORDER BY p.start_utc, p.channel_id LIMIT ?4"
     );
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
@@ -271,7 +285,7 @@ pub async fn search_programmes(
         .bind(from_utc)
         .bind(f.source_id)
         .bind(limit)
-        .bind(limit.max(256))
+        .bind(limit.max(5000))
         .bind(from_utc.saturating_add(7 * 86_400))
         .bind(f.group_id)
         .bind(f.favourites_only)
