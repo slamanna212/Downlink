@@ -792,11 +792,14 @@ impl Playback {
         };
         let start = rp.resume_secs.map(|s| s as f64);
         let mut plan = rp.plan.clone();
-        if plan.surface == downlink_core::source::Surface::Hls
-            && let Some((local, proxy)) = crate::hls_proxy::prepare(&plan).await
-        {
-            plan.url = local;
-            lock(&self.active).hls = Some(proxy);
+        if plan.surface == downlink_core::source::Surface::Hls {
+            let proxy = crate::hls_proxy::prepare(&plan, rp.tls_pin.as_ref())
+                .await
+                .inspect_err(|error| self.fail(error))?;
+            if let Some((local, proxy)) = proxy {
+                plan.url = local;
+                lock(&self.active).hls = Some(proxy);
+            }
         }
         self.start_media(
             &plan,

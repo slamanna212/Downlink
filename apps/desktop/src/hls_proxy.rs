@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use downlink_core::hls::{needs_playlist_rewrite, playlist_origin, rewrite_playlist};
 use downlink_core::source::PlayPlan;
+use downlink_core::{AppError, Result, tls};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -33,19 +34,20 @@ async fn fetch(
     client: &reqwest::Client,
     url: &str,
     headers: &[(String, String)],
-) -> Result<String, String> {
+) -> Result<String> {
     let mut req = client.get(url);
     for (k, v) in headers {
         req = req.header(k.as_str(), v.as_str());
     }
-    let resp = req.send().await.map_err(|e| e.without_url().to_string())?;
+    let resp = req.send().await?;
     if !resp.status().is_success() {
-        return Err(format!(
-            "playlist request answered {}",
-            resp.status().as_u16()
+        return Err(AppError::from_status(
+            resp.status().as_u16(),
+            None,
+            "that playlist",
         ));
     }
-    resp.text().await.map_err(|e| e.without_url().to_string())
+    Ok(resp.text().await?)
 }
 
 fn token() -> String {
@@ -58,8 +60,11 @@ fn token() -> String {
 
 /// If `plan` is an HLS playlist whose segment URLs need rewriting, start the proxy and return
 /// `(local playlist URL, proxy handle)`. `None` means play the plan as it is.
-pub async fn prepare(plan: &PlayPlan) -> Option<(String, HlsProxy)> {
-    let plan_url = Url::parse(&plan.url).ok()?;
+pub async fn prepare(
+    plan: &PlayPlan,
+    pin: Option<&tls::Pin>,
+) -> Result<Option<(String, HlsProxy)>> {
+    let plan_url = Url::parse(&plan.url)?;
     // The configured server base: scheme, host, port and any path prefix before `/proxy/`.
     let mut base = plan_url.clone();
     let prefix = plan_url
@@ -73,24 +78,27 @@ pub async fn prepare(plan: &PlayPlan) -> Option<(String, HlsProxy)> {
         .iter()
         .map(|(k, v)| (k.clone(), v.expose().to_owned()))
         .collect();
-    let client = downlink_core::http::authenticated(reqwest::Client::builder())
-        .user_agent(downlink_core::user_agent())
-        .timeout(Duration::from_secs(10))
-        .build()
-        .ok()?;
+    let client =
+        downlink_core::http::authenticated(tls::apply(reqwest::Client::builder(), &plan_url, pin)?)
+            .user_agent(downlink_core::user_agent())
+            .timeout(Duration::from_secs(10))
+            .build()?;
     let body = match fetch(&client, &plan.url, &headers).await {
         Ok(b) => b,
+        Err(e) if pin.is_some() => return Err(e),
         Err(e) => {
             tracing::debug!("playlist probe failed, playing the original URL: {e}");
-            return None;
+            return Ok(None);
         }
     };
-    let origin = playlist_origin(&body)?;
+    let Some(origin) = playlist_origin(&body) else {
+        return Ok(None);
+    };
     if !needs_playlist_rewrite(&base, &origin) {
-        return None;
+        return Ok(None);
     }
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await.ok()?;
-    let port = listener.local_addr().ok()?.port();
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let port = listener.local_addr()?.port();
     let tok = token();
     let local = format!("http://127.0.0.1:{port}/{tok}/index.m3u8");
     tracing::info!(
@@ -144,7 +152,7 @@ pub async fn prepare(plan: &PlayPlan) -> Option<(String, HlsProxy)> {
             });
         }
     });
-    Some((local, HlsProxy { task }))
+    Ok(Some((local, HlsProxy { task })))
 }
 
 #[cfg(test)]
@@ -201,7 +209,7 @@ mod tests {
         let pl = "#EXTM3U\n#EXTINF:6,\nhttp://other.invalid:9999/seg/1.ts\n#EXTINF:6,\nhttp://other.invalid:9999/seg/2.ts\n";
         let port = upstream(move |_| pl.to_owned()).await;
         let p = plan(format!("http://127.0.0.1:{port}/proxy/hls/rec/index.m3u8"));
-        let Some((local, _guard)) = prepare(&p).await else {
+        let Some((local, _guard)) = prepare(&p, None).await.expect("prepare") else {
             panic!("expected a proxy")
         };
         let (status, body) = get(&local).await;
@@ -225,8 +233,9 @@ mod tests {
             upstream(|port| format!("#EXTM3U\n#EXTINF:6,\nhttp://127.0.0.1:{port}/seg/1.ts\n"))
                 .await;
         assert!(
-            prepare(&plan(format!("http://127.0.0.1:{port}/x.m3u8")))
+            prepare(&plan(format!("http://127.0.0.1:{port}/x.m3u8")), None)
                 .await
+                .expect("prepare")
                 .is_none()
         );
     }
