@@ -804,15 +804,15 @@ impl DispatcharrClient {
                 None => format!("api/channels/recordings/{}/file/", rec.ext_id),
             }
         };
-        let url = if rel.starts_with("http://") || rel.starts_with("https://") {
-            let u = reqwest::Url::parse(&rel)?;
-            if u.origin() != self.base.origin() {
-                return Err(AppError::stream("This recording points at another server."));
-            }
-            u.to_string()
+        let url = if rel.starts_with("//") {
+            self.base.join(&rel)?
         } else {
-            self.base.join(rel.trim_start_matches('/'))?.to_string()
+            self.base.join(rel.trim_start_matches('/'))?
         };
+        if url.origin() != self.base.origin() {
+            return Err(AppError::stream("This recording points at another server."));
+        }
+        let url = url.to_string();
         let auth: (String, SecretString) = self.auth_header().await?;
         let mut redact = self.redaction_set();
         redact.add(auth.1.expose());

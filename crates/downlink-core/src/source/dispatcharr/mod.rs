@@ -1087,13 +1087,19 @@ impl DispatcharrClient {
             .iter()
             .find_map(|k| v.get(*k).and_then(|x| x.as_str()))
             .ok_or_else(|| AppError::server("The server did not return a catch-up address."))?;
-        let url = self.base.join(url)?.to_string();
-        self.remember_secret(&id);
+        let id = SessionId(id);
+        self.remember_secret(&id.0);
+        let url = match self.base.join(url) {
+            Ok(url) if url.origin() == self.base.origin() => url.to_string(),
+            _ => {
+                let _ = self.delete_catchup(&id).await;
+                return Err(AppError::stream(
+                    "This catch-up session points at another server.",
+                ));
+            }
+        };
         self.remember_secret(&url);
-        Ok(CatchupSession {
-            id: SessionId(id),
-            url,
-        })
+        Ok(CatchupSession { id, url })
     }
 
     pub async fn catchup_position(&self, session: &SessionId, position_secs: u64) -> Result<()> {
