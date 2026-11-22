@@ -13,7 +13,7 @@ use std::sync::{Arc, LazyLock};
 use tokio::sync::{Mutex as AsyncMutex, Semaphore};
 
 use async_trait::async_trait;
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, ImageError, ImageFormat, ImageReader, Limits};
 use sha2::{Digest, Sha256};
 
 use crate::error::{AppError, Result};
@@ -77,6 +77,9 @@ pub struct ImageBytes {
 pub const REVALIDATE_AFTER_SECS: i64 = 30 * 86_400;
 /// After a failed re-check, try again this much later rather than on every request.
 const REVALIDATE_RETRY_SECS: i64 = 86_400;
+const MAX_IMAGE_DIMENSION: u32 = 8192;
+const MAX_DECODE_BYTES: u64 = 64 * 1024 * 1024;
+static IMAGE_DECODERS: Semaphore = Semaphore::const_new(2);
 
 pub(crate) const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 static PUBLIC_IMAGE_FETCHES: Semaphore = Semaphore::const_new(8);
@@ -413,10 +416,17 @@ impl ImageCache {
         .await?;
         let (source_id, source_uuid, url) =
             origin.ok_or_else(|| AppError::local("That image is no longer available."))?;
-        let raw = fetcher.fetch_for(source_id, &source_uuid, &url).await?;
-        let encoded = tokio::task::spawn_blocking(move || encode_sizes(&raw.bytes))
+        let permit = IMAGE_DECODERS
+            .acquire()
             .await
-            .map_err(|_| AppError::local("Image processing was interrupted."))??;
+            .map_err(|_| AppError::local("The artwork cache is shutting down."))?;
+        let raw = fetcher.fetch_for(source_id, &source_uuid, &url).await?;
+        let encoded = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            encode_sizes(&raw.bytes)
+        })
+        .await
+        .map_err(|_| AppError::local("Image processing was interrupted."))??;
         let cache = self.clone();
         let hash = hash.to_owned();
         // Finish publication even when the requesting view cancels. A committed row must
@@ -673,8 +683,21 @@ impl ImageCache {
 /// Decode once, produce both sizes. Never upscales. PNG when the image has transparency (logos),
 /// JPEG otherwise.
 fn encode_sizes(bytes: &[u8]) -> Result<Vec<(ImageSize, Vec<u8>, &'static str)>> {
-    let img = image::load_from_memory(bytes)
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(AppError::media("That image is too large."));
+    }
+    let mut reader = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
         .map_err(|_| AppError::media("That image is not in a format Downlink can show."))?;
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(MAX_IMAGE_DIMENSION);
+    limits.max_image_height = Some(MAX_IMAGE_DIMENSION);
+    limits.max_alloc = Some(MAX_DECODE_BYTES);
+    reader.limits(limits);
+    let img = reader.decode().map_err(|error| match error {
+        ImageError::Limits(_) => AppError::media("That image is too large."),
+        _ => AppError::media("That image is not in a format Downlink can show."),
+    })?;
     let alpha = img.color().has_alpha();
     let mut out = Vec::new();
     for size in [ImageSize::Grid, ImageSize::Detail] {
