@@ -316,7 +316,7 @@ async fn handle(mut socket: TcpStream, upstream: Arc<Upstream>) {
         let mut started = false;
         if let Err(error) = serve(&mut socket, &upstream, url, root, range, &mut started).await {
             tracing::debug!("HLS resource request failed: {error}");
-            if error.source_id.is_some()
+            if error.source_id().is_some()
                 && let Some(app) = &upstream.app
                 && !upstream.certificate_reported.swap(true, Ordering::Relaxed)
             {

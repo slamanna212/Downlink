@@ -124,7 +124,7 @@ async fn a_pinned_certificate_connects_and_a_different_one_is_refused() {
     assert_eq!(e.code, ErrorCode::Auth, "{e:?}");
     assert!(e.blocking);
     assert_eq!(e.message, "The server's certificate changed.");
-    assert_eq!(e.source_id, Some(42));
+    assert_eq!(e.source_id(), Some(42));
 
     // Only an explicit new pin lets the new certificate in.
     let replacement = tls::Pin::new(&s.url(), fp("b.sha256"), Some(42)).unwrap();
@@ -191,7 +191,7 @@ async fn a_saved_https_source_does_not_enroll_a_missing_pin() {
     let error = svc.sync_source(id).await.unwrap_err();
     assert_eq!(error.code, ErrorCode::Auth);
     assert!(error.message.contains("no trusted certificate"));
-    assert_eq!(error.source_id, Some(id));
+    assert_eq!(error.source_id(), Some(id));
     assert!(svc.store().source(id).await.unwrap().tls_pin.is_none());
     svc.trust_new_certificate(id).await.unwrap();
     assert_eq!(
@@ -220,7 +220,7 @@ async fn pins_are_isolated_between_sources_on_the_same_host() {
     // Two sources can also trust different fingerprints at exactly the same address.
     let sibling = tls::Pin::new(&a.url(), fp("b.sha256"), Some(3)).unwrap();
     assert_eq!(
-        get(&a.url(), Some(&sibling)).await.unwrap_err().source_id,
+        get(&a.url(), Some(&sibling)).await.unwrap_err().source_id(),
         Some(3)
     );
     assert_eq!(get(&a.url(), Some(&pin_a)).await.unwrap(), "ok");

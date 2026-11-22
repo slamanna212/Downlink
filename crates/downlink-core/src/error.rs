@@ -54,10 +54,10 @@ pub struct AppError {
     pub blocking: bool,
     /// Source that requires a new trust decision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_id: Option<i64>,
+    source_id: Option<std::num::NonZeroI64>,
     /// Optional detail for stream failures (PLAN §4.9): `limit`, `codec` or `engine`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
+    pub reason: Option<Box<str>>,
     /// Codec name when `reason` is `codec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub codec: Option<String>,
@@ -131,14 +131,18 @@ impl AppError {
         codec: Option<String>,
         crash_id: Option<String>,
     ) -> Self {
-        self.reason = Some(reason.to_owned());
+        self.reason = Some(reason.into());
         self.codec = codec;
         self.crash_id = crash_id;
         self
     }
 
+    pub fn source_id(&self) -> Option<i64> {
+        self.source_id.map(std::num::NonZeroI64::get)
+    }
+
     pub(crate) fn with_source_id(mut self, source_id: Option<i64>) -> Self {
-        self.source_id = source_id;
+        self.source_id = source_id.and_then(std::num::NonZeroI64::new);
         self
     }
 

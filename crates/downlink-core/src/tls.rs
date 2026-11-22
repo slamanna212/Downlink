@@ -287,7 +287,7 @@ mod tests {
         }
         assert_eq!(
             certificate_error(&Wrap(Box::new(CertChanged(Some(1)))))
-                .and_then(|error| error.source_id),
+                .and_then(|error| error.source_id()),
             Some(1)
         );
         assert!(certificate_error(&Wrap(Box::new(std::fmt::Error))).is_none());
