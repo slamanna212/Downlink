@@ -18,6 +18,7 @@ spike = ["custom-protocol"]
 e2e = []
 
 [dependencies]
+tempfile = "3"
 downlink-player = { path = "../../crates/downlink-player" }
 downlink-platform = { path = "../../crates/downlink-platform" }
 downlink-core = { path = "../../crates/downlink-core" }

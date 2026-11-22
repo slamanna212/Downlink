@@ -112,13 +112,16 @@ pub async fn export_diagnostics(app: AppHandle, state: State<'_, AppState>) -> C
         .path()
         .download_dir()
         .unwrap_or_else(|_| std::env::temp_dir());
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let path = dir.join(format!("downlink-diagnostics-{secs}.zip"));
-    std::fs::write(&path, zip)
+    let mut out = tempfile::Builder::new()
+        .prefix("downlink-diagnostics-")
+        .suffix(".zip")
+        .tempfile_in(dir)
+        .map_err(|e| AppError::local(format!("Could not create the bundle: {e}")))?;
+    std::io::Write::write_all(out.as_file_mut(), &zip)
         .map_err(|e| AppError::local(format!("Could not save the bundle: {e}")))?;
+    let (_, path) = out
+        .keep()
+        .map_err(|e| AppError::local(format!("Could not keep the bundle: {e}")))?;
     Ok(path.display().to_string())
 }
 
