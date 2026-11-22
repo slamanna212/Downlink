@@ -150,6 +150,11 @@ const SET_REFRESH_DURING_PLAYBACK: &str = "refreshDuringPlayback";
 const GUIDE_FEED_KEY_PREFIX: &str = "guide_feed.";
 /// An unchanged XMLTV feed is still fully re-imported this often (retention pruning).
 const GUIDE_REINGEST_SECS: i64 = 24 * 3600;
+/// kv key: when old guide entries were last pruned, and how often that runs.
+const HOUSEKEEPING_KEY: &str = "housekeeping.guide_pruned_at";
+const HOUSEKEEPING_SECS: i64 = 24 * 3600;
+/// The light guide refresh re-fetches a windowed guide's visible hours once it is this old.
+pub const VISIBLE_GUIDE_REFRESH_SECS: i64 = 3600;
 
 pub struct ServiceConfig {
     /// Directory for the database and the image cache.
@@ -367,13 +372,16 @@ impl Service {
                     .as_deref()
                     .ok_or_else(|| AppError::local("This source has no address."))?;
                 let pw = self.secret_of(&row).await?;
-                Arc::new(XtreamClient::new(
-                    SourceId(row.id),
-                    base,
-                    row.username.as_deref().unwrap_or_default(),
-                    pw,
-                    row.tls_insecure,
-                )?)
+                Arc::new(
+                    XtreamClient::new(
+                        SourceId(row.id),
+                        base,
+                        row.username.as_deref().unwrap_or_default(),
+                        pw,
+                        row.tls_insecure,
+                    )?
+                    .with_store(self.store.clone()),
+                )
             }
             SourceKind::M3u => {
                 let location = match row.secret_ref.as_deref() {
@@ -805,14 +813,13 @@ impl Service {
 
     /// Periodic background refresh: sync every source whose data is older than the
     /// `autoRefreshHours` setting, one at a time. Offline sources are retried here too, so they
-    /// recover on their own; `auth_error` waits for the user, and sources still being probed or
+    /// recover on their own (probed every tick even when no sync is due or auto refresh is off);
+    /// `auth_error` waits for the user, and sources still being probed or
     /// synced are left alone. `playing`: something is on screen; with `refreshDuringPlayback`
     /// off the refresh waits for a later tick.
     pub async fn auto_refresh(&self, playing: bool) -> Result<()> {
         let prefs = self.refresh_prefs().await?;
-        if prefs.interval_secs == 0 || (playing && !prefs.during_playback) {
-            return Ok(());
-        }
+        let syncs_allowed = prefs.interval_secs > 0 && !(playing && !prefs.during_playback);
         let now = now_utc();
         for r in self.store.list_sources().await? {
             let status = self.status.lock().ok().and_then(|g| g.get(&r.id).copied());
@@ -820,12 +827,25 @@ impl Service {
                 status,
                 Some(SourceStatus::Connected | SourceStatus::Offline | SourceStatus::Stale)
             );
-            if !eligible || !sync_due(r.last_sync_at, now, prefs.interval_secs) {
+            if !eligible {
                 continue;
             }
-            tracing::info!(source_id = r.id, "auto refresh");
-            if let Err(e) = self.sync_source(r.id).await {
-                tracing::warn!(source_id = r.id, error = %e, "auto refresh failed");
+            if syncs_allowed && sync_due(r.last_sync_at, now, prefs.interval_secs) {
+                tracing::info!(source_id = r.id, "auto refresh");
+                if let Err(e) = self.sync_source(r.id).await {
+                    tracing::warn!(source_id = r.id, error = %e, "auto refresh failed");
+                }
+                continue;
+            }
+            // No sync now, but the server was unreachable: a cheap probe (not a stream) lets the
+            // source recover without waiting for the next sync, and the UI refetches what failed.
+            if status == Some(SourceStatus::Offline)
+                && matches!(self.probe_source(r.id).await, Ok(SourceStatus::Connected))
+            {
+                tracing::info!(source_id = r.id, "source reachable again");
+                if let Ok(c) = self.counts(r.id, CatalogChange::SyncComplete).await {
+                    self.emit(Event::CatalogUpdated(c));
+                }
             }
         }
         Ok(())
@@ -863,6 +883,15 @@ impl Service {
         }
         self.delete_secrets(&row.uuid);
         self.store.delete_source(source_id).await?;
+        // Cached lookups keyed by this source id, so a future source reusing it starts clean.
+        for prefix in [
+            crate::source::xtream::vod_cache_prefix(source_id),
+            format!("dpg:{source_id}:"),
+        ] {
+            if let Err(e) = self.store.meta_clear_prefix(&prefix).await {
+                tracing::warn!(error = %e, "clearing cached lookups failed");
+            }
+        }
         self.clients.write().await.remove(&source_id);
         self.dispatcharr.write().await.remove(&source_id);
         if let Ok(mut g) = self.status.lock() {
@@ -1170,6 +1199,67 @@ impl Service {
             .await
             {
                 tracing::warn!(error = %e, phase, "guide fill failed");
+            }
+        }
+        Ok(())
+    }
+
+    /// Light guide refresh between full syncs: re-fetch only the visible window (now - 2 h ..
+    /// now + 12 h) of windowed (Dispatcharr) guides whose guide was last fetched more than
+    /// [`VISIBLE_GUIDE_REFRESH_SECS`] ago, so late schedule changes reach now/next. Guide endpoints
+    /// only (never a stream); runs during playback too. Sources being synced are skipped.
+    pub async fn refresh_visible_guides(&self) -> Result<()> {
+        let now = now_utc();
+        for r in self.store.list_sources().await? {
+            let connected = matches!(
+                self.status.lock().ok().and_then(|g| g.get(&r.id).copied()),
+                Some(SourceStatus::Connected)
+            );
+            if !connected {
+                continue;
+            }
+            let last_ok = self
+                .store
+                .sync_state(r.id, "guide")
+                .await?
+                .and_then(|(ok, _)| ok);
+            if last_ok.is_some_and(|t| now - t < VISIBLE_GUIDE_REFRESH_SECS) {
+                continue;
+            }
+            let lock = self
+                .sync_locks
+                .lock()
+                .map_err(|_| AppError::local("Sync state is unavailable."))?
+                .entry(r.id)
+                .or_default()
+                .clone();
+            let Ok(_guard) = lock.try_lock() else {
+                continue; // a full sync is running and refreshes the guide itself
+            };
+            let client = match self.client(r.id).await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(source_id = r.id, error = %e, "guide refresh skipped");
+                    continue;
+                }
+            };
+            if client.kind() != SourceKind::Dispatcharr {
+                continue; // whole-feed guides are refreshed by the full sync
+            }
+            match epg::sync_guide(client.as_ref(), &self.store, r.id, epg::visible_window(now))
+                .await
+            {
+                Ok(c) => {
+                    tracing::info!(
+                        source_id = r.id,
+                        programmes = c.programmes,
+                        "guide refreshed"
+                    );
+                    self.emit(Event::CatalogUpdated(
+                        self.counts(r.id, CatalogChange::Guide).await?,
+                    ));
+                }
+                Err(e) => tracing::warn!(source_id = r.id, error = %e, "guide refresh failed"),
             }
         }
         Ok(())
@@ -2167,7 +2257,43 @@ impl Service {
         if let Err(e) = self.prune_metadata().await {
             tracing::warn!("metadata cache prune failed: {}", e.message);
         }
+        self.prune_guide().await;
         sessions::cleanup_on_startup(&self.store, self).await
+    }
+
+    /// Daily housekeeping from the background tick (startup does it too): old guide entries.
+    pub async fn housekeeping(&self) -> Result<()> {
+        let now = now_utc();
+        let last: Option<i64> = self
+            .store
+            .kv_get(HOUSEKEEPING_KEY)
+            .await?
+            .and_then(|(v, _)| v.parse().ok());
+        if last.is_none_or(|t| now - t >= HOUSEKEEPING_SECS) {
+            self.prune_guide().await;
+        }
+        Ok(())
+    }
+
+    /// Drop programmes past each source's retention window. Windowed (Dispatcharr) guides only
+    /// replace the windows they fetch, so without this their history would grow forever.
+    async fn prune_guide(&self) {
+        let now = now_utc();
+        match epg::prune(&self.store, now).await {
+            Ok(n) if n > 0 => tracing::info!(pruned = n, "old guide entries pruned"),
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("guide prune failed: {}", e.message);
+                return;
+            }
+        }
+        if let Err(e) = self
+            .store
+            .kv_set(HOUSEKEEPING_KEY, &now.to_string(), now)
+            .await
+        {
+            tracing::warn!("recording housekeeping time failed: {}", e.message);
+        }
     }
 
     /// Sleep / quit / navigate-away: stop every open session.
@@ -2185,6 +2311,13 @@ impl Service {
         let (hash, size) = parse_dlimg(dlimg_url)
             .ok_or_else(|| AppError::local("That image address is not valid."))?;
         self.images.get(&hash, size, &ServiceFetcher(self)).await
+    }
+
+    /// Re-download an image that [`Self::image`] served as `stale` (call it in the background).
+    pub async fn refresh_image(&self, dlimg_url: &str) -> Result<()> {
+        let (hash, _) = parse_dlimg(dlimg_url)
+            .ok_or_else(|| AppError::local("That image address is not valid."))?;
+        self.images.refresh(&hash, &ServiceFetcher(self)).await
     }
 
     // ---- diagnostics ------------------------------------------------------------------------

@@ -47,12 +47,23 @@ pub fn register<R: Runtime>(builder: Builder<R>) -> Builder<R> {
             };
             let resp = match (normalise_uri(&uri), service) {
                 (Some(u), Some(service)) => match service.image(&u).await {
-                    Ok(img) => Response::builder()
-                        .status(StatusCode::OK)
-                        .header(header::CONTENT_TYPE, img.mime)
-                        .header(header::CACHE_CONTROL, "max-age=86400")
-                        .body(img.bytes)
-                        .unwrap_or_default(),
+                    Ok(img) => {
+                        if img.stale {
+                            // Old copy shown now; a newer picture appears on the next load.
+                            let (svc, u) = (service.clone(), u.clone());
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) = svc.refresh_image(&u).await {
+                                    tracing::debug!("image re-check failed: {}", e.message);
+                                }
+                            });
+                        }
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header(header::CONTENT_TYPE, img.mime)
+                            .header(header::CACHE_CONTROL, "max-age=86400")
+                            .body(img.bytes)
+                            .unwrap_or_default()
+                    }
                     Err(e) => {
                         tracing::debug!("image request failed: {}", e.message);
                         error(StatusCode::NOT_FOUND)

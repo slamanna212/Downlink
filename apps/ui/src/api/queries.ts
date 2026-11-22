@@ -13,9 +13,15 @@ export function createQueryClient(): QueryClient {
   });
 }
 
-const GUIDE_QUERIES = ['guideProgrammes', 'nowNext', 'programmes', 'home', 'search'];
+/**
+ * Catalog lists only change when the backend says so (`catalog://updated`) or after one of our own
+ * mutations, both of which invalidate them; time-based refetching would only repeat the same read.
+ */
+const EVENT_DRIVEN = 5 * 60_000;
+
+const GUIDE_QUERIES = ['guideProgrammes', 'nowNext', 'programmes', 'home', 'search', 'palette'];
 const CHANNEL_QUERIES = ['sources', 'channels', 'channel', 'groups', 'counts', ...GUIDE_QUERIES];
-const FAVOURITE_QUERIES = ['channels', 'channel', 'counts', 'home', 'search'];
+const FAVOURITE_QUERIES = ['channels', 'channel', 'counts', 'home', 'search', 'palette'];
 const RECORDING_QUERIES = ['recordings', 'recordingRules', ...GUIDE_QUERIES];
 
 function invalidateCatalog(qc: QueryClient, keys?: string[]) {
@@ -33,7 +39,7 @@ const CATALOG_CHANGES: Record<NonNullable<CatalogUpdated['scope']>, string[] | u
   channels: CHANNEL_QUERIES,
   guide: ['sources', ...GUIDE_QUERIES],
   recordings: RECORDING_QUERIES,
-  syncComplete: [...FAVOURITE_QUERIES, 'sources', ...GUIDE_QUERIES],
+  syncComplete: [...FAVOURITE_QUERIES, 'sources', 'groups', ...GUIDE_QUERIES],
   sources: undefined,
 };
 
@@ -66,15 +72,16 @@ export function useUpdateWaiting(): boolean {
 }
 
 export const useSources = () =>
-  useQuery({ queryKey: ['catalog', 'sources'], queryFn: () => invoke('list_sources', {}) });
+  useQuery({ queryKey: ['catalog', 'sources'], queryFn: () => invoke('list_sources', {}), staleTime: EVENT_DRIVEN });
 
 export const useGroups = (sourceId?: number | null) =>
-  useQuery({ queryKey: ['catalog', 'groups', sourceId ?? null], queryFn: () => invoke('list_groups', { sourceId }) });
+  useQuery({ queryKey: ['catalog', 'groups', sourceId ?? null], queryFn: () => invoke('list_groups', { sourceId }), staleTime: EVENT_DRIVEN });
 
 export const channelQuery = (id: number | null) => ({
   queryKey: ['catalog', 'channel', id],
   queryFn: () => invoke('get_channel', { channelId: id! }),
   enabled: id != null,
+  staleTime: EVENT_DRIVEN,
 });
 
 export const useChannel = (id: number | null) => useQuery(channelQuery(id));
@@ -90,6 +97,7 @@ export function useChannelPages(
     queryFn: ({ pageParam }) => invoke('list_channels', { ...args, offset: pageParam, limit }),
     getNextPageParam: (last, _pages, offset) => last.length === limit ? offset + limit : undefined,
     enabled,
+    staleTime: EVENT_DRIVEN,
   });
 }
 
@@ -133,7 +141,7 @@ export const useSettings = () =>
   useQuery({ queryKey: ['settings'], queryFn: () => invoke('get_settings', {}), staleTime: Infinity });
 
 export const useCounts = () =>
-  useQuery({ queryKey: ['catalog', 'counts'], queryFn: () => invoke('get_counts', {}) });
+  useQuery({ queryKey: ['catalog', 'counts'], queryFn: () => invoke('get_counts', {}), staleTime: EVENT_DRIVEN });
 
 export const useHome = () =>
   useQuery({ queryKey: ['catalog', 'home'], queryFn: () => invoke('get_home', {}), refetchInterval: 60_000 });

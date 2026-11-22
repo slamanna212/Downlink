@@ -1,7 +1,7 @@
 //! Tolerant Xtream wire types: numbers as strings, missing fields, `null` for "none".
 
 use base64::Engine;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use crate::source::Programme;
@@ -81,7 +81,7 @@ pub struct LiveStreamDto {
     pub direct_source: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct VodStreamDto {
     #[serde(default, deserialize_with = "str_or_empty")]
     pub stream_id: String,
@@ -110,7 +110,7 @@ pub struct VodStreamDto {
     pub tmdb_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SeriesDto {
     #[serde(default, deserialize_with = "str_or_empty")]
     pub series_id: String,

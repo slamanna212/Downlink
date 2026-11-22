@@ -20,7 +20,7 @@ pub const AHEAD_DAYS: i64 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowKind {
-    /// now - 2 h .. now + 12 h; connect, then every 15 min.
+    /// now - 2 h .. now + 12 h; every full sync, and hourly in between (`refresh_visible_guides`).
     Visible,
     /// Back to the longest `catchup_days`, newest day first, after the visible window.
     CatchupHistory,

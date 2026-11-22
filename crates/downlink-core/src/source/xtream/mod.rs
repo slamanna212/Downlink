@@ -52,17 +52,48 @@ pub struct XtreamClient {
     vault: crate::vault::Vault,
     has_vod: std::sync::atomic::AtomicBool,
     vod_cache: tokio::sync::Mutex<VodCache>,
+    /// Persists the VOD lists across restarts; `None` for throwaway clients (connection tests).
+    store: Option<crate::store::Store>,
 }
 
 /// Xtream has no server-side paging or search: the movie and series lists are fetched whole and
-/// served from memory for a few minutes.
+/// served from memory, backed by `meta_cache` so a restart does not download them again.
 #[derive(Default)]
 struct VodCache {
-    movies: Option<(std::time::Instant, std::sync::Arc<Vec<VodStreamDto>>)>,
-    series: Option<(std::time::Instant, std::sync::Arc<Vec<SeriesDto>>)>,
+    movies: Slot<VodStreamDto>,
+    series: Slot<SeriesDto>,
 }
 
-const VOD_CACHE_TTL: Duration = Duration::from_secs(600);
+/// `(fetched_at UTC seconds, rows)`.
+type Slot<T> = Option<(i64, std::sync::Arc<Vec<T>>)>;
+
+/// How long a fetched movie or series list is served before it is fetched again (only when VOD is
+/// being browsed: nothing refetches it in the background). VOD libraries change slowly.
+const VOD_CACHE_TTL_SECS: i64 = 6 * 3600;
+
+/// A cached VOD row whose artwork URLs are templated through the vault before it is written to
+/// SQLite (rule 7: no credentials in the database).
+trait VodRow: serde::Serialize + serde::de::DeserializeOwned + Send + Sync {
+    fn template(&mut self, vault: &crate::vault::Vault);
+}
+
+impl VodRow for VodStreamDto {
+    fn template(&mut self, vault: &crate::vault::Vault) {
+        self.icon = self.icon.as_deref().map(|u| vault.template_url(u));
+    }
+}
+
+impl VodRow for SeriesDto {
+    fn template(&mut self, vault: &crate::vault::Vault) {
+        self.cover = self.cover.as_deref().map(|u| vault.template_url(u));
+        self.backdrop_path = self.backdrop_path.as_deref().map(|u| vault.template_url(u));
+    }
+}
+
+/// `meta_cache` key prefix for a source's VOD lists (trailing `:` so source 1 never matches 12).
+pub fn vod_cache_prefix(source_id: i64) -> String {
+    format!("xtvod:{source_id}:")
+}
 
 impl std::fmt::Debug for XtreamClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -156,7 +187,15 @@ impl XtreamClient {
             vault: crate::vault::Vault::new(),
             has_vod: std::sync::atomic::AtomicBool::new(false),
             vod_cache: tokio::sync::Mutex::new(VodCache::default()),
+            store: None,
         })
+    }
+
+    /// Keep the VOD lists in `store` as well as in memory.
+    #[must_use]
+    pub fn with_store(mut self, store: crate::store::Store) -> Self {
+        self.store = Some(store);
+        self
     }
 
     pub fn base_url(&self) -> &Url {
@@ -472,27 +511,80 @@ impl XtreamClient {
     }
 
     async fn movies_cached(&self) -> Result<std::sync::Arc<Vec<VodStreamDto>>> {
-        let mut g = self.vod_cache.lock().await;
-        if let Some((t, v)) = &g.movies
-            && t.elapsed() < VOD_CACHE_TTL
-        {
-            return Ok(v.clone());
-        }
-        let v = std::sync::Arc::new(self.vod_streams(None).await?);
-        g.movies = Some((std::time::Instant::now(), v.clone()));
-        Ok(v)
+        self.list_cached(VodKind::Movie, |c| &mut c.movies, || self.vod_streams(None))
+            .await
     }
 
     async fn series_cached(&self) -> Result<std::sync::Arc<Vec<SeriesDto>>> {
+        self.list_cached(VodKind::Series, |c| &mut c.series, || self.series(None))
+            .await
+    }
+
+    /// Memory, then `meta_cache`, then the server. A failed fetch serves the newest stale copy.
+    async fn list_cached<T, F, Fut>(
+        &self,
+        kind: VodKind,
+        slot: impl Fn(&mut VodCache) -> &mut Slot<T>,
+        fetch: F,
+    ) -> Result<std::sync::Arc<Vec<T>>>
+    where
+        T: VodRow + Clone,
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<Vec<T>>>,
+    {
+        let now = crate::sync::now_utc();
         let mut g = self.vod_cache.lock().await;
-        if let Some((t, v)) = &g.series
-            && t.elapsed() < VOD_CACHE_TTL
+        if let Some((at, v)) = slot(&mut g)
+            && now - *at < VOD_CACHE_TTL_SECS
         {
             return Ok(v.clone());
         }
-        let v = std::sync::Arc::new(self.series(None).await?);
-        g.series = Some((std::time::Instant::now(), v.clone()));
-        Ok(v)
+        let key = format!(
+            "{}{}",
+            vod_cache_prefix(self.id.0),
+            if kind == VodKind::Movie {
+                "movie"
+            } else {
+                "series"
+            }
+        );
+        if slot(&mut g).is_none()
+            && let Some(store) = &self.store
+            && let Ok(Some((body, at))) = store.meta_get(&key).await
+            && let Ok(rows) = serde_json::from_str::<Vec<T>>(&body)
+        {
+            // Too old: kept only as the fallback for a failed fetch below.
+            let v = std::sync::Arc::new(rows);
+            *slot(&mut g) = Some((at, v.clone()));
+            if now - at < VOD_CACHE_TTL_SECS {
+                return Ok(v);
+            }
+        }
+        match fetch().await {
+            Ok(mut rows) => {
+                rows.iter_mut().for_each(|r| r.template(&self.vault));
+                if let Some(store) = &self.store {
+                    match serde_json::to_string(&rows) {
+                        Ok(body) => {
+                            if let Err(e) = store.meta_put(&key, &body, now).await {
+                                tracing::warn!(error = %e, "saving the VOD list failed");
+                            }
+                        }
+                        Err(e) => tracing::warn!(error = %e, "saving the VOD list failed"),
+                    }
+                }
+                let v = std::sync::Arc::new(rows);
+                *slot(&mut g) = Some((now, v.clone()));
+                Ok(v)
+            }
+            Err(e) => match slot(&mut g) {
+                Some((_, v)) => {
+                    tracing::warn!(error = %e, "serving the cached VOD list");
+                    Ok(v.clone())
+                }
+                None => Err(e),
+            },
+        }
     }
 
     async fn category_counts(

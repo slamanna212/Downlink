@@ -520,7 +520,15 @@ pub struct PlexServer {
     http: reqwest::Client,
     secrets: RedactionSet,
     index: tokio::sync::Mutex<Option<(Instant, Arc<Index>)>>,
+    /// Per show: `(season, episode) -> rating key`, so zapping between a show's episodes asks the
+    /// server once per [`INDEX_TTL`].
+    episodes: tokio::sync::Mutex<HashMap<String, (Instant, Arc<EpisodeKeys>)>>,
 }
+
+type EpisodeKeys = HashMap<(i64, i64), String>;
+
+/// Shows whose episode lists are kept at once; the oldest is dropped beyond this.
+const EPISODE_CACHE_SHOWS: usize = 32;
 
 impl std::fmt::Debug for PlexServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -552,6 +560,7 @@ impl PlexServer {
             http: http(Duration::from_secs(20))?,
             secrets,
             index: tokio::sync::Mutex::new(None),
+            episodes: tokio::sync::Mutex::new(HashMap::new()),
         })
     }
 
@@ -692,6 +701,7 @@ impl PlexServer {
     /// Forget the index so the next lookup rebuilds it.
     pub async fn invalidate(&self) {
         *self.index.lock().await = None;
+        self.episodes.lock().await.clear();
     }
 
     async fn find_episode(
@@ -700,14 +710,33 @@ impl PlexServer {
         season: i64,
         episode: i64,
     ) -> Result<Option<String>> {
+        if let Some((at, keys)) = self.episodes.lock().await.get(show_key)
+            && at.elapsed() < INDEX_TTL
+        {
+            return Ok(keys.get(&(season, episode)).cloned());
+        }
         let leaves: ItemsMc = self
             .get(&format!("library/metadata/{show_key}/allLeaves"), &[])
             .await?;
-        Ok(leaves
-            .items
-            .into_iter()
-            .find(|e| e.parent_index == Some(season) && e.index == Some(episode))
-            .and_then(|e| e.rating_key))
+        let mut keys = EpisodeKeys::new();
+        for e in leaves.items {
+            if let (Some(s), Some(n), Some(k)) = (e.parent_index, e.index, e.rating_key) {
+                keys.entry((s, n)).or_insert(k); // first wins, as a linear search would
+            }
+        }
+        let found = keys.get(&(season, episode)).cloned();
+        let mut g = self.episodes.lock().await;
+        if g.len() >= EPISODE_CACHE_SHOWS
+            && !g.contains_key(show_key)
+            && let Some(oldest) = g
+                .iter()
+                .min_by_key(|(_, (at, _))| *at)
+                .map(|(k, _)| k.clone())
+        {
+            g.remove(&oldest);
+        }
+        g.insert(show_key.to_owned(), (Instant::now(), Arc::new(keys)));
+        Ok(found)
     }
 
     /// Find what `q` describes. Movies and episodes with source ids match on guid first; a title

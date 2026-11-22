@@ -1422,3 +1422,36 @@ async fn live_source_position_reads_the_server_stream_list_and_status() {
     assert_eq!(e.svc.live_source_position(one).await.unwrap(), (2, 2));
     assert_eq!(e.svc.source_position(one).await.unwrap().0, 2);
 }
+
+/// Between full syncs, a Dispatcharr guide's visible hours are re-fetched once they are an hour
+/// old, with a single grid request (no stream endpoints).
+#[tokio::test]
+async fn visible_guide_refreshes_only_once_it_is_an_hour_old() {
+    let (server, e, _sid) = added().await;
+    let grid_requests = || async {
+        server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.url.path() == "/api/epg/grid/")
+            .count()
+    };
+    let after_sync = grid_requests().await;
+    e.svc.refresh_visible_guides().await.unwrap();
+    assert_eq!(
+        grid_requests().await,
+        after_sync,
+        "just synced: nothing to do"
+    );
+
+    sqlx::query("UPDATE sync_state SET last_ok = ? WHERE entity = 'guide'")
+        .bind(downlink_core::sync::now_utc() - 2 * 3600)
+        .execute(e.svc.store().pool())
+        .await
+        .unwrap();
+    e.svc.refresh_visible_guides().await.unwrap();
+    assert_eq!(grid_requests().await, after_sync + 1);
+    e.svc.refresh_visible_guides().await.unwrap();
+    assert_eq!(grid_requests().await, after_sync + 1, "fresh again");
+}

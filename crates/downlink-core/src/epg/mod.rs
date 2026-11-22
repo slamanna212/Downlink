@@ -192,14 +192,18 @@ pub async fn sync_current(src: &dyn Source, store: &Store, source_id: i64) -> Re
     store.upsert_programmes(&rows).await
 }
 
-/// Prune programmes older than the retention cutoff.
+/// Prune programmes older than each source's retention cutoff (its longest catch-up, capped at
+/// 7 days). The visible window's past two hours are always kept so the guide never loses the
+/// programme that just ended. Windowed (Dispatcharr) guides only replace the windows they fetch,
+/// so without this their history would grow forever.
 pub async fn prune(store: &Store, now: i64) -> Result<u64> {
-    let max_days: Option<i64> = sqlx::query_scalar("SELECT max(catchup_days) FROM channel")
-        .fetch_one(store.pool())
-        .await?;
-    store
-        .prune_programmes(retention_cutoff(now, max_days.unwrap_or(0)))
-        .await
+    let mut total = 0;
+    for s in store.list_sources().await? {
+        let days = refresh::max_catchup_days(store, s.id).await?;
+        let cutoff = retention_cutoff(now, days).min(visible_window(now).start_utc);
+        total += store.prune_source_programmes(s.id, cutoff).await?;
+    }
+    Ok(total)
 }
 
 #[cfg(test)]

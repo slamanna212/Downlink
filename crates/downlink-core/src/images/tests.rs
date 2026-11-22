@@ -229,3 +229,94 @@ async fn lru_eviction_drops_oldest_first() {
             .exists()
     );
 }
+
+struct Failing;
+
+#[async_trait]
+impl ImageFetcher for Failing {
+    async fn fetch(&self, _s: i64, _u: &str) -> Result<RawImage> {
+        Err(AppError::network("offline"))
+    }
+}
+
+async fn age_entries(cache: &ImageCache, secs: i64) {
+    sqlx::query("UPDATE image_cache SET fetched_at = ?")
+        .bind(now_utc() - secs)
+        .execute(cache.store.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn old_images_are_served_stale_then_rechecked_once() {
+    let (cache, sid, _d) = setup(DEFAULT_MAX_BYTES).await;
+    let dl = cache
+        .register(sid, "https://d.test/logo.png", ImageSize::Grid)
+        .await
+        .unwrap();
+    let (hash, size) = parse_dlimg(&dl).unwrap();
+    let logo = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(64, 64, true),
+    };
+    assert!(!cache.get(&hash, size, &logo).await.unwrap().stale);
+    assert!(!cache.get(&hash, size, &logo).await.unwrap().stale);
+
+    age_entries(&cache, REVALIDATE_AFTER_SECS + 60).await;
+    let old = cache.get(&hash, size, &logo).await.unwrap();
+    assert!(
+        old.stale && old.mime == "image/png",
+        "old copy still served"
+    );
+    assert_eq!(
+        logo.calls.load(Ordering::SeqCst),
+        1,
+        "serving stale fetches nothing"
+    );
+
+    // The picture changed behind the same URL (now opaque: re-encoded as JPEG).
+    let replaced = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(64, 64, false),
+    };
+    cache.refresh(&hash, &replaced).await.unwrap();
+    cache.refresh(&hash, &replaced).await.unwrap();
+    assert_eq!(
+        replaced.calls.load(Ordering::SeqCst),
+        1,
+        "fresh after one re-check"
+    );
+    let new = cache.get(&hash, size, &replaced).await.unwrap();
+    assert!(!new.stale && new.mime == "image/jpeg");
+    let pngs = std::fs::read_dir(cache.dir().join(&hash[..2]))
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|x| x == "png")
+        })
+        .count();
+    assert_eq!(pngs, 0, "the replaced files are removed");
+}
+
+#[tokio::test]
+async fn a_failed_recheck_keeps_the_copy_and_waits_a_day() {
+    let (cache, sid, _d) = setup(DEFAULT_MAX_BYTES).await;
+    let dl = cache
+        .register(sid, "https://d.test/logo2.png", ImageSize::Grid)
+        .await
+        .unwrap();
+    let (hash, size) = parse_dlimg(&dl).unwrap();
+    let logo = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(64, 64, true),
+    };
+    cache.get(&hash, size, &logo).await.unwrap();
+    age_entries(&cache, REVALIDATE_AFTER_SECS + 60).await;
+    assert!(cache.refresh(&hash, &Failing).await.is_err());
+    let hit = cache.get(&hash, size, &logo).await.unwrap();
+    assert!(!hit.stale, "not retried on every request");
+    assert_eq!(hit.mime, "image/png", "cached copy kept");
+}

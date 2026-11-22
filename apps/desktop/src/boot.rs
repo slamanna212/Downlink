@@ -140,6 +140,13 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
                 if let Err(e) = s.auto_refresh(is_playing(&h_refresh)).await {
                     tracing::warn!("auto refresh failed: {}", e.message);
                 }
+                // Between full syncs: the guide's visible hours, once they are an hour old.
+                if let Err(e) = s.refresh_visible_guides().await {
+                    tracing::warn!("guide refresh failed: {}", e.message);
+                }
+                if let Err(e) = s.housekeeping().await {
+                    tracing::warn!("housekeeping failed: {}", e.message);
+                }
             }
         });
     }

@@ -63,7 +63,16 @@ pub trait ImageFetcher: Send + Sync {
 pub struct ImageBytes {
     pub bytes: Vec<u8>,
     pub mime: &'static str,
+    /// Served from a copy older than [`REVALIDATE_AFTER_SECS`]: the caller should call
+    /// [`ImageCache::refresh`] in the background (the cached copy is still shown meanwhile).
+    pub stale: bool,
 }
+
+/// Cached images are downloaded again after this long, in case the picture changed behind the
+/// same URL.
+pub const REVALIDATE_AFTER_SECS: i64 = 30 * 86_400;
+/// After a failed re-check, try again this much later rather than on every request.
+const REVALIDATE_RETRY_SECS: i64 = 86_400;
 
 /// Unauthenticated fetch of a public image URL (M3U/Xtream logos). No credentials are sent.
 pub async fn fetch_public(url: &str, insecure_tls: bool) -> Result<RawImage> {
@@ -127,6 +136,8 @@ struct CacheLocks {
     // A bounded set of locks coalesces duplicate downloads, including requests for different sizes.
     fetches: [AsyncMutex<()>; 64],
     writes: AsyncMutex<()>,
+    /// Hashes with a background re-check in flight, so a grid of stale logos refreshes each once.
+    refreshing: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl CacheLocks {
@@ -134,6 +145,7 @@ impl CacheLocks {
         Self {
             fetches: std::array::from_fn(|_| AsyncMutex::new(())),
             writes: AsyncMutex::new(()),
+            refreshing: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
     }
 
@@ -219,12 +231,12 @@ impl ImageCache {
 
     async fn cached(&self, hash: &str, size: ImageSize) -> Result<Option<ImageBytes>> {
         let key = Self::key(hash, size);
-        let row: Option<(String, i64)> =
-            sqlx::query_as("SELECT path, last_used FROM image_cache WHERE key = ?")
+        let row: Option<(String, i64, i64)> =
+            sqlx::query_as("SELECT path, last_used, fetched_at FROM image_cache WHERE key = ?")
                 .bind(&key)
                 .fetch_optional(self.store.pool())
                 .await?;
-        let Some((rel, last_used)) = row else {
+        let Some((rel, last_used, fetched_at)) = row else {
             return Ok(None);
         };
         let Ok(bytes) = tokio::fs::read(self.dir.join(&rel)).await else {
@@ -243,6 +255,7 @@ impl ImageCache {
         Ok(Some(ImageBytes {
             bytes,
             mime: Self::mime_of(&rel),
+            stale: fetched_at <= now - REVALIDATE_AFTER_SECS,
         }))
     }
 
@@ -260,6 +273,60 @@ impl ImageCache {
         if let Some(hit) = self.cached(hash, size).await? {
             return Ok(hit);
         }
+        self.download(hash, size, fetcher).await
+    }
+
+    /// Download `hash` again (it was served [`ImageBytes::stale`]) and replace both sizes. A
+    /// failure keeps the cached copy and waits [`REVALIDATE_RETRY_SECS`] before trying again.
+    /// Concurrent calls for the same image do the work once.
+    pub async fn refresh(&self, hash: &str, fetcher: &dyn ImageFetcher) -> Result<()> {
+        let claimed = self
+            .locks
+            .refreshing
+            .lock()
+            .map(|mut g| g.insert(hash.to_owned()))
+            .unwrap_or(false);
+        if !claimed {
+            return Ok(());
+        }
+        let r = async {
+            let _fetch = self.locks.fetch(hash).lock().await;
+            let fresh: Option<i64> =
+                sqlx::query_scalar("SELECT min(fetched_at) FROM image_cache WHERE key IN (?, ?)")
+                    .bind(Self::key(hash, ImageSize::Grid))
+                    .bind(Self::key(hash, ImageSize::Detail))
+                    .fetch_one(self.store.pool())
+                    .await?;
+            if fresh.is_some_and(|t| t > now_utc() - REVALIDATE_AFTER_SECS) {
+                return Ok(()); // refreshed by someone else meanwhile
+            }
+            if let Err(e) = self.download(hash, ImageSize::Grid, fetcher).await {
+                let retry_at = now_utc() - REVALIDATE_AFTER_SECS + REVALIDATE_RETRY_SECS;
+                sqlx::query("UPDATE image_cache SET fetched_at = ? WHERE key IN (?, ?)")
+                    .bind(retry_at)
+                    .bind(Self::key(hash, ImageSize::Grid))
+                    .bind(Self::key(hash, ImageSize::Detail))
+                    .execute(self.store.pool())
+                    .await?;
+                return Err(e);
+            }
+            Ok(())
+        }
+        .await;
+        if let Ok(mut g) = self.locks.refreshing.lock() {
+            g.remove(hash);
+        }
+        r
+    }
+
+    /// Fetch the image behind `hash`, store both sizes and return `size`. The caller holds the
+    /// hash's fetch lock.
+    async fn download(
+        &self,
+        hash: &str,
+        size: ImageSize,
+        fetcher: &dyn ImageFetcher,
+    ) -> Result<ImageBytes> {
         let origin: Option<(i64, String)> =
             sqlx::query_as("SELECT source_id, url FROM image_origin WHERE hash = ?")
                 .bind(hash)
@@ -280,7 +347,10 @@ impl ImageCache {
             if let Some(parent) = abs.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
-            tokio::fs::write(&abs, &bytes).await?;
+            // Write then rename, so a reader never sees half of a replaced (re-checked) file.
+            let tmp = abs.with_extension(format!("{ext}.part"));
+            tokio::fs::write(&tmp, &bytes).await?;
+            tokio::fs::rename(&tmp, &abs).await?;
             entries.push((
                 Self::key(hash, sz),
                 rel.clone(),
@@ -290,15 +360,25 @@ impl ImageCache {
                 wanted = Some(ImageBytes {
                     bytes,
                     mime: Self::mime_of(&rel),
+                    stale: false,
                 });
             }
         }
+        // A re-download may change the format (png <-> jpg): the old file is removed below.
+        let old_paths: Vec<String> =
+            sqlx::query_scalar("SELECT path FROM image_cache WHERE key IN (?, ?)")
+                .bind(Self::key(hash, ImageSize::Grid))
+                .bind(Self::key(hash, ImageSize::Detail))
+                .fetch_all(self.store.pool())
+                .await?;
         let mut tx = self.store.pool().begin().await?;
-        for (key, rel, bytes) in entries {
+        for (key, rel, bytes) in &entries {
             sqlx::query(
-                "INSERT INTO image_cache (key, path, bytes, last_used) VALUES (?, ?, ?, ?)
+                "INSERT INTO image_cache (key, path, bytes, last_used, fetched_at)
+                 VALUES (?1, ?2, ?3, ?4, ?4)
                  ON CONFLICT(key) DO UPDATE SET path = excluded.path, bytes = excluded.bytes,
-                                                last_used = excluded.last_used",
+                                                last_used = excluded.last_used,
+                                                fetched_at = excluded.fetched_at",
             )
             .bind(key)
             .bind(rel)
@@ -308,6 +388,12 @@ impl ImageCache {
             .await?;
         }
         tx.commit().await?;
+        for old in old_paths
+            .iter()
+            .filter(|p| !entries.iter().any(|(_, rel, _)| rel == *p))
+        {
+            let _ = tokio::fs::remove_file(self.dir.join(old)).await;
+        }
         self.evict_locked().await?;
         wanted.ok_or_else(|| AppError::media("The image could not be prepared."))
     }
