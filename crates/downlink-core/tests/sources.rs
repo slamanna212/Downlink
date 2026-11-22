@@ -1156,3 +1156,72 @@ async fn changed_channel_list_reimports_an_unchanged_guide() {
         "channel inputs changed: imported"
     );
 }
+
+#[tokio::test]
+async fn unavailable_playlist_include_preserves_existing_channels() {
+    let server = MockServer::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let playlist = dir.path().join("top.m3u");
+    std::fs::write(
+        &playlist,
+        format!(
+            "#EXTM3U\n#EXTINF:-1 type=\"playlist\",Included\n{}/child.m3u\n",
+            server.uri()
+        ),
+    )
+    .unwrap();
+    serve_text(&server, "/child.m3u", fx_text("m3u/basic.m3u")).await;
+
+    let e = env().await;
+    let src = e
+        .svc
+        .add_source(m3u_input(playlist.to_str().unwrap(), None))
+        .await
+        .unwrap();
+    let before = names(&e).await;
+    assert!(!before.is_empty());
+
+    server.reset().await;
+    assert!(e.svc.sync_source(src.id).await.is_err());
+    assert_eq!(names(&e).await, before);
+}
+
+#[tokio::test]
+async fn truncated_guide_does_not_replace_cached_validators() {
+    let server = MockServer::start().await;
+    serve_text(&server, "/get.php", fx_text("m3u/basic.m3u")).await;
+    Mock::given(method("GET"))
+        .and(path("/epg.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("etag", "\"v1\"")
+                .set_body_string(guide_xml("Now On One")),
+        )
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    let e = env().await;
+    let sid = add_m3u(&server, &e).await;
+    let state_key = format!("guide_feed.{sid}");
+    let before = e.svc.store().kv_get(&state_key).await.unwrap().unwrap();
+
+    let mut body = guide_xml("Updated programme");
+    body.truncate(body.len() - "</tv>".len());
+    Mock::given(method("GET"))
+        .and(path("/epg.xml"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("etag", "\"v2\"")
+                .set_body_string(body),
+        )
+        .with_priority(1)
+        .mount(&server)
+        .await;
+
+    e.svc.sync_source(sid).await.unwrap();
+    assert_eq!(
+        e.svc.store().kv_get(&state_key).await.unwrap(),
+        Some(before)
+    );
+    assert!(programme_count(&e).await >= 1);
+}

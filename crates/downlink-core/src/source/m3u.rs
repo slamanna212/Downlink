@@ -14,7 +14,7 @@ use super::{
 };
 use crate::catchup::template::{CatchupTemplate, ExpandCtx, expand};
 use crate::error::{AppError, Result};
-use crate::m3u::load::{Fetcher, HttpFetcher, Location, load};
+use crate::m3u::load::{Fetcher, HttpFetcher, Location, load_complete};
 use crate::m3u::{M3uEntry, Playlist};
 use crate::normalise::{stable_ids, synthetic_id};
 use crate::redact::RedactionSet;
@@ -108,7 +108,7 @@ impl M3uSource {
         // later refresh re-reads the playlist.
         let reuse = g.is_some() && self.reuse_once.swap(false, Ordering::Relaxed);
         if (refresh && !reuse) || g.is_none() {
-            let (pl, st) = load(&self.location, self.fetcher.as_ref()).await?;
+            let (pl, st) = load_complete(&self.location, self.fetcher.as_ref()).await?;
             tracing::info!(
                 entries = pl.entries.len(),
                 dropped = st.parse.dropped,

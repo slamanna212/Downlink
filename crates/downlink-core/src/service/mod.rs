@@ -111,7 +111,8 @@ async fn file_sha256(path: PathBuf) -> Result<String> {
     tokio::task::spawn_blocking(move || -> Result<String> {
         use sha2::{Digest, Sha256};
         use std::io::Read;
-        let mut f = std::fs::File::open(&path)?;
+        let file = crate::util::open_import_file(&path)?;
+        let mut f = crate::util::BoundedReader::new(file, crate::util::MAX_IMPORT_FILE_BYTES);
         let mut h = Sha256::new();
         let mut buf = vec![0u8; 256 * 1024];
         loop {
@@ -1018,7 +1019,15 @@ impl Service {
                 validators,
                 default_tz,
             })) => {
-                let content_hash = file_sha256(file.path().to_path_buf()).await?;
+                let content_hash = match file_sha256(file.path().to_path_buf()).await {
+                    Ok(hash) => hash,
+                    Err(e) => {
+                        self.store
+                            .set_sync_error(source_id, "guide", &e.message)
+                            .await?;
+                        return Err(e);
+                    }
+                };
                 let inputs_hash = self.guide_inputs_hash(source_id).await?;
                 if let Some(p) = prev.as_ref()
                     && p.content_hash == content_hash
@@ -1119,6 +1128,15 @@ impl Service {
             &|n| self.progress(source_id, "guide", n, 0),
         )
         .await;
+        let r = r.and_then(|rep| {
+            if rep.truncated {
+                Err(AppError::server(
+                    "The guide ended before it finished loading.",
+                ))
+            } else {
+                Ok(rep)
+            }
+        });
         match r {
             Ok(rep) => {
                 tracing::info!(

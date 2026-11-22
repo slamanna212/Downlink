@@ -128,6 +128,11 @@ async fn window_bounds_the_stored_programmes() {
 async fn truncated_feed_keeps_what_it_has_and_never_deletes() {
     let (store, sid) = setup(&[("1", Some("t.test"), None, "T")]).await;
     let c = store.channel_by_ext(sid, "1").await.unwrap().unwrap().id;
+    sqlx::query("UPDATE channel SET epg_match = 'manual' WHERE id = ?")
+        .bind(c)
+        .execute(store.pool())
+        .await
+        .unwrap();
     // A future programme already in the cache survives a bad refresh.
     store
         .upsert_programmes(&[downlink_core::store::ProgrammeRow {
@@ -151,6 +156,7 @@ async fn truncated_feed_keeps_what_it_has_and_never_deletes() {
     assert_eq!(r.programmes, 1);
     let all = downlink_core::epg::window(&store, &[c], ALL).await.unwrap();
     assert_eq!(all.len(), 2);
+    assert_eq!(epg_match(&store, sid, "1").await, "manual");
 }
 
 #[tokio::test]

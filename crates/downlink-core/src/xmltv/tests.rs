@@ -226,3 +226,38 @@ fn compression_errors_are_not_reported_as_successful_xmltv() {
     assert!(parse_channels(file.path()).is_err());
     assert!(parse_programmes(file.path(), Tz::UTC, |_| {}).is_err());
 }
+
+#[test]
+fn xmltv_limits_fields_events_and_nesting() {
+    let path = tempfile::NamedTempFile::new().unwrap();
+    let field = format!(
+        "<tv><channel id=\"test\"><display-name>{}</display-name></channel></tv>",
+        "x".repeat(MAX_FIELD_BYTES + 1)
+    );
+    let event = format!("<tv><!--{}--></tv>", "x".repeat(MAX_EVENT_BYTES + 1));
+    let nested = format!(
+        "<tv>{}{}</tv>",
+        "<n>".repeat(MAX_NESTING),
+        "</n>".repeat(MAX_NESTING)
+    );
+
+    std::fs::write(path.path(), field).unwrap();
+    assert_eq!(
+        parse_channels(path.path()).unwrap_err().kind(),
+        io::ErrorKind::FileTooLarge
+    );
+
+    for payload in [event, nested] {
+        std::fs::write(path.path(), payload).unwrap();
+        assert_eq!(
+            parse_channels(path.path()).unwrap_err().kind(),
+            io::ErrorKind::FileTooLarge
+        );
+        assert_eq!(
+            parse_programmes(path.path(), Tz::UTC, |_| {})
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::FileTooLarge
+        );
+    }
+}

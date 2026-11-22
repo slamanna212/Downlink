@@ -163,3 +163,34 @@ fn split_pipe() {
     assert_eq!(u, "http://x/y");
     assert_eq!(h, [("User-Agent".to_owned(), "Z".to_owned())]);
 }
+
+#[test]
+fn parse_budget_is_shared_between_files() {
+    let two_lines = b"#EXTINF:-1,A\r\nhttp://stream.test/a\r\n";
+    let mut budget = ParseBudget {
+        bytes: (two_lines.len() * 2) as u64,
+        entries: 2,
+    };
+    assert_eq!(
+        parse_with_budget(&two_lines[..], &mut budget)
+            .unwrap()
+            .entries
+            .len(),
+        1
+    );
+    assert_eq!(
+        parse_with_budget(&two_lines[..], &mut budget)
+            .unwrap()
+            .entries
+            .len(),
+        1
+    );
+    assert_eq!(budget.bytes, 0);
+    assert_eq!(budget.entries, 0);
+    assert_eq!(
+        parse_with_budget(&two_lines[..], &mut budget)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::FileTooLarge
+    );
+}
