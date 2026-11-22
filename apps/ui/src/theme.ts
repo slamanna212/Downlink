@@ -149,6 +149,8 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-focus-ring': focusRing,
     '--dl-focus-ring-tv': focusRingTv,
     '--dl-focus-ring-video': focusRingVideo,
+    // third-party brand: Plex mark only (DESIGN §2)
+    '--dl-plex': '#E5A00D',
     // video
     '--dl-on-video': '#F3F6F9',
     '--dl-scrim': 'linear-gradient(to top, rgb(5 6 7 / 0.92), rgb(5 6 7 / 0.6) 55%, rgb(5 6 7 / 0))',

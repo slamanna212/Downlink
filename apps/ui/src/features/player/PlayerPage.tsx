@@ -11,7 +11,6 @@ import {
   IconMaximize,
   IconMinimize,
   IconArrowsMaximize,
-  IconExternalLink,
   IconPictureInPicture,
   IconLayoutGrid,
   IconPlayerPause,
@@ -31,6 +30,7 @@ import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
+import { IconPlex } from '../../components/IconPlex/IconPlex';
 import { Icon } from '../../components/Icon/Icon';
 import { notifyError, notifyInfo } from '../../components/Notify/notify';
 import { SeekBar } from '../../components/SeekBar/SeekBar';
@@ -695,15 +695,13 @@ export function PlayerPage() {
                 />
               )}
               {mediaMatch && (
-                <DLButton
+                <DLIconButton
+                  label={t('player.openInPlex.help', { title: mediaMatch.title, server: mediaMatch.serverName })}
+                  icon={IconPlex}
                   variant="overlay"
                   size="lg"
-                  icon={IconExternalLink}
-                  aria-label={t('player.openInPlex.help', { title: mediaMatch.title, server: mediaMatch.serverName })}
                   onClick={() => void invoke('media_server_open', { url: mediaMatch.url }).catch(notifyError)}
-                >
-                  {t('player.openInPlex')}
-                </DLButton>
+                />
               )}
               <DLIconButton
                 label={t('player.info')}

@@ -45,6 +45,10 @@ The reference uses synthetic channel names. Where this file and the reference di
 catch-up, playing row, links) · `--dl-on-accent #120A33` (text on accent fill, never elsewhere) ·
 `--dl-accent-bar` (accent at 55%: info panel buffer graph bars only; a data mark, not a tint).
 
+### Third-party brand
+- Plex `--dl-plex` (`#E5A00D`): the Plex chevron mark on the player's open-in-Plex icon button (`IconPlex`). A
+  brand colour exception to the accent rules; used nowhere else.
+
 ### Status
 - Live `#F2495C`: dot, now line, REC dot. Text `#FF8B97` on 18% tint. Never solid red with white text.
 - OK `#34D399` (text `#6EE7B7`): connected, test passed.

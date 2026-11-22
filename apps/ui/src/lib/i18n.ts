@@ -81,7 +81,6 @@ export const en = {
   'player.streamNoInfo': 'No stream info yet',
   'player.streamsNote': 'Switching changes the stream for everyone watching this channel.',
   'player.miniPlayer': 'Mini player (P)',
-  'player.openInPlex': 'Open in Plex',
   'player.openInPlex.help': 'Open {title} on {server}',
   'player.miniRestore': 'Restore window (P)',
   'player.miniClose': 'Stop and close mini player',
