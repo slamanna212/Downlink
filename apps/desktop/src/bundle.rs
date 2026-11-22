@@ -25,19 +25,23 @@ pub fn build_zip(entries: &[(String, String)]) -> Result<Vec<u8>, String> {
         .map_err(|e| e.to_string())
 }
 
-/// The newest `max` bytes of `s`, cut at a line boundary.
-pub fn tail(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        return s;
-    }
-    let mut start = s.len() - max;
-    while !s.is_char_boundary(start) {
-        start += 1;
-    }
-    match s[start..].find('\n') {
-        Some(i) => &s[start + i + 1..],
-        None => &s[start..],
-    }
+/// Read a bounded suffix, discarding a partial first line to keep redaction intact.
+pub fn log_tail(path: &std::path::Path) -> std::io::Result<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    let start = file.metadata()?.len().saturating_sub(LOG_TAIL_BYTES as u64);
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(LOG_TAIL_BYTES as u64).read_to_end(&mut bytes)?;
+    let offset = if start == 0 {
+        0
+    } else {
+        bytes
+            .iter()
+            .position(|b| *b == b'\n')
+            .map_or(bytes.len(), |i| i + 1)
+    };
+    Ok(String::from_utf8_lossy(&bytes[offset..]).into_owned())
 }
 
 #[cfg(test)]
@@ -90,8 +94,12 @@ mod tests {
 
     #[test]
     fn tail_cuts_at_a_line_boundary() {
-        let s = "aaaa\nbbbb\ncccc\n";
-        assert_eq!(tail(s, 7), "cccc\n");
-        assert_eq!(tail(s, 100), s);
+        let file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "whole log").unwrap();
+        assert_eq!(log_tail(file.path()).unwrap(), "whole log");
+        let mut text = "x".repeat(LOG_TAIL_BYTES);
+        text.push_str("\nlast line\n");
+        std::fs::write(file.path(), text).unwrap();
+        assert_eq!(log_tail(file.path()).unwrap(), "last line\n");
     }
 }
