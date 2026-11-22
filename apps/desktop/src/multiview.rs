@@ -80,6 +80,7 @@ struct Tile {
     player: Arc<Player>,
     surface: Arc<Mutex<Surface>>,
     hls: Option<crate::hls_proxy::HlsProxy>,
+    generation: u64,
 }
 
 #[derive(Default)]
@@ -209,9 +210,12 @@ impl Multiview {
             e.insert(self.create_tile(slot).await?);
         }
         let dense = 1 + tiles.len() as u32 > BASE_TILES;
-        let Some(tile) = tiles.get(&slot) else {
+        let Some(tile) = tiles.get_mut(&slot) else {
             return Err(mv_err("The tile could not be created."));
         };
+        tile.generation += 1;
+        let generation = tile.generation;
+        tile.hls = None;
         {
             let mut g = lock(&self.shared);
             let audible = g.audible == slot;
@@ -224,29 +228,27 @@ impl Multiview {
         let player = tile.player.clone();
         drop(tiles);
         player.begin_resolving();
-        let mut plan = match self.service.tile_plan(channel_id).await {
-            Ok(p) => p,
-            Err(e) => {
-                player.mark_failed(e.message.clone());
-                self.emit(main_channel).await;
-                return Err(e);
-            }
-        };
-        let proxy = match crate::hls_proxy::prepare(&mut plan, false, Some(self.app.clone())).await
-        {
-            Ok(proxy) => proxy,
-            Err(error) => {
-                player.mark_failed(error.message.clone());
-                self.emit(main_channel).await;
-                return Err(error);
-            }
-        };
+        let prepared = async {
+            let mut plan = self.service.tile_plan(channel_id).await?;
+            let proxy = crate::hls_proxy::prepare(&mut plan, false, Some(self.app.clone())).await?;
+            Ok::<_, AppError>((plan, proxy))
+        }
+        .await;
         let mut tiles = self.tiles.lock().await;
         let Some(tile) = tiles
             .get_mut(&slot)
-            .filter(|tile| Arc::ptr_eq(&tile.player, &player))
+            .filter(|tile| tile.generation == generation && Arc::ptr_eq(&tile.player, &player))
         else {
             return Ok(());
+        };
+        let (plan, proxy) = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                player.mark_failed(error.message.clone());
+                drop(tiles);
+                self.emit(main_channel).await;
+                return Err(error);
+            }
         };
         tile.hls = proxy;
         let mut req = crate::player_glue::plan_request(&plan, PlayMode::Live, false);
@@ -290,6 +292,7 @@ impl Multiview {
             player,
             surface,
             hls: None,
+            generation: 0,
         })
     }
 

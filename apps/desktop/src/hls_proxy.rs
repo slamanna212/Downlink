@@ -1,7 +1,7 @@
 //! Loopback proxy for authenticated HLS. The player receives only local, tokenized URLs.
 //! Credentials stay inside reqwest and are attached only on the playlist's configured origin.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -11,6 +11,7 @@ use std::time::Duration;
 use downlink_core::hls::{map_uris, rewrite_playlist};
 use downlink_core::source::{PlayPlan, Surface};
 use downlink_core::{AppError, Result, tls};
+use hashlink::LinkedHashMap;
 use reqwest::header::{
     ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue,
     LOCATION, RANGE,
@@ -19,14 +20,20 @@ use reqwest::{Client, Response, StatusCode};
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use url::Url;
 
 const MAX_REDIRECTS: usize = 10;
 const MAX_PLAYLIST_BYTES: usize = 8 * 1024 * 1024;
+const MAX_RESOURCE_URL_BYTES: usize = 8192;
+const MAX_RESOURCE_COUNT: usize = 32_768;
+const MAX_REGISTRY_BYTES: usize = 16 * 1024 * 1024;
+const MAX_HANDLERS: usize = 16;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+const RESOURCE_TIMEOUT: Duration = Duration::from_secs(90);
 const PLAYLIST_CONTENT_TYPE: &str = "application/vnd.apple.mpegurl";
 
-/// Aborts the proxy listener when dropped (new playback, stop, quit).
+/// Aborts the listener and all active upstream requests when dropped.
 pub struct HlsProxy {
     task: JoinHandle<()>,
 }
@@ -37,18 +44,40 @@ impl Drop for HlsProxy {
     }
 }
 
-#[derive(Default)]
 struct Resources {
-    by_url: HashMap<Url, String>,
+    by_url: LinkedHashMap<Url, String>,
     by_route: HashMap<String, Url>,
+    max_count: usize,
+    url_bytes: usize,
+    next_id: u64,
 }
 
 impl Resources {
+    fn new(max_count: usize) -> Self {
+        Self {
+            by_url: LinkedHashMap::new(),
+            by_route: HashMap::new(),
+            max_count,
+            url_bytes: 0,
+            next_id: 0,
+        }
+    }
+
     fn route(&mut self, url: Url) -> String {
-        if let Some(route) = self.by_url.get(&url) {
+        if let Some(route) = self.by_url.to_back(&url) {
             return route.clone();
         }
-        let id = self.by_url.len();
+        let url_len = url.as_str().len();
+        while self.by_route.len() >= self.max_count || self.url_bytes + url_len > MAX_REGISTRY_BYTES
+        {
+            let Some((old_url, old_route)) = self.by_url.pop_front() else {
+                break;
+            };
+            self.url_bytes -= old_url.as_str().len();
+            self.by_route.remove(&old_route);
+        }
+        let id = self.next_id;
+        self.next_id += 1;
         let name = url.path().rsplit('/').next().unwrap_or_default();
         let extension = name.rsplit_once('.').map(|(_, ext)| ext).filter(|ext| {
             !ext.is_empty()
@@ -61,7 +90,14 @@ impl Resources {
         };
         self.by_url.insert(url.clone(), route.clone());
         self.by_route.insert(route.clone(), url);
+        self.url_bytes += url_len;
         route
+    }
+
+    fn resolve(&mut self, route: &str) -> Option<Url> {
+        let url = self.by_route.get(route)?.clone();
+        self.by_url.to_back(&url);
+        Some(url)
     }
 }
 
@@ -137,7 +173,14 @@ impl Upstream {
             .lock()
             .map_err(|_| AppError::local("The playlist proxy is unavailable."))?;
         let mut unsupported = false;
+        let mut too_large = false;
+        let mut expanded_bytes = body.len();
+        let mut used = HashSet::new();
         let rewritten = map_uris(body, &mut |uri| {
+            if unsupported || too_large {
+                return None;
+            }
+            let original_len = uri.len();
             let uri = uri.trim();
             let Ok(mut url) = playlist.join(uri) else {
                 unsupported = true;
@@ -171,13 +214,31 @@ impl Upstream {
                 unsupported = true;
                 return None;
             }
+            if url.as_str().len() > MAX_RESOURCE_URL_BYTES {
+                too_large = true;
+                return None;
+            }
             let route = resources.route(url);
-            Some(format!("{}{route}", self.local_base))
+            let local = format!("{}{route}", self.local_base);
+            expanded_bytes += local.len().saturating_sub(original_len);
+            if expanded_bytes > MAX_PLAYLIST_BYTES {
+                too_large = true;
+                return None;
+            }
+            used.insert(route);
+            Some(local)
         });
         if unsupported {
             return Err(AppError::stream(
                 "The playlist contains an unsupported resource address.",
             ));
+        }
+        if too_large
+            || used
+                .iter()
+                .any(|route| !resources.by_route.contains_key(route))
+        {
+            return Err(AppError::stream("The playlist is too large."));
         }
         Ok(rewritten)
     }
@@ -187,7 +248,7 @@ impl Upstream {
         if resource == "index.m3u8" {
             return Some((self.root.clone(), true));
         }
-        let url = self.resources.lock().ok()?.by_route.get(resource)?.clone();
+        let url = self.resources.lock().ok()?.resolve(resource)?;
         Some((url, false))
     }
 }
@@ -305,12 +366,29 @@ async fn serve(
 
 async fn handle(mut socket: TcpStream, upstream: Arc<Upstream>) {
     let mut buf = [0u8; 8192];
-    let n = tokio::time::timeout(Duration::from_secs(5), socket.read(&mut buf))
+    let request_size = async {
+        let mut read = 0;
+        while read < buf.len() {
+            let chunk = socket.read(&mut buf[read..]).await.ok()?;
+            if chunk == 0 {
+                return None;
+            }
+            let previous = read;
+            read += chunk;
+            if buf[previous.saturating_sub(3)..read]
+                .windows(4)
+                .any(|window| window == b"\r\n\r\n")
+            {
+                return Some(read);
+            }
+        }
+        None
+    };
+    let size = tokio::time::timeout(REQUEST_TIMEOUT, request_size)
         .await
         .ok()
-        .and_then(Result::ok)
-        .unwrap_or(0);
-    if let Some((path, range)) = request_line(&buf[..n])
+        .flatten();
+    if let Some((path, range)) = size.and_then(|size| request_line(&buf[..size]))
         && let Some((url, root)) = upstream.get(path)
     {
         let mut started = false;
@@ -412,7 +490,7 @@ pub async fn prepare(
         anonymous,
         local_base,
         route_prefix,
-        resources: Mutex::default(),
+        resources: Mutex::new(Resources::new(MAX_RESOURCE_COUNT)),
         initial_playlist: Mutex::default(),
         app,
         certificate_reported: AtomicBool::new(false),
@@ -423,13 +501,28 @@ pub async fn prepare(
         .is_some_and(|pin| pin.matches(&upstream.root))
     {
         // Surface any changed certificate before handing the player its loopback URL.
-        let response = upstream.fetch(upstream.root.clone(), None).await?;
+        let response = tokio::time::timeout(
+            Duration::from_secs(15),
+            upstream.fetch(upstream.root.clone(), None),
+        )
+        .await
+        .map_err(|_| AppError::network("The playlist server took too long to answer."))??;
         upstream.initial_playlist = Mutex::new(Some(response));
     }
     let upstream = Arc::new(upstream);
     let task = tokio::spawn(async move {
-        while let Ok((socket, _)) = listener.accept().await {
-            tokio::spawn(handle(socket, upstream.clone()));
+        let mut handlers = JoinSet::new();
+        loop {
+            tokio::select! {
+                connection = listener.accept(), if handlers.len() < MAX_HANDLERS => {
+                    let Ok((socket, _)) = connection else { break };
+                    handlers.spawn(tokio::time::timeout(
+                        RESOURCE_TIMEOUT,
+                        handle(socket, upstream.clone()),
+                    ));
+                }
+                _ = handlers.join_next(), if !handlers.is_empty() => {}
+            }
         }
     });
     plan.redact.add(&local);
@@ -478,6 +571,50 @@ mod tests {
             .split_once('"')
             .unwrap()
             .0
+    }
+
+    #[test]
+    fn route_cache_evicts_the_oldest_unused_path_without_reusing_it() {
+        let mut resources = Resources::new(2);
+        let first = Url::parse("http://example.test/1.ts").unwrap();
+        let second = Url::parse("http://example.test/2.ts").unwrap();
+        let third = Url::parse("http://example.test/3.ts").unwrap();
+        let first_route = resources.route(first.clone());
+        let second_route = resources.route(second.clone());
+        assert_eq!(resources.resolve(&first_route), Some(first));
+        let third_route = resources.route(third.clone());
+        assert!(resources.resolve(&second_route).is_none());
+        assert_eq!(resources.resolve(&third_route), Some(third));
+        assert_ne!(resources.route(second), second_route);
+        assert_eq!(resources.by_route.len(), 2);
+        assert_eq!(resources.by_url.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn dropping_the_proxy_closes_an_in_flight_upstream_request() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let mut plan = plan(format!(
+            "http://{}/index.m3u8",
+            listener.local_addr().unwrap()
+        ));
+        let proxy = prepare(&mut plan, false, None).await.unwrap().unwrap();
+        let request = tokio::spawn(async move { Client::new().get(plan.url).send().await });
+        let (mut socket, _) = tokio::time::timeout(Duration::from_secs(5), listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut header = Vec::new();
+        while !header.ends_with(b"\r\n\r\n") {
+            header.push(socket.read_u8().await.unwrap());
+        }
+        drop(proxy);
+        let mut trailing = Vec::new();
+        let read = tokio::time::timeout(Duration::from_secs(5), socket.read_to_end(&mut trailing))
+            .await
+            .expect("proxy dropped the upstream connection")
+            .unwrap();
+        assert_eq!(read, 0);
+        assert!(request.await.unwrap().is_err());
     }
 
     #[tokio::test]

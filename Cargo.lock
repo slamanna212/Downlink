@@ -1364,6 +1364,7 @@ dependencies = [
  "downlink-platform",
  "downlink-player",
  "gtk",
+ "hashlink",
  "reqwest",
  "serde",
  "serde_json",

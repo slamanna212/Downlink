@@ -63,7 +63,7 @@ fn absolute(uri: &str) -> Option<Url> {
     matches!(u.scheme(), "http" | "https").then_some(u)
 }
 
-//// Replace segment lines and `URI="…"` attributes while preserving playlist formatting.
+/// Replace segment lines and `URI="…"` attributes while preserving playlist formatting.
 pub fn map_uris(body: &str, f: &mut dyn FnMut(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(body.len());
     for raw in body.split_inclusive('\n') {
