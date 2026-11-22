@@ -165,6 +165,28 @@ impl CacheLocks {
     }
 }
 
+struct RefreshClaim<'a> {
+    locks: &'a CacheLocks,
+    hash: &'a str,
+}
+
+impl<'a> RefreshClaim<'a> {
+    fn new(locks: &'a CacheLocks, hash: &'a str) -> Option<Self> {
+        let mut refreshing = locks.refreshing.lock().ok()?;
+        refreshing
+            .insert(hash.to_owned())
+            .then(|| Self { locks, hash })
+    }
+}
+
+impl Drop for RefreshClaim<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut refreshing) = self.locks.refreshing.lock() {
+            refreshing.remove(self.hash);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ImageCache {
     dir: PathBuf,
@@ -323,43 +345,30 @@ impl ImageCache {
     /// failure keeps the cached copy and waits [`REVALIDATE_RETRY_SECS`] before trying again.
     /// Concurrent calls for the same image do the work once.
     pub async fn refresh(&self, hash: &str, fetcher: &dyn ImageFetcher) -> Result<()> {
-        let claimed = self
-            .locks
-            .refreshing
-            .lock()
-            .map(|mut g| g.insert(hash.to_owned()))
-            .unwrap_or(false);
-        if !claimed {
+        let Some(_refresh) = RefreshClaim::new(&self.locks, hash) else {
             return Ok(());
+        };
+        let _fetch = self.locks.fetch(hash).lock().await;
+        let fresh: Option<i64> =
+            sqlx::query_scalar("SELECT min(fetched_at) FROM image_cache WHERE key IN (?, ?)")
+                .bind(Self::key(hash, ImageSize::Grid))
+                .bind(Self::key(hash, ImageSize::Detail))
+                .fetch_one(self.store.pool())
+                .await?;
+        if fresh.is_some_and(|t| t > now_utc() - REVALIDATE_AFTER_SECS) {
+            return Ok(()); // refreshed by someone else meanwhile
         }
-        let r = async {
-            let _fetch = self.locks.fetch(hash).lock().await;
-            let fresh: Option<i64> =
-                sqlx::query_scalar("SELECT min(fetched_at) FROM image_cache WHERE key IN (?, ?)")
-                    .bind(Self::key(hash, ImageSize::Grid))
-                    .bind(Self::key(hash, ImageSize::Detail))
-                    .fetch_one(self.store.pool())
-                    .await?;
-            if fresh.is_some_and(|t| t > now_utc() - REVALIDATE_AFTER_SECS) {
-                return Ok(()); // refreshed by someone else meanwhile
-            }
-            if let Err(e) = self.download(hash, ImageSize::Grid, fetcher).await {
-                let retry_at = now_utc() - REVALIDATE_AFTER_SECS + REVALIDATE_RETRY_SECS;
-                sqlx::query("UPDATE image_cache SET fetched_at = ? WHERE key IN (?, ?)")
-                    .bind(retry_at)
-                    .bind(Self::key(hash, ImageSize::Grid))
-                    .bind(Self::key(hash, ImageSize::Detail))
-                    .execute(self.store.pool())
-                    .await?;
-                return Err(e);
-            }
-            Ok(())
+        if let Err(e) = self.download(hash, ImageSize::Grid, fetcher).await {
+            let retry_at = now_utc() - REVALIDATE_AFTER_SECS + REVALIDATE_RETRY_SECS;
+            sqlx::query("UPDATE image_cache SET fetched_at = ? WHERE key IN (?, ?)")
+                .bind(retry_at)
+                .bind(Self::key(hash, ImageSize::Grid))
+                .bind(Self::key(hash, ImageSize::Detail))
+                .execute(self.store.pool())
+                .await?;
+            return Err(e);
         }
-        .await;
-        if let Ok(mut g) = self.locks.refreshing.lock() {
-            g.remove(hash);
-        }
-        r
+        Ok(())
     }
 
     /// Fetch the image behind `hash`, store both sizes and return `size`. The caller holds the
@@ -398,7 +407,6 @@ impl ImageCache {
         size: ImageSize,
         encoded: Vec<(ImageSize, Vec<u8>, &'static str)>,
     ) -> Result<ImageBytes> {
-        let _writes = self.locks.writes.lock().await;
         let shard = hash[..2].to_owned();
         let dir = self.dir.join(&shard);
         let (entries, wanted) = tokio::task::spawn_blocking(move || {
@@ -436,6 +444,9 @@ impl ImageCache {
         .await
         .map_err(|_| AppError::local("Saving the artwork was interrupted."))??;
 
+        // The staged paths are private to this request. Only publication and pruning need
+        // to run against a consistent view of the cache index.
+        let writes = self.locks.writes.lock().await;
         let mut tx = self.store.pool().begin_with("BEGIN IMMEDIATE").await?;
         let active: bool =
             sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM image_origin WHERE hash = ?)")
@@ -470,7 +481,8 @@ impl ImageCache {
         for (_, _, _, path) in entries {
             path.keep().map_err(|e| e.error)?;
         }
-        if let Err(error) = self.evict_locked().await {
+        drop(writes);
+        if let Err(error) = self.evict().await {
             tracing::warn!(%error, "artwork eviction will be retried");
         }
         wanted.ok_or_else(|| AppError::media("The image could not be prepared."))
