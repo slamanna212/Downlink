@@ -380,6 +380,11 @@ pub fn preferences_from_settings(v: &Value) -> Preferences {
         Some("off") => HdrOutput::Off,
         _ => HdrOutput::Auto,
     };
+    p.rtx_super_resolution = v
+        .get("rtxSuperResolution")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    p.rtx_hdr = v.get("rtxHdr").and_then(Value::as_bool).unwrap_or(false);
     if let Some(pct) = v.get("subtitleSize").and_then(Value::as_f64) {
         p.subtitle.size = if pct < 85.0 {
             SubtitleSize::Small
@@ -526,6 +531,16 @@ mod tests {
         assert_eq!(p.subtitle.size, SubtitleSize::Large);
         assert_eq!(p.subtitle.background, SubtitleBackground::None);
         assert_eq!(p.audio_device.as_deref(), Some("alsa/hdmi:X"));
+    }
+
+    #[test]
+    fn rtx_video_settings_default_off() {
+        let p = preferences_from_settings(&serde_json::json!({}));
+        assert!(!p.rtx_super_resolution && !p.rtx_hdr);
+        let on = preferences_from_settings(
+            &serde_json::json!({ "rtxSuperResolution": true, "rtxHdr": true }),
+        );
+        assert!(on.rtx_super_resolution && on.rtx_hdr);
     }
 
     #[test]

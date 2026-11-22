@@ -166,6 +166,14 @@ pub struct StatsSnapshot {
     pub tone_mapped: Option<bool>,
     /// mpv `video-params/primaries`, e.g. "bt.709", "bt.2020".
     pub primaries: Option<String>,
+    /// RTX Super Resolution upscale factor requested from the driver; `None` when not in use.
+    /// The driver never reports whether it engaged, so this is the request only.
+    pub rtx_upscale: Option<f64>,
+    /// RTX HDR was requested for this video.
+    pub rtx_hdr_requested: bool,
+    /// RTX HDR is converting this SDR video to HDR: the filter tagged its output HDR, which it
+    /// only does once the driver accepted the request. `None` unless requested and params known.
+    pub rtx_hdr_active: Option<bool>,
     pub bit_depth: Option<u8>,
     /// e.g. "stereo", "5.1".
     pub audio_channels: Option<String>,
@@ -454,6 +462,14 @@ struct Shared {
     /// Engine deaths in the current session (one restart is allowed).
     engine_restarts: u32,
     engine_failure: Option<String>,
+    /// Source video size (`video-params/dw`×`dh`), before any filter scales it.
+    video_size: (i64, i64),
+    /// Render output size in pixels (`osd-width`×`osd-height`).
+    output_size: (i64, i64),
+    /// The RTX Video `vf` chain last set on the engine ("" = none).
+    rtx_vf: String,
+    /// mpv accepted `rtx_vf`.
+    rtx_applied: bool,
 }
 
 struct Inner {
@@ -533,8 +549,12 @@ const OBSERVED: &[(&str, i32)] = &[
     ("duration", ffi::FORMAT_DOUBLE),
     ("hwdec-current", ffi::FORMAT_STRING),
     ("video-codec", ffi::FORMAT_STRING),
-    ("dwidth", ffi::FORMAT_INT64),
-    ("dheight", ffi::FORMAT_INT64),
+    // Source size, not `dwidth`/`dheight`: those are after filters, so RTX Super Resolution would
+    // report the upscaled size.
+    ("video-params/dw", ffi::FORMAT_INT64),
+    ("video-params/dh", ffi::FORMAT_INT64),
+    ("osd-width", ffi::FORMAT_INT64),
+    ("osd-height", ffi::FORMAT_INT64),
     ("estimated-vf-fps", ffi::FORMAT_DOUBLE),
     ("frame-drop-count", ffi::FORMAT_INT64),
     ("demuxer-cache-time", ffi::FORMAT_DOUBLE),
@@ -596,6 +616,10 @@ impl Player {
                 decoder_codec: None,
                 engine_restarts: 0,
                 engine_failure: None,
+                video_size: (0, 0),
+                output_size: (0, 0),
+                rtx_vf: String::new(),
+                rtx_applied: false,
             }),
             cv: Condvar::new(),
             stop: AtomicBool::new(false),
@@ -654,6 +678,8 @@ impl Player {
         if let Ok(mut p) = self.inner.prefs.lock() {
             *p = prefs;
         }
+        let mut s = lock(&self.inner);
+        apply_rtx_filter(&self.inner, &mut s);
     }
 
     pub fn preferences(&self) -> Preferences {
@@ -971,10 +997,48 @@ fn load_current(inner: &Inner, s: &mut Shared) -> Result<(), PlayerError> {
     // A new file starts a new timeline and a new cache.
     s.stats.seek_range = None;
     s.stats.live_anchor = None;
+    // The new file's size is unknown until its video params arrive; the profile may differ.
+    s.video_size = (0, 0);
+    rtx_filter_for(inner, s, &prefs, req.profile);
     inner.eng().command_named(
         "loadfile",
         &[("url", &req.url), ("flags", "replace"), ("options", &opts)],
     )
+}
+
+/// Bring the engine's RTX Video filter in line with the preferences, the current profile and the
+/// video/output sizes. No-op unless the chain actually changes (changing `vf` rebuilds the filter).
+fn apply_rtx_filter(inner: &Inner, s: &mut Shared) {
+    let Some(profile) = s.request.as_ref().map(|r| r.profile) else {
+        return;
+    };
+    let prefs = match inner.prefs.lock() {
+        Ok(p) => p.clone(),
+        Err(p) => p.into_inner().clone(),
+    };
+    rtx_filter_for(inner, s, &prefs, profile);
+}
+
+fn rtx_filter_for(inner: &Inner, s: &mut Shared, prefs: &Preferences, profile: Profile) {
+    let caps = crate::gpu::video_caps();
+    let scale = options::rtx_scale(s.video_size, s.output_size);
+    let vf = options::rtx_video_filter(prefs, profile, scale, caps.rtx_video);
+    if vf == s.rtx_vf {
+        return;
+    }
+    match inner.eng().set_property("vf", &vf) {
+        Ok(()) => {
+            tracing::info!(filter = %vf, "RTX Video filter");
+            s.rtx_vf = vf;
+            s.rtx_applied = true;
+        }
+        Err(e) => {
+            tracing::warn!("RTX Video filter `{vf}` not applied: {e}");
+            // Remember it anyway so a failing chain is not retried on every resize.
+            s.rtx_vf = vf;
+            s.rtx_applied = false;
+        }
+    }
 }
 
 fn on_failure(inner: &Inner, s: &mut Shared, cause: FailureCause) {
@@ -1207,21 +1271,33 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
             };
             s.throttle.mark_dirty();
         }
-        ("dwidth", v) => {
+        ("video-params/dw", v) => {
             s.stats.width = if let PropValue::Int(i) = v {
                 Some(i)
             } else {
                 None
             };
+            s.video_size.0 = s.stats.width.unwrap_or(0);
+            apply_rtx_filter(inner, s);
             s.throttle.mark_dirty();
         }
-        ("dheight", v) => {
+        ("video-params/dh", v) => {
             s.stats.height = if let PropValue::Int(i) = v {
                 Some(i)
             } else {
                 None
             };
+            s.video_size.1 = s.stats.height.unwrap_or(0);
+            apply_rtx_filter(inner, s);
             s.throttle.mark_dirty();
+        }
+        ("osd-width", v) => {
+            s.output_size.0 = if let PropValue::Int(i) = v { i } else { 0 };
+            apply_rtx_filter(inner, s);
+        }
+        ("osd-height", v) => {
+            s.output_size.1 = if let PropValue::Int(i) = v { i } else { 0 };
+            apply_rtx_filter(inner, s);
         }
         ("estimated-vf-fps", v) => {
             s.stats.fps = if let PropValue::Double(d) = v {
@@ -1317,8 +1393,22 @@ fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
     };
     let transfer = e.get_property("video-params/gamma").filter(|g| g != "auto");
     let hdr = transfer.as_deref().map(is_hdr_transfer);
-    let tone_mapped = match (hdr, e.get_property("video-target-params/gamma")) {
-        (Some(true), Some(t)) if t != "auto" => Some(!is_hdr_transfer(&t)),
+    let (rtx_upscale, rtx_hdr_requested) = if s.rtx_applied {
+        options::rtx_filter_parts(&s.rtx_vf)
+    } else {
+        (None, false)
+    };
+    // After filters: PQ out of an SDR source means RTX HDR is running.
+    let rtx_hdr_active = match (rtx_hdr_requested, hdr) {
+        (true, Some(false)) => e
+            .get_property("video-out-params/gamma")
+            .filter(|g| g != "auto")
+            .map(|g| is_hdr_transfer(&g)),
+        _ => None,
+    };
+    let shown_hdr = hdr == Some(true) || rtx_hdr_active == Some(true);
+    let tone_mapped = match (shown_hdr, e.get_property("video-target-params/gamma")) {
+        (true, Some(t)) if t != "auto" => Some(!is_hdr_transfer(&t)),
         _ => None,
     };
     StatsSnapshot {
@@ -1346,6 +1436,9 @@ fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
         primaries: e
             .get_property("video-params/primaries")
             .filter(|v| v != "auto"),
+        rtx_upscale,
+        rtx_hdr_requested,
+        rtx_hdr_active,
         bit_depth: e
             .get_property("video-params/hw-pixelformat")
             .or_else(|| e.get_property("video-params/pixelformat"))
@@ -1450,6 +1543,12 @@ fn rebuild_engine(inner: &Arc<Inner>) -> Result<(), PlayerError> {
     };
     for (k, v) in prefs.live_options() {
         let _ = engine.set_property(&k, &v);
+    }
+    // The new engine has no `vf`; the replayed `loadfile` re-applies the RTX chain.
+    {
+        let mut s = lock(inner);
+        s.rtx_vf.clear();
+        s.rtx_applied = false;
     }
     match inner.engine.write() {
         Ok(mut g) => *g = engine.clone(),

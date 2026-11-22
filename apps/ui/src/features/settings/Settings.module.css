@@ -50,6 +50,11 @@
   color: var(--dl-text-dim);
 }
 .divider { border-top: 1px solid var(--dl-hairline); }
+.rtxNote {
+  margin: var(--mantine-spacing-xs) 0 var(--mantine-spacing-md);
+  font-size: var(--mantine-font-size-sm);
+  color: var(--dl-text-dim);
+}
 
 .notes {
   margin-top: var(--mantine-spacing-lg);

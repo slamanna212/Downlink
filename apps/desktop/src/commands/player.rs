@@ -328,6 +328,14 @@ pub async fn set_stats_enabled(state: State<'_, AppState>, enabled: bool) -> Cmd
     Ok(())
 }
 
+/// Graphics features the playback settings can offer (NVIDIA RTX Video). Detected once per run.
+#[tauri::command]
+pub async fn get_video_caps() -> CmdResult<downlink_player::VideoCaps> {
+    tauri::async_runtime::spawn_blocking(downlink_player::video_caps)
+        .await
+        .map_err(|e| AppError::local(format!("GPU detection failed: {e}")))
+}
+
 #[derive(Serialize)]
 pub struct AudioDevice {
     id: String,

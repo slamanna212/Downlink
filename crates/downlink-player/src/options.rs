@@ -233,6 +233,10 @@ pub struct Preferences {
     pub timeshift_secs: u32,
     /// Directory for the on-disk timeshift cache (`demuxer-cache-dir`). Empty = mpv's default.
     pub timeshift_dir: String,
+    /// NVIDIA RTX Video Super Resolution (Windows, RTX cards). Single player only, never tiles.
+    pub rtx_super_resolution: bool,
+    /// NVIDIA RTX Video HDR: SDR shown as HDR (Windows, RTX cards, needs `hdr_output` Auto).
+    pub rtx_hdr: bool,
 }
 
 /// Shortest and longest timeshift buffer.
@@ -256,6 +260,8 @@ impl Default for Preferences {
             hdr_output: HdrOutput::Auto,
             timeshift_secs: 60 * 60,
             timeshift_dir: String::new(),
+            rtx_super_resolution: false,
+            rtx_hdr: false,
         }
     }
 }
@@ -309,6 +315,81 @@ impl Preferences {
         }
         o
     }
+}
+
+/// Label of the RTX Video filter in mpv's `vf` chain.
+pub const RTX_FILTER_LABEL: &str = "rtx";
+
+/// Upscale factor for RTX Video Super Resolution: how much the video (`dw`×`dh`, aspect-corrected)
+/// grows to fit the output (`ow`×`oh`, pixels). `None` when the video is not upscaled noticeably.
+///
+/// The factor is rounded up to a quarter step so resizing the window does not rebuild the filter on
+/// every pixel; the renderer scales the slightly larger frame down to fit.
+pub fn rtx_scale(video: (i64, i64), output: (i64, i64)) -> Option<f64> {
+    let ((dw, dh), (ow, oh)) = (video, output);
+    if dw <= 0 || dh <= 0 || ow <= 0 || oh <= 0 {
+        return None;
+    }
+    let fit = (ow as f64 / dw as f64).min(oh as f64 / dh as f64);
+    if fit < 1.1 {
+        return None;
+    }
+    Some(((fit * 4.0).ceil() / 4.0).min(4.0))
+}
+
+/// The `vf` chain for NVIDIA RTX Video (mpv `d3d11vpp`), or an empty string for none.
+///
+/// Super Resolution only applies to the single player (`profile` not a multiview tile) and only
+/// when the video is upscaled (`scale`). RTX HDR needs HDR output on; the filter itself skips
+/// sources that are already HDR. Output format is left to mpv, which picks the 10-bit RGB format
+/// RTX HDR requires. Callers pass `rtx_available` from [`crate::gpu::video_caps`]; the filter is
+/// never built on platforms without a D3D11 renderer.
+pub fn rtx_video_filter(
+    prefs: &Preferences,
+    profile: Profile,
+    scale: Option<f64>,
+    rtx_available: bool,
+) -> String {
+    if !rtx_available || !cfg!(target_os = "windows") {
+        return String::new();
+    }
+    rtx_filter_string(prefs, profile, scale)
+}
+
+fn rtx_filter_string(prefs: &Preferences, profile: Profile, scale: Option<f64>) -> String {
+    let tile = matches!(profile, Profile::Multiview | Profile::MultiviewDense);
+    let scale = scale.filter(|_| prefs.rtx_super_resolution && !tile);
+    let hdr = prefs.rtx_hdr && prefs.hdr_output == HdrOutput::Auto;
+    let mut opts: Vec<String> = Vec::new();
+    if let Some(s) = scale {
+        opts.push(format!("scale={s:.2}"));
+        opts.push("scaling-mode=nvidia".to_owned());
+    }
+    if hdr {
+        opts.push("nvidia-true-hdr=yes".to_owned());
+    }
+    if opts.is_empty() {
+        return String::new();
+    }
+    format!("@{RTX_FILTER_LABEL}:d3d11vpp={}", opts.join(":"))
+}
+
+/// What an RTX Video `vf` chain from [`rtx_video_filter`] asks for: the Super Resolution factor
+/// (if upscaling) and whether RTX HDR is requested. For the playback info panel.
+pub fn rtx_filter_parts(vf: &str) -> (Option<f64>, bool) {
+    let Some(opts) = vf.split_once("d3d11vpp=").map(|(_, o)| o) else {
+        return (None, false);
+    };
+    let mut scale = None;
+    let mut hdr = false;
+    for o in opts.split(':') {
+        match o.split_once('=') {
+            Some(("scale", v)) => scale = v.parse::<f64>().ok(),
+            Some(("nvidia-true-hdr", v)) => hdr = v == "yes",
+            _ => {}
+        }
+    }
+    (scale, hdr)
 }
 
 /// `--wid` (Windows) renders with mpv's own swapchain, so mpv signals HDR to the OS itself.
@@ -499,6 +580,79 @@ pub fn loadfile_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rtx_scale_factor() {
+        // 1080p on a 4K window: exactly 2x.
+        assert_eq!(rtx_scale((1920, 1080), (3840, 2160)), Some(2.0));
+        // 720p on 4K: 3x. 576i (aspect-corrected 1024x576) on 1080p: 1.875 -> 2.0.
+        assert_eq!(rtx_scale((1280, 720), (3840, 2160)), Some(3.0));
+        assert_eq!(rtx_scale((1024, 576), (1920, 1080)), Some(2.0));
+        // Letterboxed: the tighter axis wins. 1920x800 in 2560x1440 -> 1.333 -> 1.5.
+        assert_eq!(rtx_scale((1920, 800), (2560, 1440)), Some(1.5));
+        // No (or barely any) upscaling, and nonsense sizes.
+        assert_eq!(rtx_scale((1920, 1080), (1920, 1080)), None);
+        assert_eq!(rtx_scale((1920, 1080), (2000, 1125)), None);
+        assert_eq!(rtx_scale((1920, 1080), (960, 540)), None);
+        assert_eq!(rtx_scale((0, 0), (3840, 2160)), None);
+        // Tiny sources are capped at 4x.
+        assert_eq!(rtx_scale((320, 180), (3840, 2160)), Some(4.0));
+    }
+
+    #[test]
+    fn rtx_filter_chain() {
+        let both = Preferences {
+            rtx_super_resolution: true,
+            rtx_hdr: true,
+            ..Preferences::default()
+        };
+        assert_eq!(
+            rtx_filter_string(&both, Profile::Live, Some(2.0)),
+            "@rtx:d3d11vpp=scale=2.00:scaling-mode=nvidia:nvidia-true-hdr=yes"
+        );
+        // No upscaling needed: HDR only.
+        assert_eq!(
+            rtx_filter_string(&both, Profile::Seekable, None),
+            "@rtx:d3d11vpp=nvidia-true-hdr=yes"
+        );
+        // Multiview tiles never get Super Resolution, but keep RTX HDR.
+        for p in [Profile::Multiview, Profile::MultiviewDense] {
+            assert_eq!(
+                rtx_filter_string(&both, p, Some(2.0)),
+                "@rtx:d3d11vpp=nvidia-true-hdr=yes"
+            );
+        }
+        // RTX HDR needs HDR output.
+        let sdr = Preferences {
+            hdr_output: HdrOutput::Off,
+            ..both.clone()
+        };
+        assert_eq!(
+            rtx_filter_string(&sdr, Profile::Live, Some(1.5)),
+            "@rtx:d3d11vpp=scale=1.50:scaling-mode=nvidia"
+        );
+        assert_eq!(rtx_filter_string(&sdr, Profile::Multiview, Some(1.5)), "");
+        // The info panel reads the chain back.
+        assert_eq!(
+            rtx_filter_parts("@rtx:d3d11vpp=scale=2.00:scaling-mode=nvidia:nvidia-true-hdr=yes"),
+            (Some(2.0), true)
+        );
+        assert_eq!(
+            rtx_filter_parts("@rtx:d3d11vpp=nvidia-true-hdr=yes"),
+            (None, true)
+        );
+        assert_eq!(rtx_filter_parts(""), (None, false));
+        // Both off: no filter.
+        assert_eq!(
+            rtx_filter_string(&Preferences::default(), Profile::Live, Some(2.0)),
+            ""
+        );
+        // No RTX adapter, or not Windows: never a filter.
+        assert_eq!(rtx_video_filter(&both, Profile::Live, Some(2.0), false), "");
+        if !cfg!(target_os = "windows") {
+            assert_eq!(rtx_video_filter(&both, Profile::Live, Some(2.0), true), "");
+        }
+    }
 
     fn has(o: &Opts, k: &str, v: &str) -> bool {
         o.iter().any(|(a, b)| a == k && b == v)

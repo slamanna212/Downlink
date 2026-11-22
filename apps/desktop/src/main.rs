@@ -148,6 +148,7 @@ macro_rules! handlers {
             commands::player::set_mini_player,
             commands::player::set_stats_enabled,
             commands::player::list_audio_devices,
+            commands::player::get_video_caps,
             commands::player::get_channel_streams,
             commands::player::switch_stream,
             commands::player::get_multiview,

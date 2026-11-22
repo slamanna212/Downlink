@@ -48,6 +48,7 @@ import { resumeUseful } from '../vod/vod';
 import { decodeCaps } from '../../lib/caps';
 import { playChannel, restartProgramme } from './actions';
 import { AudioMenu, StreamMenu, SubtitleMenu, streamPosition } from './PlayerMenus';
+import { rtxSummary } from './rtx';
 import { useMultiviewAvailable } from '../multiview/available';
 import { holdSession, releaseSession } from './session';
 import classes from './Player.module.css';
@@ -112,8 +113,10 @@ function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerSta
   const transfer = upper(stats?.transfer) ?? dash;
   const hdr =
     stats?.hdr == null ? dash
+    : stats.rtxHdrActive ? t(stats.toneMapped ? 'player.info.hdrRtxToneMapped' : 'player.info.hdrRtx', { transfer })
     : !stats.hdr ? t('player.info.hdrNo')
     : t(stats.toneMapped ? 'player.info.hdrToneMapped' : 'player.info.hdrYes', { transfer });
+  const rtx = rtxSummary(stats);
   const video = stats?.resolution
     ? join([stats.resolution, stats.videoCodec, stats.fps != null ? `${stats.fps.toFixed(2)} fps` : null])
     : player.width && player.height ? join([`${player.width}×${player.height}`, player.videoCodec]) : dash;
@@ -123,6 +126,7 @@ function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerSta
     ...(streamPosition(stats) ? [[t('player.info.stream'), streamPosition(stats) as string] as [string, string]] : []),
     [t('player.info.video'), video],
     [t('player.info.hdr'), hdr],
+    ...(rtx ? [[t('player.info.rtx'), rtx] as [string, string]] : []),
     [t('player.info.colour'), join([upper(stats?.primaries), stats?.bitDepth != null ? t('player.info.bitDepth', { n: stats.bitDepth }) : null])],
     [t('player.info.deinterlace'), stats?.deinterlace ?? dash],
     [t('player.info.audio'), join([stats?.audioCodec, stats?.audioChannels, stats?.audioSampleRate ? `${stats.audioSampleRate / 1000} kHz` : null])],

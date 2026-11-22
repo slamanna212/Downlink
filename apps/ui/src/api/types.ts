@@ -289,11 +289,22 @@ export interface AppSettings {
   deinterlace: Deinterlace;
   /** Missing in settings saved before it existed; treat as `auto`. */
   hdrOutput?: HdrOutput;
+  /** NVIDIA RTX Video Super Resolution (single player only). Missing = off. */
+  rtxSuperResolution?: boolean;
+  /** NVIDIA RTX Video HDR, SDR shown as HDR (needs `hdrOutput` auto). Missing = off. */
+  rtxHdr?: boolean;
   /** Percent, 50..150. */
   subtitleSize: number;
   subtitleBackground: boolean;
   /** Open the player on the most recently watched channel at launch (off by default). */
   resumeLastChannel: boolean;
+}
+
+/** Graphics features the player can use on this machine. */
+export interface VideoCaps {
+  /** An NVIDIA RTX card on Windows: RTX Super Resolution and RTX HDR can be turned on. */
+  rtxVideo: boolean;
+  rtxAdapter: string | null;
 }
 
 export interface AudioDevice {
@@ -320,8 +331,14 @@ export interface SessionStats {
   hdr: boolean | null;
   /** mpv transfer name, e.g. "pq", "hlg", "bt.1886". */
   transfer: string | null;
-  /** HDR source rendered to an SDR display; null unless `hdr`. */
+  /** HDR (source, or RTX HDR output) rendered to an SDR display; null unless HDR is shown. */
   toneMapped: boolean | null;
+  /** RTX Super Resolution factor requested from the driver; null when not in use. Missing on older builds. */
+  rtxUpscale?: number | null;
+  /** RTX HDR was requested for this video. */
+  rtxHdrRequested?: boolean;
+  /** RTX HDR is turning this SDR video into HDR; null unless requested and known. */
+  rtxHdrActive?: boolean | null;
   /** e.g. "bt.709", "bt.2020". */
   primaries: string | null;
   bitDepth: number | null;

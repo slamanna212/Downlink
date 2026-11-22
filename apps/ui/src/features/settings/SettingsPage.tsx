@@ -167,6 +167,7 @@ function PlaybackSection() {
   const patch = useSettingsPatch();
   const diag = useQuery({ queryKey: ['diagnostics', 'hwdec'], queryFn: () => invoke('get_diagnostics', {}) });
   const devices = useQuery({ queryKey: ['audioDevices'], queryFn: () => invoke('list_audio_devices', {}) });
+  const video = useQuery({ queryKey: ['videoCaps'], queryFn: () => invoke('get_video_caps', {}), staleTime: Infinity });
   const [buffer, setBuffer] = useState<number | null>(null);
   const [timeshift, setTimeshift] = useState<number | null>(null);
   const [subSize, setSubSize] = useState<number | null>(null);
@@ -174,6 +175,8 @@ function PlaybackSection() {
   const shown = buffer ?? data.liveBufferSecs;
   const shownTimeshift = timeshift ?? data.timeshiftMinutes ?? 60;
   const current = diag.data?.hwdecCurrent;
+  const rtx = video.data?.rtxVideo ?? false;
+  const hdrOn = (data.hdrOutput ?? 'auto') === 'auto';
   return (
     <Section title={t('settings.playback')} help={t('settings.playback.help')}>
       <SettingRow label={t('settings.hwdec')} help={current ? t('settings.hwdec.current', { current }) : t('settings.hwdec.help')}>
@@ -277,6 +280,33 @@ function PlaybackSection() {
           ]}
         />
       </SettingRow>
+      <SettingRow
+        label={t('settings.rtxSuperResolution')}
+        help={rtx ? t('settings.rtxSuperResolution.help') : t('settings.rtx.unavailable')}
+        wide
+      >
+        <Switch
+          aria-label={t('settings.rtxSuperResolution')}
+          checked={rtx && (data.rtxSuperResolution ?? false)}
+          disabled={!rtx}
+          onChange={(e) => patch.mutate({ rtxSuperResolution: e.currentTarget.checked })}
+        />
+      </SettingRow>
+      <SettingRow
+        label={t('settings.rtxHdr')}
+        help={!rtx ? t('settings.rtx.unavailable') : hdrOn ? t('settings.rtxHdr.help') : t('settings.rtxHdr.needsHdr')}
+        wide
+      >
+        <Switch
+          aria-label={t('settings.rtxHdr')}
+          checked={rtx && hdrOn && (data.rtxHdr ?? false)}
+          disabled={!rtx || !hdrOn}
+          onChange={(e) => patch.mutate({ rtxHdr: e.currentTarget.checked })}
+        />
+      </SettingRow>
+      {rtx && (
+        <p className={classes.rtxNote}>{t('settings.rtx.note', { adapter: video.data?.rtxAdapter ?? 'NVIDIA' })}</p>
+      )}
       <SettingRow label={t('settings.subtitleSize')} help={t('settings.subtitleSize.help')}>
         <div className={classes.sliderRow}>
           <Slider

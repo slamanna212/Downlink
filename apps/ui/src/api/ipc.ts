@@ -8,6 +8,7 @@ import type {
   AppError,
   AppSettings,
   AudioDevice,
+  VideoCaps,
   GuideArgs,
   GuideResult,
   HomeData,
@@ -85,6 +86,7 @@ export interface Commands {
   set_stats_enabled: { args: { enabled: boolean }; result: null };
   get_counts: { args: Record<string, never>; result: Counts };
   list_audio_devices: { args: Record<string, never>; result: AudioDevice[] };
+  get_video_caps: { args: Record<string, never>; result: VideoCaps };
   get_channel_streams: { args: { channelId: number }; result: StreamList };
   switch_stream: { args: { channelId: number; index: number }; result: null };
   get_multiview: { args: Record<string, never>; result: MultiviewState };
