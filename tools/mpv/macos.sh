@@ -131,9 +131,10 @@ meson_build "$SRC/libplacebo" static \
 # engine never fails on a rejected option) and means no scripting runtime ships at all.
 # -lc++: HarfBuzz and libplacebo contain C++ and are linked statically into a C library.
 fetch "https://github.com/mpv-player/mpv/archive/refs/tags/v$MPV_VERSION.tar.gz" "$MPV_SRC_SHA256" "$SRC/mpv"
-# Without Swift, mpv 0.42 still compiles its Swift-only clipboard backend; see the patch header.
-patch -p1 -d "$SRC/mpv" --forward --quiet < "$HERE/patches/mpv-macos-clipboard-without-swift.patch"
-meson_build "$SRC/mpv" shared \
+# mpv 0.42 does not build or run with cocoa but without Swift; see the patch header. b_lundef=true (mpv defaults it
+# to false) makes any symbol still left undefined a link error here instead of a crash in the app.
+patch -p1 -d "$SRC/mpv" --forward --quiet < "$HERE/patches/mpv-macos-cocoa-without-swift.patch"
+meson_build "$SRC/mpv" shared -Db_lundef=true \
   -Dlibmpv=true -Dcplayer=false -Dgpl=true -Dtests=false -Dbuild-date=false -Dc_link_args="$LDFLAGS -lc++" \
   -Dcocoa=enabled -Dcoreaudio=enabled -Dgl=enabled -Dgl-cocoa=enabled -Dplain-gl=enabled \
   -Dvideotoolbox-gl=enabled -Dlibavdevice=enabled -Diconv=enabled -Dzlib=enabled \
