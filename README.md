@@ -1,22 +1,35 @@
-# Downlink
 
-A desktop IPTV client for **Dispatcharr**, M3U/XMLTV playlists and Xtream accounts. Windows, macOS and Linux.
+<p align="center">
+  <img src="apps/desktop/icons/icon.svg" width="120" height="120" alt="Downlink logo">
+</p>
 
-Downlink is a player. It ships no channels, playlists, guide data or credentials: the first run is an empty
-"add a source" screen, and you bring your own.
+<h1 align="center">Downlink</h1>
+<p align="center">Cross Platform desktop IPTV client for Dispatcharr, M3U/XMLTV playlists and Xtream accounts.</p>
 
-> Works with [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) 0.32.0 or newer, tested with 0.34.1.
-> Downlink is an independent project and is not affiliated with or endorsed by Dispatcharr.
+<p align="center">
+  <a href=""><img src="https://img.shields.io/badge/Windows-Download-0078D6?style=for-the-badge&logo=windows11&logoColor=white" alt="Download for Windows"></a>
+  <a href=""><img src="https://img.shields.io/badge/Linux-.deb-A81D33?style=for-the-badge&logo=debian&logoColor=white" alt="Download .deb"></a>
+  <a href=""><img src="https://img.shields.io/badge/Linux-AppImage-333333?style=for-the-badge&logo=linux&logoColor=white" alt="Download AppImage"></a>
+  <a href=""><img src="https://img.shields.io/badge/macOS-Download-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS"></a>
+</p>
+
+---
+
+# What Is Downlink
+I wanted a desktop IPTV player that could take advantage of all Dispatcharr offers. Fast, Easy to Use, and reliable.
+
+
+ While not required, this app is best used with [Dispatcharr](https://github.com/dispatcharr/dispatcharr).
 
 ## Features
 
-- Channel list with groups, search, favourites and recently watched.
-- Programme guide with now/next, local search of programme titles and descriptions.
-- Catch-up and "restart this programme" on sources that offer an archive (Dispatcharr).
+- TV guide with now/next, local search of program titles and descriptions.
+- Catch-up and "restart this program" on sources that offer an archive (Dispatcharr).
+- Full support for VOD content
+- When using Dispatcharr, manage your DVR and recordings
 - Fast channel changes: the playback engine is pre-warmed and nothing waits on the network before a zap.
-- Playback by libmpv, bundled with the app: H.264, HEVC, MPEG-2, AC-3/E-AC-3, teletext, hardware decode where the
-  machine allows it. You never install mpv yourself.
-- Works offline from its local cache: the channel list and guide open without the server.
+- Playback powered by MPV: H.264, HEVC, MPEG-2, AC-3/E-AC-3, teletext, hardware decode where the
+  machine allows it.
 - System tray, media keys and OS media controls (MPRIS, Windows media overlay, macOS Now Playing), keeps the screen
   awake while playing, pauses and releases the stream when the machine sleeps.
 - Single instance and `downlink://channel/<uuid>` deep links.
