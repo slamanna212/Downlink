@@ -297,6 +297,7 @@ jobs:
 
       # Also proves the hardened-runtime app can load its bundled libmpv (library validation) and play a frame.
       - name: Verify the app
+        timeout-minutes: 10
         env:
           SIGNED: ${{ steps.apple.outputs.signed }}
         run: |
@@ -308,7 +309,21 @@ jobs:
             spctl --assess --type execute --verbose=4 "$app"
           fi
           exe="$(find "$app/Contents/MacOS" -maxdepth 1 -type f -perm -u+x | head -n1)"
-          DOWNLINK_REQUIRE_BUNDLED=1 "$exe" --self-test
+          # The self-test gives up after ~35 s on its own; past 90 s it is hung, so dump every thread's stack
+          # (macOS `sample`) before killing it, otherwise the job just sits until the 6 h timeout with no log.
+          DOWNLINK_REQUIRE_BUNDLED=1 "$exe" --self-test &
+          pid=$!
+          for _ in $(seq 90); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "::error::--self-test still running after 90 s; thread stacks follow"
+            sample "$pid" 5 -mayDie || true
+            kill -9 "$pid" || true
+            exit 1
+          fi
+          wait "$pid"
 
       # The updater archive is made here rather than by tauri: updater signing happens in publish, away from the
       # build (createUpdaterArtifacts is off in every build job).
