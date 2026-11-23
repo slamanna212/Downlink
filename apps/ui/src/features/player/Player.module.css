@@ -134,16 +134,23 @@
 .progressSection { background: var(--dl-accent); }
 
 .controls {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: var(--mantine-spacing-sm);
   margin-top: var(--mantine-spacing-md);
 }
-.spacer { flex: 1; }
-/* control bar slots: start | transport | volume | end. One layout for live, catch-up, VOD and recordings;
-   a control that does nothing for the current content is not rendered. */
+/* control bar slots: start (back, volume) | transport | end (menus). One layout for live, catch-up, VOD and
+   recordings; a control that does nothing for the current content is not rendered. */
 .group { display: flex; align-items: center; gap: var(--mantine-spacing-sm); }
-.groupEnd { margin-left: auto; }
+.groupEnd { justify-content: flex-end; }
+/* play/pause stays dead centre: restart + back 10 s fill the left cell, forward 10 s + go live the right. */
+.transport {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+}
 .volume { width: 96px; }
 
 /* resting 10% fill on play/pause */

@@ -163,9 +163,10 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   icon · past no archive dashed, disabled text · now `--dl-guide-now` + 10% fill + 2 px bar · future
   `--dl-guide-future` · scheduled red dot · focused = `--dl-row-focus` tint, no ring.
 - **Player**: full-bleed video, bottom `--dl-scrim` with badge row, 30/650 title, timeline, 44 px controls.
-  One control bar for live, catch-up, VOD and recordings: same slots and order (start: back · transport:
-  −10 s, play/pause, +10 s, start over, go live · volume · end: audio, subtitles, stream, open in Plex, info,
-  multiview, mini player, full screen). A control that does nothing for the current content is not rendered
+  One control bar for live, catch-up, VOD and recordings, a `1fr auto 1fr` grid of three groups: left = back,
+  mute + volume; centre = transport, with play/pause dead centre whatever else is shown (start over, −10 s on
+  its left; +10 s, go live on its right); right = audio, subtitles, stream, open in Plex, info,
+  multiview, mini player, full screen. A control that does nothing for the current content is not rendered
   (never shown disabled): skip needs a seekable stream, start over needs a channel or a VOD/recording past
   its start, go live needs catch-up or live behind the edge, stream and multiview are live only, audio and
   subtitles need tracks. The seek slot holds the channel timeline (live/catch-up) or a position bar (VOD/recording).

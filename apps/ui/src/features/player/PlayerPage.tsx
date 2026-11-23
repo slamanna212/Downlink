@@ -633,9 +633,33 @@ export function PlayerPage() {
             <div className={classes.controls}>
               <div className={classes.group} data-slot="start">
                 <DLIconButton label={t('player.back')} icon={IconArrowLeft} variant="overlay" size="lg" onClick={goBack} />
+                <DLIconButton
+                  label={player.muted ? t('player.unmute') : t('player.mute')}
+                  icon={player.muted ? IconVolumeOff : IconVolume}
+                  variant="overlay"
+                  size="lg"
+                  onClick={toggleMute}
+                />
+                <Slider
+                  className={classes.volume}
+                  size="xs"
+                  min={0}
+                  max={100}
+                  value={player.muted ? 0 : player.volume}
+                  onChange={(v) => cmd({ kind: 'setVolume', volume: v })}
+                  label={null}
+                  thumbLabel={t('player.volume')}
+                />
               </div>
-              <div className={classes.group} data-slot="transport">
+              <div className={classes.transport} data-slot="transport">
+              <div className={`${classes.group} ${classes.groupEnd}`}>
+              {canRestart && (
+                <DLButton variant="overlay" size="lg" icon={IconHistory} keyHint="S" onClick={restart}>
+                  {t('player.restart')}
+                </DLButton>
+              )}
               {canSkip && <DLIconButton label={t('player.back10')} icon={IconRewindBackward10} variant="overlay" size="lg" onClick={() => seekBy(-10)} />}
+              </div>
               <span className={classes.playPause}>
                 <DLIconButton
                   label={paused ? t('player.play') : t('player.pause')}
@@ -646,36 +670,14 @@ export function PlayerPage() {
                   onClick={togglePause}
                 />
               </span>
+              <div className={classes.group}>
               {canSkip && <DLIconButton label={t('player.fwd10')} icon={IconRewindForward10} variant="overlay" size="lg" onClick={() => seekBy(10)} />}
-              {canRestart && (
-                <DLButton variant="overlay" size="lg" icon={IconHistory} keyHint="S" onClick={restart}>
-                  {t('player.restart')}
-                </DLButton>
-              )}
               {showGoLive && (
                 <DLButton variant="live" size="lg" keyHint="End" onClick={goLive}>
                   {t('player.goLive')}
                 </DLButton>
               )}
               </div>
-              <div className={classes.group} data-slot="volume">
-              <DLIconButton
-                label={player.muted ? t('player.unmute') : t('player.mute')}
-                icon={player.muted ? IconVolumeOff : IconVolume}
-                variant="overlay"
-                size="lg"
-                onClick={toggleMute}
-              />
-              <Slider
-                className={classes.volume}
-                size="xs"
-                min={0}
-                max={100}
-                value={player.muted ? 0 : player.volume}
-                onChange={(v) => cmd({ kind: 'setVolume', volume: v })}
-                label={null}
-                thumbLabel={t('player.volume')}
-              />
               </div>
               <div className={`${classes.group} ${classes.groupEnd}`} data-slot="end">
               {hasAudioMenu && <AudioMenu tracks={player.tracks} {...menuProps('audio')} />}
