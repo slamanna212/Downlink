@@ -299,8 +299,11 @@
 }
 .block[data-state='now'] .face { background: var(--dl-guide-now); }
 .block[data-focused] { z-index: 2; }
+/* No ring on guide cells (overrides the global focus ring, incl. tv density); focus is the background tint only. */
+.block.block[data-focused],
+.block.block:focus-visible { outline: none; box-shadow: none; }
 .block[data-focused] .face,
-.block:focus-visible .face { box-shadow: var(--dl-focus-ring); background: var(--dl-row-focus); }
+.block:focus-visible .face { background: var(--dl-row-focus); }
 
 .fill {
   position: absolute;

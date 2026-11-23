@@ -161,7 +161,7 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 - **Guide**: preview pane (260 px, 384×216 art / mini player, updates after 300 ms dwell) · 40 px sticky time header · 180 px sticky
   channel column · 64 px rows · red now line + time pill. Blocks: past+archive `--dl-guide-past` + history
   icon · past no archive dashed, disabled text · now `--dl-guide-now` + 10% fill + 2 px bar · future
-  `--dl-guide-future` · scheduled red dot · focused ring.
+  `--dl-guide-future` · scheduled red dot · focused = `--dl-row-focus` tint, no ring.
 - **Player**: full-bleed video, bottom `--dl-scrim` with badge row, 30/650 title, timeline, 44 px controls.
   Live and catch-up share one channel timeline: a 1 h window of wall-clock time sliding under a thumb
   fixed at the centre, so there is always room to rewind. Gaps (0.25rem) only at EPG programme
