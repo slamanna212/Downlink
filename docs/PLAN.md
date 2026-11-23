@@ -565,11 +565,11 @@ A CI job runs each artefact on a clean VM/container with **no mpv or libmpv inst
   its pre-warmed instance and the full failover policy); tiles 2–9 get their own instances, created
   on entering multiview and destroyed on exit. Live channels only (no catch-up, VOD, recordings).
 - **Surfaces.** Linux: one `GtkGLArea` per tile in the same `GtkOverlay`, each with its own render
-  context. Windows: one `--wid` child HWND per tile beneath WebView2. macOS: one NSView per tile;
-  until the macOS surface is reworked for several instances, macOS reports a cap of 1 tile and the
-  entry points are hidden.
+  context. Windows: one `--wid` popup per tile behind the main window. macOS: one `NSOpenGLView`
+  per tile below the `WKWebView`, each with its own GL and render context. Every platform has the
+  same tile cap.
 - **Rendering.** While more than one surface is attached, render calls pass
-  `MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME=0`: every surface renders on the GTK main thread, and one
+  `MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME=0`: every surface renders on the main thread (GTK, AppKit), and one
   blocking render starves the rest (observed: tiles froze after two frames). The audio output list
   excludes SDL, whose global init crashed when several instances started at once (§4.3).
 - **Options.** Tiles use profile `multiview` (owned by `downlink-player`): the `live` profile plus
@@ -1242,8 +1242,8 @@ Acceptance:
 
 ### M7 — macOS
 
-Add the macOS build job; Developer ID signing and notarisation (§10.5); universal libmpv; the macOS
-surface reworked for several instances so multiview works; Mac testers verify the M0 checks and every
+Add the macOS build job; Developer ID signing and notarisation (§10.5); universal libmpv; Mac testers
+verify multiview (one surface per tile, as on Linux and Windows), the M0 checks and every
 milestone's acceptance; fix what they find, then ship macOS on the stable channel.
 
 ### Definition of done (every milestone)

@@ -69,7 +69,7 @@ pub fn attach(
     attach_slot(app, p.engine(), dispatch, 0)
 }
 
-/// Attach a surface for `slot`. macOS supports slot 0 only (`MAX_SURFACES` is 1). Main thread only.
+/// Attach a surface for `slot` (0 = main player, 1.. = multiview tiles). Main thread only.
 #[cfg(target_os = "macos")]
 pub fn attach_slot(
     app: &AppHandle,
@@ -77,9 +77,6 @@ pub fn attach_slot(
     dispatch: MainThreadDispatch,
     slot: u32,
 ) -> Result<Surface, String> {
-    if slot != 0 {
-        return Err("multiview is not available on macOS yet".into());
-    }
     let win = app.get_webview_window("main").ok_or("no main window")?;
     let view = win.ns_window().map_err(|e| e.to_string())?;
     let mut s = Surface::with_slot(engine, dispatch, slot);

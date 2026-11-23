@@ -367,9 +367,9 @@ impl Multiview {
             .iter()
             .map(|(s, t)| {
                 let snap = t.player.snapshot();
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 let frames = lock(&t.surface).render_count();
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                 let frames = 0;
                 (*s, snap.position_secs, snap.dropped_frames, frames)
             })
