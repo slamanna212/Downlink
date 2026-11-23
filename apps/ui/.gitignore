@@ -2,3 +2,6 @@
 # playwright
 test-results/
 playwright-report/
+
+# marketing screenshots (pnpm screenshots)
+/screenshots/
