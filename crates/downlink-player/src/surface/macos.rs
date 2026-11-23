@@ -196,6 +196,38 @@ fn draw(slot: u32, frames: &AtomicU64) {
     });
 }
 
+/// Depth-first search for the webview under `view` (inclusive). wry wraps it: the window's
+/// content view is a `WryWebViewParent` holding a `WryWebView` (a `WKWebView` subclass), so match
+/// by `isKindOfClass:` rather than by class name, at any depth. Main thread only.
+///
+/// # Safety
+/// `view` must be a live `NSView`.
+unsafe fn find_webview(
+    view: &AnyObject,
+    wk_class: &AnyClass,
+    depth: u32,
+) -> Option<Retained<AnyObject>> {
+    // SAFETY: messages to live NSViews on the main thread (caller contract).
+    unsafe {
+        let is_wk: Bool = msg_send![view, isKindOfClass: wk_class];
+        if is_wk.as_bool() {
+            return Retained::retain((view as *const AnyObject).cast_mut());
+        }
+        if depth >= 8 {
+            return None;
+        }
+        let subviews: Retained<AnyObject> = msg_send![view, subviews];
+        let count: usize = msg_send![&*subviews, count];
+        for i in 0..count {
+            let v: Retained<AnyObject> = msg_send![&*subviews, objectAtIndex: i];
+            if let Some(found) = find_webview(&v, wk_class, depth + 1) {
+                return Some(found);
+            }
+        }
+        None
+    }
+}
+
 fn update_context(slot: u32) {
     with_slot_state(slot, |st| {
         // SAFETY: message to the retained NSOpenGLContext on the main thread.
@@ -220,19 +252,11 @@ impl VideoSurface for MacSurface {
             let content: Option<Retained<AnyObject>> = msg_send![window, contentView];
             let content =
                 content.ok_or_else(|| PlayerError::Surface("window has no content view".into()))?;
-            let subviews: Retained<AnyObject> = msg_send![&*content, subviews];
-            let count: usize = msg_send![&*subviews, count];
-            let mut webview: Option<Retained<AnyObject>> = None;
-            for i in 0..count {
-                let v: Retained<AnyObject> = msg_send![&*subviews, objectAtIndex: i];
-                let cls_name: Retained<NSString> = msg_send![&*v, className];
-                if cls_name.to_string().contains("WKWebView") {
-                    webview = Some(v);
-                    break;
-                }
-            }
-            let webview =
-                webview.ok_or_else(|| PlayerError::Surface("no WKWebView found".into()))?;
+            let wk_class = class(c"WKWebView")?;
+            let webview = find_webview(&content, wk_class, 0).ok_or_else(|| {
+                let cls: Retained<NSString> = msg_send![&*content, className];
+                PlayerError::Surface(format!("no WKWebView found under {cls}"))
+            })?;
 
             // Core 3.2, double buffered, accelerated.
             let attrs: [u32; 7] = [99, 0x3200, 5, 73, 0, 0, 0];
