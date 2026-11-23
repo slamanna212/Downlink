@@ -4,7 +4,8 @@ import { t } from '../../lib/i18n';
 /** A saved position is only worth offering when it is more than 2 s in and more than 2 s from the end. */
 export function resumeUseful(resumeSecs: number | null | undefined, durationSecs: number | null | undefined): resumeSecs is number {
   if (resumeSecs == null || resumeSecs <= 2) return false;
-  return durationSecs == null || durationSecs - resumeSecs > 2;
+  // No (or a zero) duration yet means unknown: keep offering the resume point.
+  return durationSecs == null || durationSecs <= 0 || durationSecs - resumeSecs > 2;
 }
 
 export const progressOf = (resume: number | null, duration: number | null): number | null =>

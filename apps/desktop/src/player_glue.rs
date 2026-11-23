@@ -109,6 +109,7 @@ pub(crate) fn plan_request(plan: &PlayPlan, mode: PlayMode, failover: bool) -> P
             PlayProfile::Seekable => Profile::Seekable,
         },
         start_secs: None,
+        start_paused: false,
         failover_capable: failover,
         mode,
         source_index: 0,
@@ -899,6 +900,9 @@ impl Playback {
         };
         let mut req = self.to_request(plan, mode, false);
         req.start_secs = start_secs;
+        // The UI asks "keep watching or start over" for a recording with a saved position; hold playback
+        // until it answers (it sends `Resume`). Keep the threshold equal to `resumeUseful` in the UI.
+        req.start_paused = mode == PlayMode::Recording && start_secs.is_some_and(|s| s > 2.0);
         self.player
             .play(req)
             .map_err(player_err)

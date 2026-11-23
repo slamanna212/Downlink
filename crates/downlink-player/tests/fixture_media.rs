@@ -139,6 +139,7 @@ fn req(port: u16, failover: bool) -> PlayRequest {
         headers: vec![],
         profile: Profile::Live,
         start_secs: None,
+        start_paused: false,
         failover_capable: failover,
         mode: PlayMode::Live,
         source_index: 0,

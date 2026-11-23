@@ -497,6 +497,16 @@ export function PlayerPage() {
   }, [player.mode, player.mediaId, shownProg]);
   const mediaMatch = useMediaMatch(player.state === 'Idle' || player.state === 'Stopped' ? null : mediaTarget).data ?? null;
   const showResume = timeshift && player.mode !== 'vod' && resumeUseful(player.resumeAt, player.duration) && resumeDismissed !== resumeKey;
+  // A recording with a saved position is loaded paused (downlink-player `start_paused`) so nothing plays under
+  // the prompt. Whenever the prompt is not up (either button, or it never applied: the duration says the
+  // position is no longer useful), release the pause once per session. Escape leaves the player entirely.
+  const heldPause = player.mode === 'recording' && player.resumeAt != null && player.resumeAt > 2;
+  const releasedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!heldPause || showResume || player.state !== 'Paused' || releasedFor.current === resumeKey) return;
+    releasedFor.current = resumeKey;
+    cmd({ kind: 'resume' });
+  }, [heldPause, showResume, player.state, resumeKey, cmd]);
 
   return (
     <div

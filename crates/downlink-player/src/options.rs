@@ -575,10 +575,18 @@ pub fn loadfile_options(
     prefs: &Preferences,
     headers: &[(String, String)],
     start_secs: Option<f64>,
+    start_paused: bool,
 ) -> String {
     // `pause` is engine state that survives `loadfile`: a session paused (or one that failed while
     // paused) would otherwise start the next file frozen while the UI says it is playing.
-    let mut parts: Vec<String> = vec!["pause=no".to_owned()];
+    let mut parts: Vec<String> = vec![
+        if start_paused {
+            "pause=yes"
+        } else {
+            "pause=no"
+        }
+        .to_owned(),
+    ];
     parts.extend(
         profile_options(profile, prefs)
             .into_iter()
@@ -715,7 +723,7 @@ mod tests {
             let o = profile_options(prof, &p);
             assert_eq!(o.iter().filter(|(k, _)| k == "sid").count(), 1);
             assert!(has(&o, "sid", "no"), "{prof:?}");
-            assert!(loadfile_options(prof, &p, &[], None).contains("sid=%2%no"));
+            assert!(loadfile_options(prof, &p, &[], None, false).contains("sid=%2%no"));
         }
     }
 
@@ -862,6 +870,7 @@ mod tests {
             &Preferences::default(),
             &[("X-API-Key".into(), "k,1".into())],
             None,
+            false,
         );
         // inner list: "X-API-Key: k\,1" (15 bytes), the comma escaped for mpv's list parser
         assert!(s.contains("http-header-fields=%15%X-API-Key: k\\,1"), "{s}");
@@ -878,6 +887,7 @@ mod tests {
                 ("Referer".into(), "http://r.test".into()),
             ],
             None,
+            false,
         );
         assert!(
             s.contains("http-header-fields=%46%Authorization: Bearer t,Referer: http://r.test"),
@@ -895,6 +905,7 @@ mod tests {
                 ("X-API-Key".into(), "k".into()),
             ],
             None,
+            false,
         );
         assert!(s.contains("user-agent=%10%Agent/1, x"), "{s}");
         assert!(s.contains("http-header-fields=%12%X-API-Key: k"), "{s}");
@@ -916,14 +927,34 @@ mod tests {
     #[test]
     fn every_load_starts_unpaused() {
         for p in [Profile::Live, Profile::Timeshift, Profile::Seekable] {
-            let s = loadfile_options(p, &Preferences::default(), &[], None);
+            let s = loadfile_options(p, &Preferences::default(), &[], None, false);
             assert!(s.starts_with("pause=no,"), "{s}");
         }
     }
 
     #[test]
+    fn start_paused_loads_paused() {
+        let s = loadfile_options(
+            Profile::Seekable,
+            &Preferences::default(),
+            &[],
+            Some(30.0),
+            true,
+        );
+        assert!(s.starts_with("pause=yes,"), "{s}");
+        assert!(s.contains("start=%6%30.000"), "{s}");
+        assert!(!s.contains("pause=no"), "{s}");
+    }
+
+    #[test]
     fn no_headers_no_header_option() {
-        let s = loadfile_options(Profile::Seekable, &Preferences::default(), &[], Some(12.5));
+        let s = loadfile_options(
+            Profile::Seekable,
+            &Preferences::default(),
+            &[],
+            Some(12.5),
+            false,
+        );
         assert!(!s.contains("http-header-fields"));
         assert!(s.contains("start=%6%12.500"));
     }

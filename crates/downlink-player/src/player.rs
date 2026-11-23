@@ -26,6 +26,9 @@ pub struct PlayRequest {
     pub headers: Vec<(String, String)>,
     pub profile: Profile,
     pub start_secs: Option<f64>,
+    /// Load the file paused (`pause=yes`), so nothing plays until the caller sends `Resume`. Used while the
+    /// UI asks whether to resume or start over. Applies to the first load only.
+    pub start_paused: bool,
     /// `Caps::FAILOVER` present on the source.
     pub failover_capable: bool,
     pub mode: PlayMode,
@@ -320,6 +323,7 @@ impl fmt::Debug for PlayRequest {
             )
             .field("profile", &self.profile)
             .field("start_secs", &self.start_secs)
+            .field("start_paused", &self.start_paused)
             .field("failover_capable", &self.failover_capable)
             .finish()
     }
@@ -1071,7 +1075,17 @@ fn load_current(inner: &Inner, s: &mut Shared) -> Result<(), PlayerError> {
         Ok(p) => p.clone(),
         Err(p) => p.into_inner().clone(),
     };
-    let opts = options::loadfile_options(req.profile, &prefs, &req.headers, req.start_secs);
+    let opts = options::loadfile_options(
+        req.profile,
+        &prefs,
+        &req.headers,
+        req.start_secs,
+        req.start_paused,
+    );
+    // Only the first load starts paused; a reload (retry) must not freeze a session the user resumed.
+    if let Some(r) = s.request.as_mut() {
+        r.start_paused = false;
+    }
     s.load_started = Some(Instant::now());
     s.first_frame_ms = None;
     // A new file starts a new timeline and a new cache.
@@ -1740,6 +1754,7 @@ mod tests {
             headers: vec![("X-API-Key".into(), "sekrit".into())],
             profile: Profile::Live,
             start_secs: None,
+            start_paused: false,
             failover_capable: true,
             mode: PlayMode::Live,
             source_index: 0,
