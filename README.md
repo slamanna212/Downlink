@@ -16,10 +16,9 @@
 ---
 
 # What Is Downlink
-I wanted a desktop IPTV player that could take advantage of all Dispatcharr offers. Fast, Easy to Use, and reliable.
+I wanted a desktop IPTV player that could take advantage of all Dispatcharr offers. Support for Live channels, VOD, and DVR. Fast, Easy to Use, and reliable.
 
-
- While not required, this app is best used with [Dispatcharr](https://github.com/dispatcharr/dispatcharr).
+While not required, this app is best used with [Dispatcharr](https://github.com/dispatcharr/dispatcharr).
 
 ## Features
 
