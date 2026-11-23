@@ -10,6 +10,7 @@ const focusFirstRow = (page: Page) => page.locator('[role=list] [data-index="0"]
 test('first run: add a Dispatcharr source, test it, save, land on Channels with the first row focused', async ({ page }) => {
   await page.goto('/?mock=empty');
   await page.getByRole('button', { name: 'Add source' }).click();
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Home server');
   await page.getByLabel('Server URL').fill('http://192.0.2.10:9191');
   await page.getByLabel('API key').fill('example-key');
   await page.getByRole('button', { name: 'Test connection' }).click();
