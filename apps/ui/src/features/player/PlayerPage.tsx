@@ -650,6 +650,7 @@ export function PlayerPage() {
                   label={null}
                   thumbLabel={t('player.volume')}
                 />
+                {hasSubMenu && <SubtitleMenu tracks={player.tracks} {...menuProps('subs')} />}
               </div>
               <div className={classes.transport} data-slot="transport">
               <div className={`${classes.group} ${classes.groupEnd}`}>
@@ -681,7 +682,6 @@ export function PlayerPage() {
               </div>
               <div className={`${classes.group} ${classes.groupEnd}`} data-slot="end">
               {hasAudioMenu && <AudioMenu tracks={player.tracks} {...menuProps('audio')} />}
-              {hasSubMenu && <SubtitleMenu tracks={player.tracks} {...menuProps('subs')} />}
               {canSwitchStream && channel && (
                 <StreamMenu channelId={channel.id} onDenied={() => setStreamDenied(true)} {...menuProps('stream')} />
               )}

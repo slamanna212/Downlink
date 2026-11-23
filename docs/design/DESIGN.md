@@ -163,13 +163,13 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   icon · past no archive dashed, disabled text · now `--dl-guide-now` + 10% fill + 2 px bar · future
   `--dl-guide-future` · scheduled red dot · focused = `--dl-row-focus` tint, no ring.
 - **Player**: full-bleed video, bottom `--dl-scrim` with badge row, 30/650 title, timeline, 44 px controls.
-  One control bar for live, catch-up, VOD and recordings, a `1fr auto 1fr` grid of three groups: left = back,
-  mute + volume; centre = transport, with play/pause dead centre whatever else is shown (start over, −10 s on
-  its left; +10 s, go live on its right); right = audio, subtitles, stream, open in Plex, info,
+  One control bar for live, catch-up, VOD and recordings, a `minmax(0,1fr) auto minmax(0,1fr)` grid of three groups: left = back,
+  mute + volume (slider hidden below 900 px), subtitles/CC; centre = transport, with play/pause dead centre whatever else is shown (start over, −10 s on
+  its left; +10 s, go live on its right); right = audio, stream, open in Plex, info,
   multiview, mini player, full screen. A control that does nothing for the current content is not rendered
   (never shown disabled): skip needs a seekable stream, start over needs a channel or a VOD/recording past
   its start, go live needs catch-up or live behind the edge, stream and multiview are live only, audio and
-  subtitles need tracks. The seek slot holds the channel timeline (live/catch-up) or a position bar (VOD/recording).
+  subtitles/CC need tracks. The seek slot holds the channel timeline (live/catch-up) or a position bar (VOD/recording).
   Live and catch-up share one channel timeline: a 1 h window of wall-clock time sliding under a thumb
   fixed at the centre, so there is always room to rewind. Gaps (0.25rem) only at EPG programme
   boundaries; no guide data = no gaps. Layers: unplayable (before the buffer/archive, after the live edge)
