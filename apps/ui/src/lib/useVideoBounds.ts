@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { invoke } from '../api/ipc';
-import { createBoundsReporter, toPhysicalBounds } from './videoBounds';
+import { useUiStore } from '../store/ui';
+import { createBoundsReporter, nextBoundsSeq, toPhysicalBounds } from './videoBounds';
 
 /**
  * Reports the element's rect in physical pixels (ResizeObserver + one rAF debounce) so the libmpv
@@ -12,21 +13,34 @@ export function useVideoBounds(ref: React.RefObject<HTMLElement | null>, enabled
   useEffect(() => {
     const el = ref.current;
     if (!el || !enabled) return;
-    const reporter = createBoundsReporter({
+    const reporter: ReturnType<typeof createBoundsReporter> = createBoundsReporter({
       measure: () => toPhysicalBounds(el.getBoundingClientRect(), window.devicePixelRatio || 1),
-      send: (b) =>
-        void (slot > 0 ? invoke('multiview_set_bounds', { ...b, slot }) : invoke('set_video_bounds', b)).catch(() => undefined),
+      send: (b) => {
+        const args = { ...b, seq: nextBoundsSeq() };
+        void (slot > 0 ? invoke('multiview_set_bounds', { ...args, slot }) : invoke('set_video_bounds', args)).catch(() => {
+          // Not applied natively: forget it so the next measure resends instead of deduping against it.
+          reporter.reset();
+          reporter.schedule();
+        });
+      },
     });
     const ro = new ResizeObserver(() => reporter.schedule());
     ro.observe(el);
     // Position can change without a resize (rail collapse transition, window move/zoom).
     const onChange = () => reporter.schedule();
-    window.addEventListener('resize', onChange);
+    // A window transition (fullscreen) resizes the window over several frames and the DPR can change
+    // with it: re-measure as it settles. Native sizes are only ever corrected by a later report.
+    const onWindowChange = () => reporter.settle();
+    window.addEventListener('resize', onWindowChange);
+    const unsubFullscreen = useUiStore.subscribe((s, prev) => {
+      if (s.fullscreen !== prev.fullscreen) reporter.settle();
+    });
     document.addEventListener('transitionend', onChange, true);
     reporter.schedule();
     return () => {
       ro.disconnect();
-      window.removeEventListener('resize', onChange);
+      window.removeEventListener('resize', onWindowChange);
+      unsubFullscreen();
       document.removeEventListener('transitionend', onChange, true);
       reporter.dispose();
     };

@@ -76,7 +76,7 @@ export interface Commands {
   set_debug_logging: { args: { enabled: boolean }; result: null };
   get_settings: { args: Record<string, never>; result: AppSettings };
   set_settings: { args: { patch: Partial<AppSettings> }; result: AppSettings };
-  set_video_bounds: { args: VideoBounds; result: null };
+  set_video_bounds: { args: VideoBounds & { seq?: number }; result: null };
   set_fullscreen: { args: { enabled: boolean }; result: null };
   set_mini_player: { args: { enabled: boolean }; result: null };
   get_guide: { args: GuideArgs; result: GuideResult };
@@ -97,7 +97,7 @@ export interface Commands {
   multiview_remove_tile: { args: { slot: number }; result: null };
   multiview_set_audio: { args: { slot: number }; result: null };
   multiview_make_main: { args: { slot: number }; result: null };
-  multiview_set_bounds: { args: VideoBounds & { slot: number }; result: null };
+  multiview_set_bounds: { args: VideoBounds & { slot: number; seq?: number }; result: null };
   multiview_exit: { args: Record<string, never>; result: null };
   get_update_status: { args: Record<string, never>; result: UpdateStatus };
   set_update_channel: { args: { channel: UpdateChannel }; result: UpdateStatus };
