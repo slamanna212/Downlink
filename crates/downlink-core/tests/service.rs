@@ -945,6 +945,34 @@ async fn counts_channel_by_id_and_filters() {
 }
 
 #[tokio::test]
+async fn channel_neighbours_follow_list_order_and_wrap() {
+    let (_server, e, _) = added().await;
+    let chans = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    assert_eq!(chans.len(), 3);
+    let mid = e.svc.channel_neighbours(chans[1].id).await.unwrap();
+    assert_eq!(mid.prev.map(|c| c.id), Some(chans[0].id));
+    assert_eq!(mid.next.map(|c| c.id), Some(chans[2].id));
+    let first = e.svc.channel_neighbours(chans[0].id).await.unwrap();
+    assert_eq!(
+        first.prev.map(|c| c.id),
+        Some(chans[2].id),
+        "wraps to the last"
+    );
+    let last = e.svc.channel_neighbours(chans[2].id).await.unwrap();
+    assert_eq!(
+        last.next.map(|c| c.id),
+        Some(chans[0].id),
+        "wraps to the first"
+    );
+    let gone = e.svc.channel_neighbours(99_999).await.unwrap();
+    assert!(gone.prev.is_none() && gone.next.is_none());
+}
+
+#[tokio::test]
 async fn home_and_search_carry_full_channel_dtos_in_the_ui_shapes() {
     let (_server, e, sid) = added().await;
     let chans = e
@@ -966,6 +994,7 @@ async fn home_and_search_carry_full_channel_dtos_in_the_ui_shapes() {
         season: None,
         episode: None,
         flags: 0,
+        icon: None,
     };
     let past = now - 7200;
     e.svc

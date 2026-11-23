@@ -41,6 +41,7 @@ export const GuideBlock = memo(function GuideBlock({ p, row, state, x, y, w, h, 
       style={{ left: x, top: y, width: w, height: h }}
     >
       <div className={classes.face}>
+        {state === 'now' && <div className={classes.fill} style={{ width: `${pct * 100}%` }} />}
         <div className={classes.inner} style={{ maxWidth: Math.max(w - 8, 0) }}>
           <div className={classes.blockTitle}>
             {state === 'past-archive' && (

@@ -357,6 +357,15 @@ pub struct ContinueItemDto {
 pub struct OnNowItemDto {
     pub channel: ChannelDto,
     pub now: Option<ProgrammeDto>,
+    pub next: Option<ProgrammeDto>,
+}
+
+/// Zapping targets around a channel (list order, wrapping).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelNeighboursDto {
+    pub prev: Option<ChannelDto>,
+    pub next: Option<ChannelDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]

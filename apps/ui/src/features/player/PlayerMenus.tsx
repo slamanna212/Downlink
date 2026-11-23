@@ -1,6 +1,6 @@
 import { Menu } from '@mantine/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { IconArrowsShuffle, IconBadgeCc, IconCheck, IconLanguage } from '@tabler/icons-react';
+import { IconArrowsExchange, IconBadgeCc, IconCheck, IconLanguage } from '@tabler/icons-react';
 import { invoke, toAppError } from '../../api/ipc';
 import type { AltStream, Track } from '../../api/types';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
@@ -149,7 +149,7 @@ export function StreamMenu({ channelId, opened, onChange, onDenied }: MenuProps 
   return (
     <Menu opened={opened} onChange={onChange} position="top-end" withinPortal>
       <Menu.Target>
-        <DLIconButton label={t('player.streams')} icon={IconArrowsShuffle} variant="overlay" size="lg" pressed={opened} />
+        <DLIconButton label={t('player.streams')} icon={IconArrowsExchange} variant="overlay" size="lg" pressed={opened} />
       </Menu.Target>
       <Menu.Dropdown aria-label={t('player.streams')} className={classes.streamMenu}>
         <Menu.Label>{t('player.streams')}</Menu.Label>

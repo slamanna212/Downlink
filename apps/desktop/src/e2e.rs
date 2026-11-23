@@ -170,6 +170,7 @@ async fn full(st: &AppState, db: &str) -> Result<(), String> {
                     season: None,
                     episode: None,
                     flags: 0,
+                    icon: None,
                 }])
                 .await
                 .map_err(|e| e.message)?;

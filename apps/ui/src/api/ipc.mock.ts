@@ -343,7 +343,7 @@ export function createMockBackend(): Backend {
           ...(cu ? [{ kind: 'catchup' as const, id: `catchup:${nnOf(cu).now?.id ?? `${cu.id}:${nowSec() - 3600}`}`, channel: cu, programme: null, title: 'Fieldwork S2 E3', subtitle: `${cu.name} · Yesterday 21:00`, art: null, progress: 0.5, remainingSecs: 1800 }] : []),
         ],
         favourites: favs,
-        onNow: favs.map((c) => ({ channel: c, now: nnOf(c).now })),
+        onNow: favs.map((c) => ({ channel: c, now: nnOf(c).now, next: nnOf(c).next })),
         recents: channels.slice(1, 6),
       };
     },
@@ -664,6 +664,14 @@ export function createMockBackend(): Backend {
         : null;
     },
     media_server_open: () => null,
+    // The mock guide has no artwork: every hero and card shows its gradient fallback.
+    programme_art: () => null,
+    channel_neighbours: ({ channelId }) => {
+      const i = channels.findIndex((c) => c.id === channelId);
+      const n = channels.length;
+      if (i < 0 || n < 2) return { prev: null, next: null };
+      return { prev: channels[(i + n - 1) % n] ?? null, next: channels[(i + 1) % n] ?? null };
+    },
     media_details: async ({ target }) => {
       await wait(250);
       if (target.kind === 'programme') {

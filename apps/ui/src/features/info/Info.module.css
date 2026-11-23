@@ -158,8 +158,6 @@
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scroll-snap-type: x proximity;
-  scrollbar-width: thin;
-  scrollbar-color: var(--dl-border) transparent;
 }
 .person { display: flex; flex-direction: column; gap: 0.125rem; min-width: 0; scroll-snap-align: start; }
 .portrait {

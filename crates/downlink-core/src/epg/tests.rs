@@ -49,6 +49,7 @@ fn p(cid: i64, s: i64, e: i64, t: &str) -> ProgrammeRow {
         season: None,
         episode: None,
         flags: 0,
+        icon: None,
     }
 }
 

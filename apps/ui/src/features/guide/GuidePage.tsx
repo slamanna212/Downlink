@@ -3,14 +3,13 @@ import { useNavigate } from 'react-router';
 import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
 import { useMergedRef } from '@mantine/hooks';
 import { Menu, SegmentedControl, Select } from '@mantine/core';
-import { IconCalendar } from '@tabler/icons-react';
+import { IconCalendar, IconChevronLeft, IconChevronRight, IconFilter } from '@tabler/icons-react';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { invoke } from '../../api/ipc';
 import { invalidateFavourites, useCaps, useCounts, useGroups, useOffline, useSources } from '../../api/queries';
 import type { Channel, Programme } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
-import { DLButton } from '../../components/DLButton/DLButton';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { EmptySource } from '../../pages/EmptySource';
@@ -24,7 +23,7 @@ import { openChannelMenu } from '../../store/contextMenu';
 import { openInfo } from '../../store/info';
 import { useUiStore } from '../../store/ui';
 import { freshGuideView, useViewStateStore, type GuideView } from '../../store/viewState';
-import { playCatchup, playChannel, restartProgramme } from '../player/actions';
+import { playCatchup, playChannel } from '../player/actions';
 import { GuideBlock } from './GuideBlock';
 import { GuidePreview, GuideRecordItems } from './GuidePreview';
 import {
@@ -58,31 +57,23 @@ interface ControlsProps {
   onNow: () => void;
 }
 
+/** Toolbar between the hero and the grid: day stepper, Now, channel filter, visible span. */
 const GuideControls = memo(function GuideControls({ span, onSpan, groupId, groups, onGroup, leftTime, days, onJump, onNow }: ControlsProps) {
+  const first = days[0] ?? leftTime;
+  const last = days.at(-1) ?? leftTime;
+  const step = (n: number) => onJump(Math.min(addDays(last, 1) - 1, Math.max(first, addDays(leftTime, n))));
   return (
-    <div className={classes.controls}>
-      <SegmentedControl
-        size="xs"
-        aria-label={t('guide.span')}
-        value={String(span)}
-        onChange={(v) => onSpan(Number(v) as SpanHours)}
-        data={SPANS_HOURS.map((h) => ({ value: String(h), label: `${h}h` }))}
-      />
-      <div className={classes.controlRow}>
-        <Select
-          size="xs"
-          w={130}
-          aria-label={t('guide.group')}
-          allowDeselect={false}
-          value={groupId == null ? 'all' : String(groupId)}
-          data={[{ value: 'all', label: t('guide.allGroups') }, ...groups.map((g) => ({ value: String(g.id), label: g.name }))]}
-          onChange={(v) => onGroup(v && v !== 'all' ? Number(v) : null)}
-        />
-        <Menu position="bottom-end">
+    <div className={classes.toolbar}>
+      <div className={classes.stepper}>
+        <button type="button" className={classes.stepBtn} aria-label={t('guide.prevDay')} disabled={startOfDay(leftTime) <= first} onClick={() => step(-1)}>
+          <IconChevronLeft size={16} stroke={dl.iconStroke} aria-hidden />
+        </button>
+        <Menu position="bottom-start">
           <Menu.Target>
-            <DLButton variant="default" size="sm" icon={IconCalendar} aria-label={`${formatDay(leftTime)}, ${t('guide.jumpDay')}`}>
-              {formatDay(leftTime)}
-            </DLButton>
+            <button type="button" className={classes.stepDay} aria-label={`${formatDay(leftTime)}, ${t('guide.jumpDay')}`}>
+              <IconCalendar size={16} stroke={dl.iconStroke} aria-hidden className={classes.dimIcon} />
+              {dayLabel(leftTime)}, {formatDay(leftTime)}
+            </button>
           </Menu.Target>
           <Menu.Dropdown>
             {days.map((d) => (
@@ -92,10 +83,33 @@ const GuideControls = memo(function GuideControls({ span, onSpan, groupId, group
             ))}
           </Menu.Dropdown>
         </Menu>
-        <DLButton variant="default" size="sm" onClick={onNow}>
-          {t('guide.now')}
-        </DLButton>
+        <button type="button" className={classes.stepBtn} aria-label={t('guide.nextDay')} disabled={startOfDay(leftTime) >= last} onClick={() => step(1)}>
+          <IconChevronRight size={16} stroke={dl.iconStroke} aria-hidden />
+        </button>
       </div>
+      <button type="button" className={classes.toolBtn} onClick={onNow}>
+        <span className={classes.liveDot} aria-hidden />
+        {t('guide.now')}
+      </button>
+      <span className={classes.toolSpacer} />
+      <Select
+        size="xs"
+        w={180}
+        aria-label={t('guide.group')}
+        allowDeselect={false}
+        leftSection={<IconFilter size={14} stroke={dl.iconStroke} />}
+        classNames={{ input: classes.filterInput }}
+        value={groupId == null ? 'all' : String(groupId)}
+        data={[{ value: 'all', label: t('guide.allGroups') }, ...groups.map((g) => ({ value: String(g.id), label: g.name }))]}
+        onChange={(v) => onGroup(v && v !== 'all' ? Number(v) : null)}
+      />
+      <SegmentedControl
+        size="xs"
+        aria-label={t('guide.span')}
+        value={String(span)}
+        onChange={(v) => onSpan(Number(v) as SpanHours)}
+        data={SPANS_HOURS.map((h) => ({ value: String(h), label: `${h}h` }))}
+      />
     </div>
   );
 });
@@ -195,7 +209,6 @@ export function GuidePage() {
   const [range, setRange] = useState<RenderRange | null>(null);
   const [leftTime, setLeftTime] = useState(() => nowEpoch());
   const [focus, setFocusState] = useState<Focus>(restore?.focus ?? { row: 0, t: nowEpoch() });
-  const [recordOpen, setRecordOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollPos = useRef({ left: 0, top: 0 });
   const raf = useRef(0);
@@ -446,9 +459,10 @@ export function GuidePage() {
       e.preventDefault();
       e.stopPropagation();
       activate(focusProgramme);
-    } else if ((e.key === 'r' || e.key === 'R') && caps.dvr && focusState && (focusState === 'now' || focusState === 'future')) {
+    } else if ((e.key === 'r' || e.key === 'R') && caps.dvr && focusProgramme && (focusState === 'now' || focusState === 'future')) {
+      // Recording lives in the details modal (and the right-click menu).
       e.preventDefault();
-      setRecordOpen(true);
+      openInfo({ kind: 'programme', programme: focusProgramme, channel: focusChannel ?? undefined });
     } else if ((e.key === 'i' || e.key === 'I') && focusProgramme) {
       e.preventDefault();
       openInfo({ kind: 'programme', programme: focusProgramme, channel: focusChannel ?? undefined });
@@ -508,12 +522,7 @@ export function GuidePage() {
     if (ch) openChannelMenu(e, ch);
   };
 
-  const onRecord = useStable((kind: 'once' | 'series') => {
-    setRecordOpen(false);
-    if (focusProgramme) record.mutate({ programmeId: focusProgramme.id, kind });
-  });
   const onPrimary = useStable(() => activate(focusProgramme));
-  const onFromStart = useStable(() => focusChannel && void restartProgramme(focusChannel.id).then((err) => (err ? undefined : navigate('/player'))));
   const onDetails = useStable(() => focusProgramme && showDetail(focusProgramme.channelId, focusProgramme.id));
   const onInfo = useStable(() => focusProgramme && openInfo({ kind: 'programme', programme: focusProgramme, channel: focusChannel ?? undefined }));
   const onFavourite = useStable(() => focusChannel && favourite.mutate({ channelId: focusChannel.id, favourite: !focusChannel.isFavourite }));
@@ -577,14 +586,7 @@ export function GuidePage() {
         programme={focusProgramme}
         channel={focusChannel}
         state={focusState}
-        canRecord={caps.dvr}
-        offline={offline}
-        canCatchup={caps.catchup}
-        recordOpen={recordOpen}
-        onRecordOpen={setRecordOpen}
-        onRecord={onRecord}
         onPrimary={onPrimary}
-        onFromStart={onFromStart}
         onDetails={onDetails}
         onInfo={onInfo}
         onFavourite={onFavourite}

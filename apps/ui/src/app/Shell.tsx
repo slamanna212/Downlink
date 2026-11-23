@@ -14,6 +14,8 @@ import { Banner } from '../components/Banner/Banner';
 import { formatUpdated } from '../lib/time';
 import { readTvSignals, wantsTv } from '../lib/tv';
 import { Rail, type RailMode } from './Rail';
+import { TitleBar } from '../components/TitleBar/TitleBar';
+import { isMac } from '../lib/platform';
 import { preloadRoutes } from './routes';
 import { useDetailStore } from '../store/detail';
 import { useInfoStore } from '../store/info';
@@ -147,6 +149,11 @@ function useDeepLinks() {
 }
 
 const isVideoRoute = (path: string) => path.startsWith('/player') || path.startsWith('/multiview');
+/**
+ * Routes whose content runs under the title bar (heroes and video). Everywhere else the bar takes its own
+ * 36 px row above the page, so no page control ever sits inside the drag region.
+ */
+const underTitleBar = (path: string) => path === '/' || path === '/guide' || isVideoRoute(path);
 
 export function Shell() {
   useResumeOnLaunch();
@@ -189,6 +196,9 @@ export function Shell() {
     setPrevPath(pathname);
     setFromVideo(isVideoRoute(prevPath));
   }
+  useEffect(() => {
+    if (!isVideoRoute(pathname)) useUiStore.getState().setLastAppPath(pathname);
+  }, [pathname]);
 
   // Keyboard map (PLAN §8.4): G guide, L live list, / search.
   useHotkeys([
@@ -201,7 +211,7 @@ export function Shell() {
   useHotkeys([['mod+K', () => openPalette(), { preventDefault: true }]], []);
 
   return (
-    <div className={`dl-shell ${classes.shell}`} data-route={route} data-video-hole={(videoHole && route !== 'player') || undefined} data-allow-blur={String(dl.allowBlur)}>
+    <div className={`dl-shell ${classes.shell}`} data-route={route} data-video-hole={(videoHole && route !== 'player') || undefined} data-allow-blur={String(dl.allowBlur)} data-mac={isMac() || undefined}>
       <a href="#main" className={classes.skip}>
         {t('a11y.skipToContent')}
       </a>
@@ -209,6 +219,10 @@ export function Shell() {
         <aside className={classes.rail} style={{ width }}>
           <Rail mode={mode} onToggle={() => setRailPref(collapsed ? 'expanded' : 'collapsed')} />
         </aside>
+      )}
+      <div className={classes.content} data-under-bar={underTitleBar(pathname) || undefined}>
+      {!fullscreen && !mini && (
+        <TitleBar onVideo={route === 'player'} inFlow={!underTitleBar(pathname)} passive={pathname.startsWith('/multiview')} />
       )}
       <main id="main" className={classes.main} tabIndex={-1}>
         {route !== 'player' && hasSource && sources?.[0] && (
@@ -218,6 +232,7 @@ export function Shell() {
           <Outlet />
         </RouteTransition>
       </main>
+      </div>
       <IdleMount when={detailOpen}><ChannelDetail /></IdleMount>
       <IdleMount when={infoOpen}><InfoModal /></IdleMount>
       <IdleMount><CommandPalette /></IdleMount>

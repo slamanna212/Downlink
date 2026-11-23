@@ -1,81 +1,149 @@
 .page {
-  /* Preview pane and its art / mini player box (16:9), scaled at tv density. */
-  --gpane: calc(260px * var(--gscale, 1));
+  /* Hero and its mini player box (16:9), scaled at tv density. */
+  --gpane: calc(288px * var(--gscale, 1));
   --gart-w: calc(384px * var(--gscale, 1));
   --gart-h: calc(216px * var(--gscale, 1));
+  --gmini-top: 44px;
+  --gmini-right: var(--mantine-spacing-xl);
   position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  /* Paints everything below the preview pane. The pane paints itself so its mini player can stay clear
-     while the shell is transparent (Shell data-video-hole). */
+  /* Paints everything below the hero. The hero paints itself so its mini player can stay clear while the
+     shell is transparent (Shell data-video-hole). */
   background: linear-gradient(var(--dl-surface-0), var(--dl-surface-0)) 0 var(--gpane) / 100% 100% no-repeat;
 }
 
-/* ---------- preview pane (260 px) ---------- */
+/* ---------- hero (288 px, runs under the title bar) ---------- */
 .preview {
   position: relative;
   height: var(--gpane);
   flex: none;
-  display: flex;
-  gap: var(--mantine-spacing-xl);
-  padding: var(--mantine-spacing-xl) var(--mantine-spacing-xl) var(--mantine-spacing-lg);
-  background: var(--dl-surface-0);
   overflow: hidden;
 }
-/* Hairline drawn inside the pane so the mini player's backdrop sits under it, not a transparent border. */
-.preview::after {
-  content: '';
+/* Art + scrim. With the mini player up, this layer is masked around the player's rect so the libmpv
+   surface underneath shows through; nothing else in the hero paints there. */
+.heroBack {
+  position: absolute;
+  inset: 0;
+  background: var(--dl-surface-0);
+}
+.preview[data-mini] .heroBack {
+  mask:
+    linear-gradient(var(--dl-surface-0) 0 0) right var(--gmini-right) top var(--gmini-top) / var(--gart-w) var(--gart-h) no-repeat,
+    linear-gradient(var(--dl-surface-0) 0 0);
+  mask-composite: exclude;
+}
+.heroArt { position: absolute; inset: 0; }
+.heroScrim { position: absolute; inset: 0; background: var(--dl-hero-scrim); }
+
+.info {
+  position: absolute;
+  left: var(--mantine-spacing-xl);
+  bottom: 1.75rem;
+  width: min(620px, calc(100% - 2 * var(--mantine-spacing-xl)));
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+}
+.preview[data-mini] .info { width: min(620px, calc(100% - var(--gart-w) - 3 * var(--mantine-spacing-xl))); }
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  font-size: var(--mantine-font-size-md);
+  color: var(--dl-text-2);
+  min-width: 0;
+  white-space: nowrap;
+}
+.title {
+  margin: 0;
+  font-size: calc(3rem * var(--gscale, 1));
+  line-height: 1.05;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.epRow {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  min-width: 0;
+}
+.epLine {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: var(--dl-text-2);
+}
+.desc {
+  margin: 0;
+  max-width: 540px;
+  font-size: var(--mantine-font-size-md);
+  line-height: 1.5;
+  color: var(--dl-text-dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.actions {
+  display: flex;
+  gap: var(--mantine-spacing-sm);
+  margin-top: var(--mantine-spacing-xs);
+}
+
+/* Mini player: a clear rect over the libmpv surface, with its own controls on a bottom scrim. */
+.mini {
+  position: absolute;
+  top: var(--gmini-top);
+  right: var(--gmini-right);
+  width: var(--gart-w);
+  height: var(--gart-h);
+  border-radius: var(--mantine-radius-lg);
+  border: 1px solid var(--dl-hairline-strong);
+  overflow: hidden;
+  color: var(--dl-on-video);
+}
+.miniOpen {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.mini .miniOpen:focus-visible { box-shadow: inset 0 0 0 2px var(--dl-accent); }
+.miniBadge { position: absolute; top: 10px; left: 10px; pointer-events: none; }
+.miniControls {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
-  height: 1px;
-  background: var(--dl-hairline);
+  height: 64px;
+  padding: 0 var(--mantine-spacing-sm) var(--mantine-spacing-sm);
+  display: flex;
+  align-items: flex-end;
+  gap: var(--mantine-spacing-xs);
+  background: var(--dl-tile-scrim);
+  opacity: 0;
+  transition: opacity 160ms var(--dl-ease);
   pointer-events: none;
 }
-/* Mini player: the pane stops painting and the box's spread shadow repaints it, leaving only the box clear
-   for the libmpv surface underneath (clipped by the pane's overflow). */
-.preview[data-mini] {
-  background: transparent;
-}
-.art {
-  width: var(--gart-w);
-  height: var(--gart-h);
-  flex: none;
-  border-radius: var(--mantine-radius-lg);
-  border: 1px solid var(--dl-hairline);
-  background: repeating-linear-gradient(135deg, var(--dl-surface-2) 0 10px, var(--dl-surface-1) 10px 20px);
-  display: flex;
-  align-items: flex-start;
-  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
-  font-family: var(--mantine-font-family-monospace);
-  font-size: var(--mantine-font-size-xs);
-  color: var(--dl-text-faint);
-}
-.mini {
-  position: relative;
-  width: var(--gart-w);
-  height: var(--gart-h);
-  flex: none;
-  padding: 0;
-  border: 0;
-  border-radius: var(--mantine-radius-lg);
-  background: transparent;
-  box-shadow: 0 0 0 100vmax var(--dl-surface-0);
-  cursor: pointer;
-}
-/* Keeps the backdrop when focused (the global ring would replace the whole box-shadow). */
-.preview .mini:focus-visible {
-  outline: none;
-  box-shadow: var(--dl-focus-ring), 0 0 0 100vmax var(--dl-surface-0);
-}
+.mini:hover .miniControls,
+.mini:focus-within .miniControls { opacity: 1; pointer-events: auto; }
+.miniSpacer { flex: 1; }
+.miniBar { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--dl-accent); pointer-events: none; }
 /* Browser dev mode has no libmpv: a stand-in so the box isn't a hole onto nothing. */
 .miniDev {
   position: absolute;
   inset: 0;
-  border-radius: inherit;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -84,82 +152,59 @@
   font-size: var(--mantine-font-size-xs);
   color: var(--dl-text-faint);
 }
-.info {
-  /* Above the mini player's spread backdrop (a later flex item paints over earlier ones). */
+
+/* ---------- toolbar (52 px) ---------- */
+.toolbar {
   position: relative;
-  z-index: 1;
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-}
-.metaRow {
-  display: flex;
-  align-items: center;
-  gap: var(--mantine-spacing-sm);
-  font-size: var(--mantine-font-size-sm);
-  color: var(--dl-text-2);
-}
-.title {
-  margin: var(--mantine-spacing-xs) 0;
-  font-size: var(--mantine-h1-font-size);
-  line-height: var(--mantine-h1-line-height);
-  font-weight: 650;
-  letter-spacing: -0.015em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.desc {
-  margin: 0;
-  max-width: 640px;
-  font-size: var(--mantine-font-size-md);
-  line-height: 1.5;
-  color: var(--dl-text-dim);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.epRow {
-  display: flex;
-  align-items: center;
-  gap: var(--mantine-spacing-sm);
-  min-width: 0;
-  margin-bottom: var(--mantine-spacing-xs);
-}
-.epLine {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--mantine-font-size-md);
-  font-weight: 600;
-  color: var(--dl-text-2);
-}
-/* The episode line takes a row: keep the pane's height by trimming the description. */
-.epRow + .desc { -webkit-line-clamp: 2; }
-.actions {
-  display: flex;
-  gap: var(--mantine-spacing-sm);
-  margin-top: auto;
-}
-/* Sits just left of the preview art, which takes the pane's right edge. */
-.controls {
-  position: absolute;
-  top: var(--mantine-spacing-xl);
-  right: calc(var(--mantine-spacing-xl) * 2 + var(--gart-w));
   z-index: 6;
+  flex: none;
+  height: 52px;
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--mantine-spacing-sm);
-}
-.controlRow {
-  display: flex;
-  gap: var(--mantine-spacing-sm);
   align-items: center;
+  gap: var(--mantine-spacing-sm);
+  padding: 0 var(--mantine-spacing-xl);
+  background: var(--dl-surface-0);
+  border-bottom: 1px solid var(--dl-hairline);
 }
+.toolSpacer { flex: 1; }
+.stepper,
+.toolBtn {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  border-radius: var(--mantine-radius-md);
+  background: var(--dl-surface-2);
+  border: 1px solid var(--dl-hairline-strong);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 600;
+  color: var(--dl-text);
+}
+.stepper { padding: 0 var(--mantine-spacing-xs); gap: 0.125rem; }
+.stepBtn,
+.stepDay {
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--mantine-spacing-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--mantine-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.stepBtn { width: 28px; color: var(--dl-text-dim); }
+.stepDay { padding: 0 0.375rem; white-space: nowrap; }
+.stepBtn:hover:not(:disabled),
+.stepDay:hover { background: var(--dl-hover); color: var(--dl-text); }
+.stepBtn:disabled { opacity: 0.4; cursor: default; }
+.dimIcon { color: var(--dl-text-dim); }
+.toolBtn { gap: 0.375rem; padding: 0 var(--mantine-spacing-md); cursor: pointer; font-family: inherit; }
+.toolBtn:hover { background: var(--dl-surface-3); }
+.liveDot { width: 7px; height: 7px; border-radius: 50%; background: var(--dl-live); }
+.filterInput { background: var(--dl-surface-2); font-weight: 600; }
 
 /* ---------- grid ---------- */
 .scroll {
@@ -303,7 +348,7 @@
 .block.block[data-focused],
 .block.block:focus-visible { outline: none; box-shadow: none; }
 .block[data-focused] .face,
-.block:focus-visible .face { background: var(--dl-row-focus); }
+.block:focus-visible .face { background: var(--dl-guide-focus); color: var(--mantine-color-white); }
 
 .fill {
   position: absolute;

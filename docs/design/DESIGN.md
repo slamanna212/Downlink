@@ -66,6 +66,16 @@ catch-up, playing row, links) · `--dl-on-accent #120A33` (text on accent fill, 
   icon / live badge. Glow 24% is for the focus halo only.
 - Approved text pairs with computed contrast ratios are listed in design-language-v2 §04. Use only those.
 
+### Window chrome and heroes
+- `--dl-titlebar-close` (`#E5484D`) + `--dl-on-titlebar-close`: the title bar's close button on hover only.
+- `--dl-scrollbar-thumb` (ink 22%) / `--dl-scrollbar-thumb-hover` (36%): overlay scrollbars (global.css).
+- `--dl-guide-focus` (`#2A3140`): the focused guide block (no ring).
+- `--dl-hero-scrim`: fades hero art into surface-0 (left, bottom, top). Home and Guide heroes only.
+- `--dl-player-scrim` / `--dl-player-top-scrim`: the player overlay's bottom and top scrims.
+  `--dl-tile-scrim`: the guide mini player's control strip.
+- Programme art fallback (no picture): a radial + linear gradient tinted with the channel's logo palette
+  colour (`ProgrammeArt`). Never a grey box.
+
 ### Logo fallback
 Initials (first letter of the first two words) on `logoPalette[hash(channelId) % 8]`, text `--dl-text`.
 Real logos sit on a surface-3 plate. Never a grey box or a broken image.
@@ -153,20 +163,46 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 - **Errors (player)**: centred 56 px tinted icon circle, 24/650 title, one sentence, primary + "Copy diagnostics".
 
 ## 8. Screens (see reference/screens.html)
+- **Title bar**: one frameless layout. Windows/Linux: `decorations: false`; the top 36 px of the content area is a
+  drag region (double-click maximizes) with three 46×36 window buttons top-right (minimize, maximize/restore,
+  close; close turns `--dl-titlebar-close` on hover). macOS: native traffic lights over an overlay title bar
+  (`tauri.macos.conf.json`); the rail keeps a clear 36 px strip for them. Home, Guide and video routes run
+  under the strip (nothing interactive in it); other pages get it as its own row. Hidden in fullscreen and
+  the mini window.
+- **Scrollbars**: overlay style everywhere: no track or arrows, 6 px thumb inset 3 px, 10 px and brighter on hover.
+- **Home**: 460 px hero for the first continue-watching item: programme art (or gradient) under
+  `--dl-hero-scrim`, caps label + search field top, then LIVE + logo + slot line, 72/800 title, episode line +
+  badges, two-line description, progress with minutes left, Watch live (primary) · From start · More info.
+  Then *Pick up where you left off* (16:9 art cards, tag top-left, 3 px progress), *On now in your favorites*
+  (96 px art header, logo plate on the edge, LIVE, progress, next), *Recently watched* (148 px logo tiles).
+  Four across from 1100 px.
+- **Programme art** (`programme_art`): the guide's own `<icon>` first, then the server's programme details,
+  then TMDB (backdrop before poster). The pick is cached per title in core; images in the image cache.
 - **Rail** 224 expanded / 68 collapsed / 96 10-foot. Same size on every route for a given density; it collapses only when the user toggles it. Order:
   Search ⌘K, Home, Guide, Channels, Movies, Series, Recordings · Settings · source status dot.
   Hide Movies/Series/Recordings when no source has the cap.
 - **Channels**: group sidebar 220 + virtualised rows (logo 72×36 · number · name + badges · now + 2 px
   progress · next · catch-up days + fav). Playing row: accent wash, accent-text name, speaker icon.
-- **Guide**: preview pane (260 px, 384×216 art / mini player, updates after 300 ms dwell) · 40 px sticky time header · 180 px sticky
-  channel column · 64 px rows · red now line + time pill. Blocks: past+archive `--dl-guide-past` + history
-  icon · past no archive dashed, disabled text · now `--dl-guide-now` + 10% fill + 2 px bar · future
-  `--dl-guide-future` · scheduled red dot · focused = `--dl-row-focus` tint, no ring.
-- **Player**: full-bleed video, bottom `--dl-scrim` with badge row, 30/650 title, timeline, 44 px controls.
-  One control bar for live, catch-up, VOD and recordings, a `minmax(0,1fr) auto minmax(0,1fr)` grid of three groups: left = back,
-  mute + volume (slider hidden below 900 px), subtitles/CC; centre = transport, with play/pause dead centre whatever else is shown (start over, −10 s on
-  its left; +10 s, go live on its right); right = audio, stream, open in Plex, info,
-  multiview, mini player, full screen. A control that does nothing for the current content is not rendered
+- **Guide**: 288 px hero (programme art under `--dl-hero-scrim`, follows focus after a 300 ms dwell): meta
+  line, 48/800 title, episode line, one-line description, primary (Watch live / Play from start / More info)
+  + info and favorite icon buttons. Recording lives in the details modal and the right-click menu, not the
+  hero. While something plays, a 384×216 mini player sits top-right in the hero (the art is masked around it)
+  with LIVE, a 2 px progress bar and hover controls (mute, mini window, fullscreen); focusing the playing
+  channel turns the primary into *Full screen* (OS fullscreen). Below: a 52 px toolbar (day stepper with
+  menu, Now, channel filter, 3/6/12/24 h). 40 px sticky time header · 200 px sticky channel column · 64 px
+  rows · red now line + time pill. Blocks: past+archive `--dl-guide-past` + history icon · past no archive
+  dashed, disabled text · now `--dl-guide-now` + 10% fill + 2 px bar · future `--dl-guide-future` ·
+  scheduled red dot · focused = `--dl-guide-focus`, no ring.
+- **Player**: full-bleed video, top scrim + back pill top-left named after where the player was opened from
+  (Guide, Home, Channels…; Back if unknown), bottom `--dl-player-scrim` with a 64 px logo tile, badge row,
+  32/700 title with the episode on the same line, an Up next card (art, time, title) on the right for live,
+  timeline, 44 px controls. One control bar for live, catch-up, VOD and recordings, a
+  `minmax(0,1fr) auto minmax(0,1fr)` grid of three groups: left = mute + volume (slider hidden below 900 px),
+  subtitles/CC, audio; centre = transport, with play/pause (48 px Iris primary) dead centre whatever else is
+  shown (start over, −10 s on its left; +10 s, go live on its right); right = stream, open in Plex, stream
+  info, multiview, mini player, full screen. **Channel change**: ↑/PgUp next, ↓/PgDn previous (wrapping,
+  `channel_neighbours`), tuned once presses settle (300 ms); a 300 px list (previous / current / next with
+  what is on, current in accent tint) shows at the left while zapping or typing a number and fades after 3 s. A control that does nothing for the current content is not rendered
   (never shown disabled): skip needs a seekable stream, start over needs a channel or a VOD/recording past
   its start, go live needs catch-up or live behind the edge, stream and multiview are live only, audio and
   subtitles/CC need tracks. The seek slot holds the channel timeline (live/catch-up) or a position bar (VOD/recording).
@@ -180,7 +216,7 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   behind live. VOD/recordings keep the position bar: position (accent), buffered (white 32%), thumb + time
   tooltip. Info panel 380 px right, mono values, then
   a BUFFER · n s graph (last 30 samples at 1 Hz, 36 px bars, `--dl-accent-bar`). Channel logo (tv size) left of the badge row and title; no separate zap pill.
-  Number entry pill top-right with accent caret.
+  Number entry pill top-right (Geist Mono 36) with accent caret.
 
 ## 9. Multiview
 In 1.0 (PLAN §1.5, §4.11, D17).

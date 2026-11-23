@@ -16,6 +16,12 @@ pub async fn media_details(
     state.svc().await?.media_details(target).await
 }
 
+/// Artwork for a guide programme (`dlimg://` URL): the guide's icon, then the server, then TMDB.
+#[tauri::command]
+pub async fn programme_art(state: State<'_, AppState>, id: String) -> CmdResult<Option<String>> {
+    state.svc().await?.programme_art(&id).await
+}
+
 #[tauri::command]
 pub async fn tmdb_status(state: State<'_, AppState>) -> CmdResult<TmdbStatusDto> {
     state.svc().await?.tmdb_status().await

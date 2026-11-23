@@ -342,7 +342,13 @@ pub async fn set_mini_player(app: AppHandle, enabled: bool) -> CmdResult<()> {
             return Ok(());
         };
         win.set_always_on_top(false).map_err(err)?;
-        win.set_decorations(true).map_err(err)?;
+        // Back to the normal chrome: frameless with our own title bar on Windows/Linux; on macOS
+        // the native frame with an overlay title bar (traffic lights over our bar).
+        win.set_decorations(cfg!(target_os = "macos"))
+            .map_err(err)?;
+        #[cfg(target_os = "macos")]
+        win.set_title_bar_style(tauri::TitleBarStyle::Overlay)
+            .map_err(err)?;
         win.set_min_size(Some(LogicalSize::new(MIN_W, MIN_H)))
             .map_err(err)?;
         win.set_size(prev.size).map_err(err)?;

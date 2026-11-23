@@ -53,6 +53,9 @@ interface UiState {
   /** A mini player outside the player route is showing video: the shell stops painting so it shows through. */
   videoHole: boolean;
   setVideoHole: (on: boolean) => void;
+  /** Last non-video route the user was on: names the player's back pill ("Guide", "Home"…). */
+  lastAppPath: string | null;
+  setLastAppPath: (p: string) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -78,4 +81,6 @@ export const useUiStore = create<UiState>((set) => ({
   setMini: (mini) => set({ mini }),
   videoHole: false,
   setVideoHole: (videoHole) => set({ videoHole }),
+  lastAppPath: null,
+  setLastAppPath: (lastAppPath) => set({ lastAppPath }),
 }));

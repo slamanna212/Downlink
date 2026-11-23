@@ -146,6 +146,7 @@ async fn truncated_feed_keeps_what_it_has_and_never_deletes() {
             season: None,
             episode: None,
             flags: 0,
+            icon: None,
         }])
         .await
         .unwrap();

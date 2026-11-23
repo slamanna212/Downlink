@@ -158,6 +158,21 @@ export function useMediaServerStatus() {
   return useQuery({ queryKey: ['mediaServer', 'status'], queryFn: () => invoke('media_server_status', {}) });
 }
 
+/**
+ * Artwork for a guide programme. Core picks and caches the source (guide icon, server, TMDB), so
+ * this is cheap after the first view; null means "show the gradient".
+ */
+export function useProgrammeArt(programmeId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['programmeArt', programmeId],
+    queryFn: () => invoke('programme_art', { id: programmeId as string }),
+    enabled: !!programmeId,
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    retry: false,
+  });
+}
+
 /** The playing title on the user's media server; idle until a server is chosen. Failures just hide the button. */
 export function useMediaMatch(target: MediaTarget | null) {
   const status = useMediaServerStatus();

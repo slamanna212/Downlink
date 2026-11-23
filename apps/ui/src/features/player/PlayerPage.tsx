@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useIdle } from '@mantine/hooks';
 import { Progress, Slider } from '@mantine/core';
 import {
@@ -24,9 +24,10 @@ import {
 } from '@tabler/icons-react';
 import { inTauri, invoke, listen } from '../../api/ipc';
 import { useChannel, useChannelProgrammes, useMediaMatch, useNowNextWindow, useSources } from '../../api/queries';
-import type { AppError, Channel, MediaTarget, PlayerState, SessionStats } from '../../api/types';
+import type { AppError, Channel, MediaTarget, PlayerState, Programme, SessionStats } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
+import { ProgrammeArt } from '../../components/ProgrammeArt/ProgrammeArt';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { IconPlex } from '../../components/IconPlex/IconPlex';
@@ -37,7 +38,7 @@ import { Timeline, TIMELINE_SPAN_SECONDS } from '../../components/Timeline/Timel
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { appendDigit, NUMBER_ENTRY_TIMEOUT_MS } from '../../lib/numberEntry';
 import { goLiveTarget, isBehindLive } from '../../lib/liveEdge';
-import { bucketEpoch, dayLabel, nowEpoch, formatClock, formatClockSeconds, formatDuration, formatRange, progress } from '../../lib/time';
+import { bucketEpoch, dayLabel, nowEpoch, formatClock, formatClockSeconds, formatDuration, formatRange, minutesLeft, progress } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
 import { episodeLine } from '../../lib/episode';
 import { useVideoBounds } from '../../lib/useVideoBounds';
@@ -53,9 +54,13 @@ import { rtxSummary } from './rtx';
 import { useMultiviewAvailable } from '../multiview/available';
 import { holdSession, releaseSession } from './session';
 import { holdFullscreen, isFullscreenKey, releaseFullscreen, toggleFullscreen } from './fullscreen';
+import { setMiniPlayer } from './mini';
+import { originLabel } from './origin';
 import classes from './Player.module.css';
 
 const BUFFER_SLOTS = 30;
+/** Zapping: the play goes out once the key has been quiet this long. */
+const ZAP_SETTLE_MS = 300;
 /** Repeated skip presses are gathered into one seek after this pause. */
 const SEEK_COALESCE_MS = 250;
 /** Give up waiting for the playhead to reach a pending seek after this long. */
@@ -166,6 +171,61 @@ function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerSta
   );
 }
 
+/** Up next card beside the title (live only). */
+function UpNext({ next, channelId }: { next: Programme; channelId: number }) {
+  return (
+    <div className={classes.upNext}>
+      <ProgrammeArt programmeId={next.id} channelId={channelId} className={classes.upNextArt} />
+      <div className={classes.upNextText}>
+        <span className={classes.upNextWhen}>{t('player.upNext', { time: formatClock(next.startUtc) })}</span>
+        <span className={classes.upNextTitle}>
+          <span className={classes.ellipsis}>{next.title ?? ''}</span>
+          {next.isNew && <StatusBadge kind="new" />}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Channel-change overlay: previous / current / next channel with what is on. Shown while zapping or typing
+ * a number, fades after `dl.zapOverlayMs`. Catalog + guide data only; tuning is a separate play.
+ */
+function ZapList({ center, now }: { center: Channel; now: number }) {
+  const nb = useQuery({
+    queryKey: ['catalog', 'neighbours', center.id],
+    queryFn: () => invoke('channel_neighbours', { channelId: center.id }),
+    staleTime: 60_000,
+  });
+  const list = useMemo(
+    () => [nb.data?.prev, center, nb.data?.next].filter((c): c is Channel => !!c && (c === center || c.id !== center.id)),
+    [nb.data, center],
+  );
+  const ids = useMemo(() => list.map((c) => c.id), [list]);
+  const nn = useNowNextWindow(ids, `zap|${center.id}`);
+  const nowOf = (id: number) => nn.data?.find((x) => x.channelId === id)?.now ?? null;
+  return (
+    <div className={`${classes.zap} ${classes.panel}`} role="listbox" aria-label={t('player.zapList')}>
+      {list.map((c) => {
+        const on = c.id === center.id;
+        const p = nowOf(c.id);
+        return (
+          <div key={c.id} className={classes.zapRow} data-current={on || undefined} role="option" aria-selected={on}>
+            <span className={classes.zapNum}>{c.number}</span>
+            <span className={classes.zapText}>
+              <span className={classes.zapName}>{c.name}</span>
+              <span className={classes.zapNow}>
+                {p?.title ?? t('channels.noGuide')}
+                {on && p ? ` · ${t('home.minLeft', { min: minutesLeft(p.endUtc, now) })}` : ''}
+              </span>
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ErrorOverlay({ error, onRetry }: { error: AppError | null; onRetry: () => void }) {
   const [copied, setCopied] = useState(false);
   const code = error?.code ?? 'local';
@@ -215,12 +275,7 @@ function ErrorOverlay({ error, onRetry }: { error: AppError | null; onRetry: () 
 
 let pendingMiniReset: ReturnType<typeof setTimeout> | null = null;
 
-/** Enter or leave the mini player (compact always-on-top window). */
-export function setMiniPlayer(enabled: boolean): Promise<void> {
-  return invoke('set_mini_player', { enabled })
-    .then(() => useUiStore.getState().setMini(enabled))
-    .catch(() => undefined);
-}
+export { setMiniPlayer } from './mini';
 
 /** Mini player chrome: drag anywhere, hover shows play/pause, mute, restore and close. */
 function MiniOverlay({ paused, muted, onTogglePause, onToggleMute, onRestore, onClose }: {
@@ -271,6 +326,55 @@ export function PlayerPage() {
   const entryRequest = useRef(0);
   const entryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idle = useIdle(dl.controlsIdleMs, { events: ['mousemove', 'keydown', 'touchstart', 'click'], initialState: false });
+  const lastAppPath = useUiStore((s) => s.lastAppPath);
+  const hasHistory = ((window.history.state as { idx?: number } | null)?.idx ?? 0) > 0;
+  // Channel-change overlay: shown while zapping or typing a number, hidden after a quiet spell.
+  const qc = useQueryClient();
+  const [zapShown, setZapShown] = useState(false);
+  const [zapChannel, setZapChannel] = useState<Channel | null>(null);
+  const zapHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zapPlayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const zapFrom = useRef<number | null>(null);
+  const showZap = useCallback(() => {
+    setZapShown(true);
+    if (zapHideTimer.current) clearTimeout(zapHideTimer.current);
+    zapHideTimer.current = setTimeout(() => {
+      setZapShown(false);
+      setZapChannel(null);
+      zapFrom.current = null;
+    }, dl.zapOverlayMs);
+  }, []);
+  const hideZap = useCallback(() => {
+    if (zapHideTimer.current) clearTimeout(zapHideTimer.current);
+    setZapShown(false);
+    setZapChannel(null);
+    zapFrom.current = null;
+  }, []);
+  // Up/PgUp = next channel, Down/PgDn = previous, wrapping. The list moves at once; the play is sent once
+  // presses pause briefly, so holding a key does not open and drop a stream per channel.
+  const zap = useCallback(
+    (dir: 1 | -1) => {
+      const from = zapFrom.current ?? usePlayerStore.getState().player.channelId;
+      if (from == null) return;
+      showZap();
+      void qc
+        .fetchQuery({ queryKey: ['catalog', 'neighbours', from], queryFn: () => invoke('channel_neighbours', { channelId: from }), staleTime: 60_000 })
+        .then((nb) => {
+          const target = dir > 0 ? nb.next : nb.prev;
+          if (!target) return;
+          zapFrom.current = target.id;
+          setZapChannel(target);
+          if (zapPlayTimer.current) clearTimeout(zapPlayTimer.current);
+          zapPlayTimer.current = setTimeout(() => void playChannel(target.id), ZAP_SETTLE_MS);
+        })
+        .catch(() => undefined);
+    },
+    [qc, showZap],
+  );
+  useEffect(() => () => {
+    if (zapHideTimer.current) clearTimeout(zapHideTimer.current);
+    if (zapPlayTimer.current) clearTimeout(zapPlayTimer.current);
+  }, []);
 
   const failed = player.state === 'Failed';
   const paused = player.state === 'Paused';
@@ -426,8 +530,15 @@ export function PlayerPage() {
         else if (e.key === 'Escape') toggleMini();
         return;
       }
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(e.key) && !target?.closest('[role="slider"]')) {
+        if (usePlayerStore.getState().player.channelId == null) return;
+        e.preventDefault();
+        zap(e.key === 'ArrowUp' || e.key === 'PageUp' ? 1 : -1);
+        return;
+      }
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
+        showZap();
         entryRequest.current++;
         setEntryMiss(false);
         const next = appendDigit(entry, e.key);
@@ -452,6 +563,7 @@ export function PlayerPage() {
       else if (e.key === 'Escape') {
         if (menu) setMenu(null);
         else if (entry) clearEntry();
+        else if (zapShown) hideZap();
         else if (infoOpen) setInfoOpen(false);
         else if (fullscreen) toggleFullscreen();
         else goBack();
@@ -459,7 +571,7 @@ export function PlayerPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mini, toggleMini, entry, infoOpen, menu, hasAudioMenu, hasSubMenu, fullscreen, commitEntry, clearEntry, togglePause, toggleMute, goBack, seekBy, restart, goLive]);
+  }, [mini, toggleMini, entry, infoOpen, menu, hasAudioMenu, hasSubMenu, fullscreen, commitEntry, clearEntry, togglePause, toggleMute, goBack, seekBy, restart, goLive, zap, showZap, zapShown, hideZap]);
 
   useEffect(() => () => {
     entryRequest.current++;
@@ -545,6 +657,12 @@ export function PlayerPage() {
         <ErrorOverlay error={player.error} onRetry={() => cmd({ kind: 'retry' })} />
       ) : (
         <div className={classes.layer}>
+          <div className={classes.topScrim} data-hidden={barHidden || undefined} aria-hidden />
+          <button type="button" className={`${classes.backPill} ${classes.panel}`} data-hidden={barHidden || undefined} onClick={goBack}>
+            <IconArrowLeft size={18} stroke={dl.iconStroke} aria-hidden />
+            {originLabel(lastAppPath, hasHistory)}
+          </button>
+          {(zapShown || entry) && channel && <ZapList center={zapChannel ?? channel} now={now} />}
           {entry && (
             <div className={`${classes.entry} ${classes.glass}`} data-info={infoOpen || undefined} role="status" aria-label={t('player.numberEntry')}>
               {entry.split('').join(' ')}
@@ -577,7 +695,11 @@ export function PlayerPage() {
 
           <div className={classes.bar} data-hidden={barHidden || undefined}>
             <div className={classes.nowRow}>
-              {channel && <ChannelLogo channelId={channel.id} name={channel.name} src={channel.logo} density="tv" bare />}
+              {channel && (
+                <span className={classes.logoTile}>
+                  <ChannelLogo channelId={channel.id} name={channel.name} src={channel.logo} density="compact" bare />
+                </span>
+              )}
               <div className={classes.nowText}>
                 <div className={classes.badges}>
                   {live && <StatusBadge kind="live" />}
@@ -598,10 +720,10 @@ export function PlayerPage() {
                 </div>
                 <div className={classes.titleRow}>
                   <h1 className={classes.title}>{player.title ?? shownProg?.title ?? (channel ? t('player.noGuide') : '')}</h1>
-                  {live && next && <span className={classes.next}>{t('player.next', { time: formatClock(next.startUtc), title: next.title ?? '' })}</span>}
+                  {!player.title && shownProg && episodeLine(shownProg) && <span className={classes.epLine}>{episodeLine(shownProg)}</span>}
                 </div>
-                {!player.title && shownProg && episodeLine(shownProg) && <div className={classes.epLine}>{episodeLine(shownProg)}</div>}
               </div>
+              {live && next && player.channelId != null && <UpNext next={next} channelId={player.channelId} />}
             </div>
             {tl && player.channelId != null ? (
               <div className={classes.timeline}>
@@ -642,7 +764,6 @@ export function PlayerPage() {
             )}
             <div className={classes.controls}>
               <div className={classes.group} data-slot="start">
-                <DLIconButton label={t('player.back')} icon={IconArrowLeft} variant="overlay" size="lg" onClick={goBack} />
                 <DLIconButton
                   label={player.muted ? t('player.unmute') : t('player.mute')}
                   icon={player.muted ? IconVolumeOff : IconVolume}
@@ -661,68 +782,68 @@ export function PlayerPage() {
                   thumbLabel={t('player.volume')}
                 />
                 {hasSubMenu && <SubtitleMenu tracks={player.tracks} {...menuProps('subs')} />}
+                {hasAudioMenu && <AudioMenu tracks={player.tracks} {...menuProps('audio')} />}
               </div>
               <div className={classes.transport} data-slot="transport">
-              <div className={`${classes.group} ${classes.groupEnd}`}>
-              {canRestart && (
-                <DLButton variant="overlay" size="lg" icon={IconHistory} keyHint="S" onClick={restart}>
-                  {t('player.restart')}
-                </DLButton>
-              )}
-              {canSkip && <DLIconButton label={t('player.back10')} icon={IconRewindBackward10} variant="overlay" size="lg" onClick={() => seekBy(-10)} />}
-              </div>
-              <span className={classes.playPause}>
-                <DLIconButton
-                  label={paused ? t('player.play') : t('player.pause')}
-                  icon={paused ? IconPlayerPlay : IconPlayerPause}
-                  variant="overlay"
-                  size="lg"
-                  filledGlyph
-                  onClick={togglePause}
-                />
-              </span>
-              <div className={classes.group}>
-              {canSkip && <DLIconButton label={t('player.fwd10')} icon={IconRewindForward10} variant="overlay" size="lg" onClick={() => seekBy(10)} />}
-              {showGoLive && (
-                <DLButton variant="live" size="lg" keyHint="End" onClick={goLive}>
-                  {t('player.goLive')}
-                </DLButton>
-              )}
-              </div>
+                <div className={`${classes.group} ${classes.groupEnd}`}>
+                  {canRestart && (
+                    <DLButton variant="overlay" size="lg" icon={IconHistory} onClick={restart}>
+                      {t('player.restart')}
+                    </DLButton>
+                  )}
+                  {canSkip && <DLIconButton label={t('player.back10')} icon={IconRewindBackward10} variant="overlay" size="lg" onClick={() => seekBy(-10)} />}
+                </div>
+                <span className={classes.playPause}>
+                  <DLIconButton
+                    label={paused ? t('player.play') : t('player.pause')}
+                    icon={paused ? IconPlayerPlay : IconPlayerPause}
+                    variant="filled"
+                    filledGlyph
+                    size="lg"
+                    onClick={togglePause}
+                  />
+                </span>
+                <div className={classes.group}>
+                  {canSkip && <DLIconButton label={t('player.fwd10')} icon={IconRewindForward10} variant="overlay" size="lg" onClick={() => seekBy(10)} />}
+                  {showGoLive && (
+                    <DLButton variant="live" size="lg" keyHint="End" onClick={goLive}>
+                      {t('player.goLive')}
+                    </DLButton>
+                  )}
+                </div>
               </div>
               <div className={`${classes.group} ${classes.groupEnd}`} data-slot="end">
-              {hasAudioMenu && <AudioMenu tracks={player.tracks} {...menuProps('audio')} />}
-              {canSwitchStream && channel && (
-                <StreamMenu channelId={channel.id} onDenied={() => setStreamDenied(true)} {...menuProps('stream')} />
-              )}
-              {mediaMatch && (
+                {canSwitchStream && channel && (
+                  <StreamMenu channelId={channel.id} onDenied={() => setStreamDenied(true)} {...menuProps('stream')} />
+                )}
+                {mediaMatch && (
+                  <DLIconButton
+                    label={t('player.openInPlex.help', { title: mediaMatch.title, server: mediaMatch.serverName })}
+                    icon={IconPlex}
+                    variant="overlay"
+                    size="lg"
+                    onClick={() => void invoke('media_server_open', { url: mediaMatch.url }).catch(notifyError)}
+                  />
+                )}
                 <DLIconButton
-                  label={t('player.openInPlex.help', { title: mediaMatch.title, server: mediaMatch.serverName })}
-                  icon={IconPlex}
+                  label={`${t('player.streamInfo')} (I)`}
+                  icon={IconInfoCircle}
                   variant="overlay"
                   size="lg"
-                  onClick={() => void invoke('media_server_open', { url: mediaMatch.url }).catch(notifyError)}
+                  pressed={infoOpen}
+                  onClick={() => setInfoOpen((v) => !v)}
                 />
-              )}
-              <DLIconButton
-                label={t('player.info')}
-                icon={IconInfoCircle}
-                variant="overlay"
-                size="lg"
-                pressed={infoOpen}
-                onClick={() => setInfoOpen((v) => !v)}
-              />
-              {live && multiviewAvailable && player.channelId != null && (
-                <DLIconButton label={t('player.multiview')} icon={IconLayoutGrid} variant="overlay" size="lg" onClick={() => void navigate('/multiview')} />
-              )}
-              <DLIconButton label={t('player.miniPlayer')} icon={IconPictureInPicture} variant="overlay" size="lg" onClick={toggleMini} />
-              <DLIconButton
-                label={fullscreen ? t('player.exitFullscreen') : t('player.fullscreen')}
-                icon={fullscreen ? IconMinimize : IconMaximize}
-                variant="overlay"
-                size="lg"
-                onClick={toggleFullscreen}
-              />
+                {live && multiviewAvailable && player.channelId != null && (
+                  <DLIconButton label={t('player.multiview')} icon={IconLayoutGrid} variant="overlay" size="lg" onClick={() => void navigate('/multiview')} />
+                )}
+                <DLIconButton label={t('player.miniPlayer')} icon={IconPictureInPicture} variant="overlay" size="lg" onClick={toggleMini} />
+                <DLIconButton
+                  label={fullscreen ? t('player.exitFullscreen') : t('player.fullscreen')}
+                  icon={fullscreen ? IconMinimize : IconMaximize}
+                  variant="overlay"
+                  size="lg"
+                  onClick={toggleFullscreen}
+                />
               </div>
             </div>
           </div>

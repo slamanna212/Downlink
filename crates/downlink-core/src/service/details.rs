@@ -35,6 +35,8 @@ const SOURCE_TTL: (i64, i64) = (6 * HOUR, HOUR);
 const TMDB_TTL: (i64, i64) = (7 * DAY, 2 * DAY);
 /// Title searches (which TMDB id a title is): stable, but retry misses now and then.
 const SEARCH_TTL: (i64, i64) = (30 * DAY, 3 * DAY);
+/// The artwork picked for a programme title (misses are retried sooner: a TMDB key may be added).
+const ART_TTL: (i64, i64) = (30 * DAY, DAY);
 /// Anything older than this is pruned at startup.
 const PRUNE_AFTER: i64 = 60 * DAY;
 
@@ -569,6 +571,68 @@ impl Service {
         Ok(self.airing_details(airing).await)
     }
 
+    /// Artwork for a guide programme, as a `dlimg://` URL: the guide's own icon first, then the
+    /// server's programme details, then TMDB (backdrop before poster: heroes and cards are
+    /// landscape). The chosen source URL is cached per title, so later views (and other airings
+    /// of the same episode) need no lookups; the image itself is kept by the image cache.
+    /// Never touches a stream endpoint (CLAUDE.md rule 4).
+    pub async fn programme_art(&self, id: &str) -> Result<Option<String>> {
+        let (channel_id, start) = parse_programme_id(id)
+            .ok_or_else(|| AppError::local("That programme is not valid."))?;
+        let Some(p) = self.store.programme_row(channel_id, start).await? else {
+            return Ok(None);
+        };
+        let Some(ch) = self.store.channel(channel_id).await? else {
+            return Ok(None);
+        };
+        let src = match p.icon.clone() {
+            Some(icon) => Some(icon),
+            None => {
+                let title = p.title.clone().unwrap_or_else(|| ch.name.clone());
+                let key = format!(
+                    "part:{}:{}:{}:{}:{}",
+                    ch.source_id,
+                    p.ext_id.as_deref().unwrap_or_default(),
+                    title_key(&title),
+                    p.season.map(|n| n.to_string()).unwrap_or_default(),
+                    p.episode.map(|n| n.to_string()).unwrap_or_default(),
+                );
+                let airing = Airing {
+                    source_id: ch.source_id,
+                    kind: "programme",
+                    title,
+                    subtitle: p.subtitle.clone(),
+                    description: None,
+                    season: p.season,
+                    episode: p.episode,
+                    flags: p.flags,
+                    ext_id: p.ext_id.clone(),
+                    runtime_mins: None,
+                };
+                self.cached(&key, ART_TTL, async { Ok(self.airing_art(&airing).await) })
+                    .await
+                    .ok()
+                    .flatten()
+            }
+        };
+        Ok(self
+            .reg(ch.source_id, src.as_deref(), ImageSize::Detail)
+            .await)
+    }
+
+    /// Source artwork URL for an airing without a guide icon: server details, then TMDB.
+    async fn airing_art(&self, a: &Airing) -> Option<String> {
+        let x = self
+            .programme_extra(a.source_id, a.ext_id.as_deref())
+            .await
+            .unwrap_or_default();
+        if let Some(u) = x.images.first() {
+            return Some(u.clone());
+        }
+        let t = self.tmdb_lookup(&airing_lookup(a, &x)).await.title?;
+        t.backdrop.or(t.poster)
+    }
+
     async fn recording_details(&self, id: i64) -> Result<MediaDetailsDto> {
         let r = self
             .store
@@ -609,25 +673,7 @@ impl Service {
             .programme_extra(a.source_id, a.ext_id.as_deref())
             .await
             .unwrap_or_default();
-        let has_episode = a.season.is_some() && a.episode.is_some();
-        let hint = match x.tmdb_is_movie {
-            Some(true) => Hint::Movie,
-            Some(false) => Hint::Tv,
-            None if has_episode => Hint::Tv,
-            None if movie_categories(&x.categories) => Hint::Movie,
-            None if skip_categories(&x.categories) || a.flags & flags::LIVE != 0 => Hint::Skip,
-            None => Hint::Unknown,
-        };
-        let lookup = Lookup {
-            hint,
-            title: a.title.clone(),
-            year: x.production_date.as_deref().and_then(year_of),
-            tmdb_id: x.tmdb_id.as_deref().and_then(|t| t.parse().ok()),
-            imdb_id: x.imdb_id.clone(),
-            season: a.season,
-            episode: a.episode,
-        };
-        let f = self.tmdb_lookup(&lookup).await;
+        let f = self.tmdb_lookup(&airing_lookup(&a, &x)).await;
         let t = f.title.clone().unwrap_or_default();
         let ep = f.episode.clone().unwrap_or_default();
         let is_movie = t.kind == Some(TmdbKind::Movie);
@@ -1059,6 +1105,28 @@ struct Airing {
     flags: i64,
     ext_id: Option<String>,
     runtime_mins: Option<i64>,
+}
+
+/// What to ask TMDB for an airing: the server's ids when it has them, else title + episode.
+fn airing_lookup(a: &Airing, x: &ProgrammeExtra) -> Lookup {
+    let has_episode = a.season.is_some() && a.episode.is_some();
+    let hint = match x.tmdb_is_movie {
+        Some(true) => Hint::Movie,
+        Some(false) => Hint::Tv,
+        None if has_episode => Hint::Tv,
+        None if movie_categories(&x.categories) => Hint::Movie,
+        None if skip_categories(&x.categories) || a.flags & flags::LIVE != 0 => Hint::Skip,
+        None => Hint::Unknown,
+    };
+    Lookup {
+        hint,
+        title: a.title.clone(),
+        year: x.production_date.as_deref().and_then(year_of),
+        tmdb_id: x.tmdb_id.as_deref().and_then(|t| t.parse().ok()),
+        imdb_id: x.imdb_id.clone(),
+        season: a.season,
+        episode: a.episode,
+    }
 }
 
 fn push_crew(out: &mut Vec<CrewDto>, job: &'static str, names: Vec<String>) {

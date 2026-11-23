@@ -287,7 +287,7 @@ pub async fn ingest_with_progress(
             if channel_programmes > MAX_CHANNEL_PROGRAMMES {
                 return Err(import_limit());
             }
-            let row_bytes = [&p.title, &p.subtitle, &p.description]
+            let row_bytes = [&p.title, &p.subtitle, &p.description, &p.icon]
                 .into_iter()
                 .filter_map(|part| part.as_ref())
                 .map(String::len)
@@ -328,6 +328,7 @@ pub async fn ingest_with_progress(
                     season: p.season,
                     episode: p.episode,
                     flags: p.flags,
+                    icon: p.icon.clone(),
                 });
                 if batch.len() >= BATCH || batch_bytes >= MAX_BATCH_TEXT_BYTES {
                     seen.clear();

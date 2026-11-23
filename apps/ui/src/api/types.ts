@@ -485,6 +485,7 @@ export interface ContinueItem {
 export interface OnNowItem {
   channel: Channel;
   now: Programme | null;
+  next: Programme | null;
 }
 
 export interface HomeData {

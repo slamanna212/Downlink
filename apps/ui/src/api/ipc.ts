@@ -60,6 +60,8 @@ export interface Commands {
     result: Channel[];
   };
   find_channel_number: { args: { number: number }; result: number | null };
+  /** Previous/next channel in list order (wraps). Catalog only: zapping still goes through play_channel. */
+  channel_neighbours: { args: { channelId: number }; result: { prev: Channel | null; next: Channel | null } };
   get_channel: { args: { channelId: number }; result: Channel };
   get_programme_window: { args: { channelIds: number[]; start: number; end: number }; result: Programme[] };
   get_now_next: { args: { channelIds: number[] }; result: NowNext[] };
@@ -141,6 +143,8 @@ export interface Commands {
   media_server_open: { args: { url: string }; result: null };
   /** Rich details (source first, then TMDB). Never touches a stream. */
   media_details: { args: { target: MediaTarget }; result: MediaDetails };
+  /** Programme artwork (`dlimg://`): the guide's icon, then the server, then TMDB. Cached in core. */
+  programme_art: { args: { id: string }; result: string | null };
   tmdb_status: { args: Record<string, never>; result: TmdbStatus };
   /** Checks the key with TMDB, then keeps it in the keychain. */
   tmdb_set_key: { args: { key: string }; result: TmdbStatus };

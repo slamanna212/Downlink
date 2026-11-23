@@ -435,6 +435,7 @@ async fn recordings_list_groups_by_state_and_flags_scheduled_programmes() {
             season: None,
             episode: None,
             flags: 0,
+            icon: None,
         }])
         .await
         .unwrap();
@@ -531,6 +532,7 @@ async fn schedule_once_and_series_cancel_stop_extend_delete() {
             season: None,
             episode: None,
             flags: 0,
+            icon: None,
         }])
         .await
         .unwrap();

@@ -261,3 +261,28 @@ fn xmltv_limits_fields_events_and_nesting() {
         );
     }
 }
+
+#[test]
+fn programme_icon_keeps_the_first_web_url() {
+    let path = tempfile::NamedTempFile::new().unwrap();
+    let doc = r#"<tv>
+      <channel id="a"><display-name>A</display-name><icon src="https://img.example.test/logo.png"/></channel>
+      <programme channel="a" start="20260101120000 +0000" stop="20260101130000 +0000">
+        <title>One</title>
+        <icon src="file:///etc/passwd"/>
+        <icon src=" https://img.example.test/one.jpg "/>
+        <icon src="https://img.example.test/two.jpg"/>
+      </programme>
+      <programme channel="a" start="20260101130000 +0000" stop="20260101140000 +0000">
+        <title>Two</title>
+      </programme>
+    </tv>"#;
+    std::fs::write(path.path(), doc).unwrap();
+    let (v, _) = all(path.path(), Tz::UTC);
+    assert_eq!(v.len(), 2);
+    assert_eq!(
+        v[0].icon.as_deref(),
+        Some("https://img.example.test/one.jpg")
+    );
+    assert_eq!(v[1].icon, None, "the channel's icon is not the programme's");
+}

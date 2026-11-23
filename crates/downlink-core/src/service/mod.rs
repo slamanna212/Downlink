@@ -1633,6 +1633,32 @@ impl Service {
         )
     }
 
+    /// The channels before and after `channel_id` in list order (channel number), wrapping at the ends,
+    /// under the user's catalog filters. Player zapping (PgUp/PgDn, ↑/↓). Catalog-only: nothing plays.
+    pub async fn channel_neighbours(&self, channel_id: i64) -> Result<ChannelNeighboursDto> {
+        let f = self.filter().await?;
+        let rows = catalog::list_channels(&self.store, &f, 100_000, 0).await?;
+        let Some(i) = rows.iter().position(|r| r.id == channel_id) else {
+            return Ok(ChannelNeighboursDto {
+                prev: None,
+                next: None,
+            });
+        };
+        let n = rows.len();
+        if n < 2 {
+            return Ok(ChannelNeighboursDto {
+                prev: None,
+                next: None,
+            });
+        }
+        let pick = [rows[(i + n - 1) % n].clone(), rows[(i + 1) % n].clone()];
+        let mut dtos = self.to_channel_dtos(&pick).await?.into_iter();
+        Ok(ChannelNeighboursDto {
+            prev: dtos.next(),
+            next: dtos.next(),
+        })
+    }
+
     /// Channel totals under the user's catalog filters (adult/radio/DRM hiding).
     pub async fn get_counts(&self) -> Result<CountsDto> {
         let f = self.filter().await?;
@@ -1681,7 +1707,7 @@ impl Service {
 
     async fn programme_dto(&self, channel_id: i64, start_utc: i64) -> Result<Option<ProgrammeDto>> {
         let row: Option<crate::store::ProgrammeRow> = sqlx::query_as(
-            "SELECT channel_id, start_utc, end_utc, ext_id, title, subtitle, description, season, episode, flags
+            "SELECT channel_id, start_utc, end_utc, ext_id, title, subtitle, description, season, episode, flags, icon
              FROM programme WHERE channel_id = ? AND start_utc = ?",
         )
         .bind(channel_id)
@@ -1724,6 +1750,7 @@ impl Service {
             .map(|c| OnNowItemDto {
                 channel: c.clone(),
                 now: nn.get(&c.id).and_then(|n| n.now.as_ref()).map(Into::into),
+                next: nn.get(&c.id).and_then(|n| n.next.as_ref()).map(Into::into),
             })
             .collect();
 

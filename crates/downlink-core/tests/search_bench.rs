@@ -199,6 +199,7 @@ async fn build_guide(channels: usize, per_channel: usize, now: i64) -> (Store, i
                 season: None,
                 episode: None,
                 flags: 0,
+                icon: None,
             });
             if batch.len() == 5_000 {
                 store.upsert_programmes(&batch).await.unwrap();

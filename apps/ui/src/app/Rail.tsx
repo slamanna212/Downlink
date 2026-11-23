@@ -9,7 +9,7 @@ import { Icon } from '../components/Icon/Icon';
 import { DLIconButton } from '../components/DLIconButton/DLIconButton';
 import { useDLFocusable } from '../lib/spatial';
 import { t } from '../lib/i18n';
-import { modKeyLabel } from '../lib/platform';
+import { isMac, modKeyLabel } from '../lib/platform';
 import { SETTINGS_NAV, visibleNav, type NavEntry } from './nav';
 import classes from './Rail.module.css';
 import logoUrl from '../assets/logo.svg';
@@ -98,7 +98,7 @@ function SourceStatus({ source, mode }: { source: Source | undefined; mode: Rail
   );
 }
 
-export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void }) {
+export function Rail({ mode, onToggle, mac = isMac() }: { mode: RailMode; onToggle: () => void; /** macOS layout (Storybook override). */ mac?: boolean }) {
   const { caps } = useCaps();
   const { data: sources } = useSources();
   const updateWaiting = useUpdateWaiting();
@@ -111,10 +111,14 @@ export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void 
         aria-label={t('nav.primary')}
         ref={ref}
         className={`${classes.rail} ${mode === 'collapsed' ? classes.collapsed : ''} ${mode === 'tv' ? classes.tv : ''}`}
+        data-mac={mac || undefined}
         h="100%"
       >
-        <Group className={classes.brand} gap="sm" wrap="nowrap" justify={mode === 'expanded' ? 'space-between' : 'center'}>
-          <Group gap="sm" wrap="nowrap">
+        {/* macOS: a clear strip for the traffic lights (overlay title bar), draggable like a title bar. */}
+        {mac && <div className={classes.macLights} data-tauri-drag-region />}
+        {/* Drag region: the window also moves from the brand row. */}
+        <Group className={classes.brand} gap="sm" wrap="nowrap" justify={mode === 'expanded' ? 'space-between' : 'center'} data-tauri-drag-region>
+          <Group gap="sm" wrap="nowrap" className={classes.brandGroup} data-tauri-drag-region>
             <span
               className={classes.brandMark}
               role={mode === 'collapsed' ? 'button' : undefined}
@@ -123,12 +127,14 @@ export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void 
               onClick={mode === 'collapsed' ? onToggle : undefined}
               onKeyDown={mode === 'collapsed' ? (e) => (e.key === 'Enter' || e.key === ' ') && onToggle() : undefined}
             >
-              <img src={logoUrl} alt="" width={24} height={24} draggable={false} />
+              <img src={logoUrl} alt="" width={28} height={28} draggable={false} />
             </span>
             {mode === 'expanded' && <span className={classes.brandName}>{t('app.name')}</span>}
           </Group>
           {mode === 'expanded' && (
-            <DLIconButton label={t('nav.collapse')} icon={IconArrowBarLeft} size="sm" onClick={onToggle} />
+            <span className={classes.collapseBtn}>
+              <DLIconButton label={t('nav.collapse')} icon={IconArrowBarLeft} size="sm" onClick={onToggle} />
+            </span>
           )}
         </Group>
         {visibleNav(caps).map((e) => (

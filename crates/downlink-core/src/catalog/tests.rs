@@ -321,6 +321,7 @@ async fn programme_search_is_visibility_aware_and_tracks_updates() {
         season: None,
         episode: None,
         flags: 0,
+        icon: None,
     };
     store
         .upsert_programmes(&[
@@ -438,6 +439,7 @@ async fn broad_search_reaches_eligible_rows_beyond_the_old_candidate_windows() {
             season: None,
             episode: None,
             flags: 0,
+            icon: None,
         })
         .collect();
     store.upsert_programmes(&rows).await.unwrap();

@@ -29,13 +29,14 @@
 /* top-right number entry */
 .entry {
   position: absolute;
-  top: var(--mantine-spacing-xl);
-  right: var(--mantine-spacing-xl);
+  top: 48px;
+  right: 2rem;
   min-width: 108px;
   padding: var(--mantine-spacing-md) var(--mantine-spacing-lg);
-  font-size: 2.5rem;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: 2.25rem;
   font-weight: 500;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.15em;
   line-height: 1.2;
   color: var(--dl-on-video);
   text-align: center;
@@ -63,8 +64,11 @@
   left: 0;
   right: 0;
   bottom: 0;
-  padding: 7.5rem var(--mantine-spacing-xl) var(--mantine-spacing-xl);
-  background: var(--dl-scrim);
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding: 6rem 2rem 1.25rem;
+  background: var(--dl-player-scrim);
   opacity: 1;
   transition: opacity 160ms var(--dl-ease);
 }
@@ -74,11 +78,23 @@
 }
 .bar[data-hidden] * { pointer-events: none; }
 
-/* channel logo beside the badge row and title */
+/* channel logo tile, badge row + title, up next card */
 .nowRow {
   display: flex;
+  align-items: flex-end;
+  gap: 1.25rem;
+}
+.logoTile {
+  width: 64px;
+  height: 64px;
+  flex: none;
+  display: flex;
   align-items: center;
-  gap: var(--mantine-spacing-lg);
+  justify-content: center;
+  border-radius: var(--mantine-radius-lg);
+  border: 1px solid var(--dl-hairline-strong);
+  background: var(--dl-surface-3);
+  overflow: hidden;
 }
 .nowText {
   flex: 1;
@@ -94,33 +110,131 @@
 }
 .titleRow {
   display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--mantine-spacing-lg);
-  margin: var(--mantine-spacing-xs) 0 var(--mantine-spacing-sm);
+  align-items: baseline;
+  gap: 0.875rem;
+  min-width: 0;
+  margin-top: var(--mantine-spacing-xs);
 }
 .title {
   margin: 0;
-  font-size: 1.875rem;
-  line-height: 1.2;
-  font-weight: 650;
+  min-width: 0;
+  font-size: 2rem;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
   color: var(--dl-on-video);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .epLine {
-  margin-top: calc(var(--mantine-spacing-xs) * -1);
-  margin-bottom: var(--mantine-spacing-sm);
-  font-size: var(--mantine-font-size-lg);
-  font-weight: 600;
-  color: var(--dl-on-video);
-  opacity: 0.85;
-}
-.next {
-  font-size: var(--mantine-font-size-sm);
-  color: var(--dl-text-dim);
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--dl-text-2);
+}
+.ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* surface-1 card on video: up next, back pill, zap list, number entry */
+.panel {
+  background: var(--dl-glass-solid);
+  border: 1px solid var(--dl-hairline-strong);
+}
+.upNext {
+  width: 260px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: var(--mantine-spacing-sm);
+  border-radius: var(--mantine-radius-lg);
+  background: var(--dl-glass-solid);
+  border: 1px solid var(--dl-hairline-strong);
+}
+.upNextArt { width: 72px; height: 40px; flex: none; border-radius: var(--mantine-radius-md); }
+.upNextText { min-width: 0; display: flex; flex-direction: column; }
+.upNextWhen { font-size: var(--mantine-font-size-xs); color: var(--dl-text-dim); }
+.upNextTitle { display: flex; align-items: center; gap: 0.375rem; min-width: 0; font-size: var(--mantine-font-size-md); font-weight: 600; }
+
+@media (width <= 900px) { .upNext { display: none; } }
+
+/* top: scrim under the title bar and the back pill */
+.topScrim {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 120px;
+  background: var(--dl-player-top-scrim);
+  pointer-events: none;
+  transition: opacity 160ms var(--dl-ease);
+}
+.backPill {
+  position: absolute;
+  top: 48px;
+  left: 2rem;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  padding: 0 0.875rem 0 0.625rem;
+  border-radius: var(--mantine-radius-lg);
+  color: var(--dl-on-video);
+  font: inherit;
+  font-size: var(--mantine-font-size-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 160ms var(--dl-ease), background-color 120ms var(--dl-ease);
+}
+.backPill:hover { background: var(--dl-overlay); }
+.backPill:focus-visible { box-shadow: var(--dl-focus-ring-video); }
+.topScrim[data-hidden],
+.backPill[data-hidden] { opacity: 0; pointer-events: none; }
+
+/* channel-change list: left, vertically centred */
+.zap {
+  position: absolute;
+  left: 2rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 300px;
+  border-radius: var(--mantine-radius-lg);
+  overflow: hidden;
+  animation: zap-in 160ms var(--dl-ease);
+}
+.zapRow {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: var(--mantine-spacing-md) var(--mantine-spacing-lg);
+}
+.zapRow[data-current] { background: var(--dl-accent-tint); }
+.zapNum {
+  width: 26px;
+  flex: none;
+  text-align: right;
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-lg);
+  color: var(--dl-text-dim);
+}
+.zapRow[data-current] .zapNum { color: var(--dl-accent-text); }
+.zapText { min-width: 0; display: flex; flex-direction: column; gap: 0.0625rem; }
+.zapName { font-size: var(--mantine-font-size-md); font-weight: 600; color: var(--dl-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zapRow[data-current] .zapName { font-size: var(--mantine-font-size-lg); color: var(--dl-on-video); }
+.zapNow { font-size: var(--mantine-font-size-sm); color: var(--dl-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zapRow[data-current] .zapNow { color: var(--dl-text-2); }
+
+@keyframes zap-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .timeline {
+  font-family: var(--mantine-font-family-monospace);
   display: flex;
   align-items: center;
   gap: var(--mantine-spacing-md);
@@ -137,8 +251,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: var(--mantine-spacing-sm);
-  margin-top: var(--mantine-spacing-md);
+  gap: var(--mantine-spacing-md);
 }
 /* control bar slots: start (back, volume) | transport | end (menus). One layout for live, catch-up, VOD and
    recordings; a control that does nothing for the current content is not rendered. */
@@ -155,13 +268,14 @@
 /* narrow windows: the volume slider goes first (mute stays) so the sides never reach the centre transport */
 @media (width <= 900px) { .volume { display: none; } }
 
-/* resting 10% fill on play/pause */
-.playPause button { background: var(--dl-video-btn); }
+/* play/pause: the Iris primary (same as Watch live), a touch larger than the other controls */
+.playPause { margin: 0 var(--mantine-spacing-xs); }
+.playPause button { width: 3rem; height: 3rem; min-width: 3rem; }
 
 /* info panel */
 .info {
   position: absolute;
-  top: var(--mantine-spacing-xl);
+  top: 48px;
   right: var(--mantine-spacing-xl);
   bottom: 200px;
   width: 380px;

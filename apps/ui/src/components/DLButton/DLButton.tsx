@@ -15,6 +15,8 @@ export interface DLButtonProps
   size?: DLButtonSize;
   /** Icon on the left only. */
   icon?: TablerIcon;
+  /** Filled glyph (play/pause only, DESIGN §6). */
+  filledGlyph?: boolean;
   /** Loader replaces the icon, label stays, width stays locked. Clicks are ignored while loading. */
   loading?: boolean;
   /** Optional key hint (Geist Mono 11px), at most one per view. */
@@ -27,7 +29,7 @@ export interface DLButtonProps
 }
 
 export const DLButton = forwardRef<HTMLButtonElement, DLButtonProps>(function DLButton(
-  { variant = 'default', size = 'md', icon, loading = false, keyHint, children, onClick, style, disabled, ...rest },
+  { variant = 'default', size = 'md', icon, filledGlyph = false, loading = false, keyHint, children, onClick, style, disabled, ...rest },
   ref,
 ) {
   const tvDensity = useUiStore((s) => s.density === 'tv');
@@ -47,7 +49,7 @@ export const DLButton = forwardRef<HTMLButtonElement, DLButtonProps>(function DL
   ) : variant === 'live' ? (
     <span className={classes.liveDot} aria-hidden />
   ) : icon ? (
-    <Icon icon={icon} size={spec.icon as 14 | 16 | 20 | 24} />
+    <Icon icon={icon} size={spec.icon as 14 | 16 | 20 | 24} filled={filledGlyph} />
   ) : undefined;
 
   return (
