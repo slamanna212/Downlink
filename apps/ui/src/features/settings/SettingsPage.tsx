@@ -243,7 +243,7 @@ function PlaybackSection() {
       <SettingRow label={t('settings.buffer')} help={t('settings.buffer.help')}>
         <div className={classes.sliderRow}>
           <Slider
-            min={1}
+            min={3}
             max={10}
             step={1}
             value={shown}

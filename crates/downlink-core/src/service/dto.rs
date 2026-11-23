@@ -434,7 +434,7 @@ pub struct DiagnosticsData {
 }
 
 /// Settings are an open JSON object (the UI owns the field set); core validates only
-/// `liveBufferSecs` (1..=10) and persists the rest verbatim.
+/// `liveBufferSecs` (3..=10) and persists the rest verbatim.
 pub type SettingsDto = Value;
 
 // ---- VOD ------------------------------------------------------------------------------------

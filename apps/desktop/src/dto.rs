@@ -94,7 +94,9 @@ pub struct TimelineDto {
 }
 
 /// Seconds behind the edge that still count as "live".
-pub const LIVE_SLACK_SECS: f64 = 5.0;
+pub const LIVE_SLACK_SECS: f64 = 10.0;
+/// Cushion kept behind the buffer tip when jumping to live: the tip itself has nothing buffered ahead.
+pub const LIVE_CUSHION_SECS: f64 = 3.0;
 
 /// `Track` of types.ts: one audio or subtitle track (teletext and DVB subtitles are `sub`).
 #[derive(Debug, Clone, Serialize)]
@@ -227,10 +229,15 @@ pub fn seek_route(
     catchup_end_utc: Option<i64>,
     utc: f64,
 ) -> SeekRoute {
-    if utc >= tl.live_edge_utc - 3.0 {
+    if utc >= tl.live_edge_utc - LIVE_CUSHION_SECS {
         return match (info.mode, snap.live_anchor, snap.seek_range) {
             (Some(PlayMode::Live), Some(a), Some((_, end))) if info.timeshift => {
-                SeekRoute::Media(utc_to_media(a, media_to_utc(a, end) - 1.0))
+                let target = utc_to_media(a, media_to_utc(a, end) - LIVE_CUSHION_SECS);
+                // Already inside the cushion: stay put rather than jump back.
+                match snap.position_secs {
+                    Some(p) if p >= target => SeekRoute::Media(p),
+                    _ => SeekRoute::Media(target),
+                }
             }
             _ => SeekRoute::Live,
         };
@@ -357,7 +364,7 @@ pub fn preferences_from_settings(v: &Value) -> Preferences {
         ..Preferences::default()
     };
     if let Some(n) = v.get("liveBufferSecs").and_then(Value::as_f64) {
-        p.live_buffer_secs = n.round().clamp(1.0, 10.0) as u32;
+        p.live_buffer_secs = n.round().clamp(3.0, 10.0) as u32;
     }
     p.timeshift_dir = TIMESHIFT_DIR.get().cloned().unwrap_or_default();
     if let Some(m) = v.get("timeshiftMinutes").and_then(Value::as_f64) {
@@ -465,7 +472,14 @@ mod tests {
         // At the edge: jump to the newest buffered moment, no reload.
         assert_eq!(
             seek_route(&snap, &info, &tl, None, NOW + 50.0),
-            SeekRoute::Media(599.0)
+            SeekRoute::Media(597.0)
+        );
+        // Already within the cushion of the tip: keep the position.
+        let mut near = snap.clone();
+        near.position_secs = Some(598.0);
+        assert_eq!(
+            seek_route(&near, &info, &tl, None, NOW + 50.0),
+            SeekRoute::Media(598.0)
         );
         // No archive: clamp to the start of the buffer.
         let (snap, info) = live_buffered(0);

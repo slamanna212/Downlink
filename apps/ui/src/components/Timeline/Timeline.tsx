@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Timeline as TimelineState } from '../../api/types';
 import { epochAtRatio, formatClockSeconds, hoursToSeconds, programmeSegments, ratioOfEpoch, timelineWindow, type Epoch } from '../../lib/time';
+import { smoothStep } from '../../lib/liveEdge';
 import classes from './Timeline.module.css';
 
 /** Whole bar: one hour, the playhead always in the middle. */
@@ -22,8 +23,43 @@ export interface TimelineProps {
   pendingUtc?: Epoch | null;
   spanSeconds?: number;
   disabled?: boolean;
+  /** Media is playing: the bar glides at real time between player updates instead of stepping. */
+  playing?: boolean;
   label: string;
   onSeekTo: (utc: Epoch) => void;
+}
+
+/**
+ * Playhead and live edge shown on the bar. Player updates arrive a few times a second and are noisy (the cache
+ * end moves in chunks, the anchor re-bases), so while playing both advance at real time on animation frames and
+ * drift gently towards the reported values; they never move backwards unless the user seeks.
+ */
+function useGlidingTimeline(timeline: TimelineState, playing: boolean): { playhead: number; edge: number } {
+  const raw = useRef({ timeline, at: 0 });
+  const [shown, setShown] = useState({ playhead: timeline.playheadUtc, edge: timeline.liveEdgeUtc });
+  useEffect(() => {
+    raw.current = { timeline, at: performance.now() };
+  }, [timeline, playing]);
+  useEffect(() => {
+    if (!playing) return undefined;
+    let frame = 0;
+    let last = performance.now();
+    let prev: { playhead: number; edge: number } | null = null;
+    const tick = (now: number) => {
+      const dt = (now - last) / 1000;
+      last = now;
+      const { timeline: tl, at } = raw.current;
+      const age = (now - at) / 1000;
+      const playhead = smoothStep(prev?.playhead ?? null, tl.playheadUtc + age, dt, true);
+      const edge = Math.max(playhead, smoothStep(prev?.edge ?? null, tl.liveEdgeUtc + age, dt, true));
+      prev = { playhead, edge };
+      setShown(prev);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [playing]);
+  return playing ? shown : { playhead: timeline.playheadUtc, edge: timeline.liveEdgeUtc };
 }
 
 const clamp01 = (r: number) => Math.min(1, Math.max(0, r));
@@ -34,13 +70,14 @@ const pct = (r: number) => `${(r * 100).toFixed(4)}%`;
  * what has been watched or can be rewound to (local buffer, then the archive); right of it, up to the live
  * edge, is what can be skipped ahead to. Gaps mark programme boundaries.
  */
-export function Timeline({ timeline, programmes, pendingUtc, spanSeconds = TIMELINE_SPAN_SECONDS, disabled, label, onSeekTo }: TimelineProps) {
+export function Timeline({ timeline, programmes, pendingUtc, spanSeconds = TIMELINE_SPAN_SECONDS, disabled, playing = false, label, onSeekTo }: TimelineProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const drag = useRef<{ x: number; moved: boolean } | null>(null);
   const [dragSecs, setDragSecs] = useState(0);
   const [hover, setHover] = useState<number | null>(null);
 
-  const center = (pendingUtc ?? timeline.playheadUtc) + dragSecs;
+  const glide = useGlidingTimeline(timeline, playing);
+  const center = (pendingUtc ?? glide.playhead) + dragSecs;
   const win = timelineWindow(center, spanSeconds);
   const oldest = timeline.archiveStartUtc ?? timeline.bufferStartUtc ?? timeline.playheadUtc;
   // Windows move every frame; segment math only needs the window rounded to the second.
@@ -50,7 +87,7 @@ export function Timeline({ timeline, programmes, pendingUtc, spanSeconds = TIMEL
     [programmes, winStart, spanSeconds],
   );
   const available = clamp01(ratioOfEpoch(win, oldest));
-  const edge = clamp01(ratioOfEpoch(win, timeline.liveEdgeUtc));
+  const edge = clamp01(ratioOfEpoch(win, glide.edge));
   const width = () => ref.current?.getBoundingClientRect().width ?? 0;
   const ratioOf = (clientX: number) => {
     const r = ref.current?.getBoundingClientRect();

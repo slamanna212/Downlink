@@ -37,7 +37,8 @@ import { SeekBar } from '../../components/SeekBar/SeekBar';
 import { Timeline, TIMELINE_SPAN_SECONDS } from '../../components/Timeline/Timeline';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { appendDigit, NUMBER_ENTRY_TIMEOUT_MS } from '../../lib/numberEntry';
-import { bucketEpoch, dayLabel, nowEpoch, formatBehindLive, formatClock, formatClockSeconds, formatDuration, formatRange, progress } from '../../lib/time';
+import { goLiveTarget, isBehindLive } from '../../lib/liveEdge';
+import { bucketEpoch, dayLabel, nowEpoch, formatClock, formatClockSeconds, formatDuration, formatRange, progress } from '../../lib/time';
 import { t, type MessageKey } from '../../lib/i18n';
 import { episodeLine } from '../../lib/episode';
 import { useVideoBounds } from '../../lib/useVideoBounds';
@@ -373,7 +374,7 @@ export function PlayerPage() {
   // Behind live in the local buffer: jump to the edge without reloading. From the archive: back to the stream.
   const goLive = useCallback(() => {
     const st = usePlayerStore.getState().player;
-    if (st.mode === 'live' && st.timeline) seekTo(st.timeline.liveEdgeUtc);
+    if (st.mode === 'live' && st.timeline) seekTo(goLiveTarget(st.timeline.liveEdgeUtc, st.timeline.archiveStartUtc ?? st.timeline.bufferStartUtc));
     else cmd({ kind: 'goLive' });
   }, [cmd, seekTo]);
   const toggleMini = useCallback(() => void setMiniPlayer(!useUiStore.getState().mini), []);
@@ -488,7 +489,11 @@ export function PlayerPage() {
   const tl = player.timeline;
   const behindLive = tl ? Math.max(0, tl.liveEdgeUtc - (pendingUtc ?? tl.playheadUtc)) : 0;
   const canSkip = timeshift || (live && player.seekable);
-  const showGoLive = catchup || (live && formatBehindLive(behindLive) !== '');
+  // A few seconds behind the tip still counts as live; hysteresis keeps the button from flickering.
+  const [behindFlag, setBehindFlag] = useState(false);
+  const behindNow = isBehindLive(behindLive, behindFlag);
+  if (behindNow !== behindFlag) setBehindFlag(behindNow);
+  const showGoLive = catchup || (live && behindNow);
   const source = sources.data?.find((s) => s.id === channel?.sourceId);
   const sourceName = source?.name ?? '–';
   const canSwitchStream = live && player.state !== 'Idle' && !!channel && !!source && decodeCaps(source.caps).streamSwitch && !streamDenied;
@@ -609,10 +614,11 @@ export function PlayerPage() {
                   programmes={tlProgs.data ?? []}
                   pendingUtc={pendingUtc}
                   disabled={!player.seekable}
+                  playing={player.state === 'Playing'}
                   onSeekTo={(utc) => seekTo(utc)}
                 />
-                <span aria-label={behindLive > 5 ? t('player.behindLive', { time: formatDuration(behindLive) }) : undefined}>
-                  {formatBehindLive(behindLive)}
+                <span aria-label={behindNow ? t('player.behindLive', { time: formatDuration(behindLive) }) : undefined}>
+                  {behindNow ? `−${formatDuration(behindLive)}` : ''}
                 </span>
               </div>
             ) : timeshift && player.seekable && duration > 0 ? (

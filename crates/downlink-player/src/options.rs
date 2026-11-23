@@ -215,7 +215,7 @@ pub fn valid_hwdec(v: &str) -> bool {
 pub struct Preferences {
     pub alang: String,
     pub slang: String,
-    /// "Live buffer" setting, seconds. Clamped to 1..=10.
+    /// "Live buffer" setting, seconds. Clamped to 3..=10 (the floor we always try to keep buffered).
     pub live_buffer_secs: u32,
     /// `hwdec` value, default `auto-safe`; invalid values fall back to it.
     pub hwdec: String,
@@ -239,6 +239,9 @@ pub struct Preferences {
     pub rtx_hdr: bool,
 }
 
+/// Lowest live buffer: never run the cache thinner than this.
+pub const LIVE_BUFFER_MIN_SECS: u32 = 3;
+
 /// Shortest and longest timeshift buffer.
 pub const TIMESHIFT_MIN_SECS: u32 = 15 * 60;
 pub const TIMESHIFT_MAX_SECS: u32 = 3 * 60 * 60;
@@ -250,7 +253,7 @@ impl Default for Preferences {
         Self {
             alang: String::new(),
             slang: String::new(),
-            live_buffer_secs: 2,
+            live_buffer_secs: 3,
             hwdec: "auto-safe".to_owned(),
             deinterlace: Deinterlace::Auto,
             audio_mode: AudioMode::Surround,
@@ -268,7 +271,7 @@ impl Default for Preferences {
 
 impl Preferences {
     pub fn live_buffer_secs_clamped(&self) -> u32 {
-        self.live_buffer_secs.clamp(1, 10)
+        self.live_buffer_secs.clamp(LIVE_BUFFER_MIN_SECS, 10)
     }
 
     /// Timeshift buffer length in seconds, `None` when timeshift is off.
@@ -497,10 +500,25 @@ fn profile_cache_options(profile: Profile, prefs: &Preferences) -> Opts {
             o.push(kv("vd-lavc-skiploopfilter", "nonkey"));
             o
         }
+        // Keep at least `live_buffer_secs` (>= 3) read ahead: the demuxer reads that far past the
+        // playhead (readahead), the cache may hold twice that so a burst is not discarded, and
+        // after an underrun playback pauses until the buffer is full again (cache-pause-wait)
+        // instead of stuttering along on a near-empty cache.
         Profile::Live => vec![
             kv("cache", "yes"),
-            kv("cache-secs", prefs.live_buffer_secs_clamped().to_string()),
-            kv("demuxer-readahead-secs", "2"),
+            kv(
+                "cache-secs",
+                (prefs.live_buffer_secs_clamped() * 2).to_string(),
+            ),
+            kv("cache-pause", "yes"),
+            kv(
+                "cache-pause-wait",
+                prefs.live_buffer_secs_clamped().to_string(),
+            ),
+            kv(
+                "demuxer-readahead-secs",
+                prefs.live_buffer_secs_clamped().to_string(),
+            ),
             kv("demuxer-max-bytes", "32MiB"),
             kv("demuxer-max-back-bytes", "16MiB"),
         ],
@@ -522,7 +540,11 @@ fn profile_cache_options(profile: Profile, prefs: &Preferences) -> Opts {
                     "cache-pause-wait",
                     prefs.live_buffer_secs_clamped().to_string(),
                 ),
-                kv("demuxer-readahead-secs", "2"),
+                kv("cache-pause", "yes"),
+                kv(
+                    "demuxer-readahead-secs",
+                    prefs.live_buffer_secs_clamped().to_string(),
+                ),
                 kv("demuxer-max-bytes", bytes.to_string()),
                 kv("demuxer-max-back-bytes", bytes.to_string()),
             ];
@@ -760,12 +782,16 @@ mod tests {
 
     #[test]
     fn live_buffer_is_clamped() {
-        for (input, want) in [(0u32, "1"), (2, "2"), (10, "10"), (99, "10")] {
+        for (input, want) in [(0u32, "3"), (2, "3"), (5, "5"), (10, "10"), (99, "10")] {
             let p = Preferences {
                 live_buffer_secs: input,
                 ..Preferences::default()
             };
-            assert!(has(&profile_options(Profile::Live, &p), "cache-secs", want));
+            let o = profile_options(Profile::Live, &p);
+            assert!(has(&o, "cache-pause-wait", want));
+            assert!(has(&o, "demuxer-readahead-secs", want));
+            let cache: u32 = want.parse().unwrap_or(0) * 2;
+            assert!(has(&o, "cache-secs", &cache.to_string()));
         }
     }
 
@@ -773,7 +799,8 @@ mod tests {
     fn live_and_seekable_profiles() {
         let p = Preferences::default();
         let live = profile_options(Profile::Live, &p);
-        assert!(has(&live, "demuxer-readahead-secs", "2"));
+        assert!(has(&live, "demuxer-readahead-secs", "3"));
+        assert!(has(&live, "cache-pause", "yes"));
         assert!(has(&live, "demuxer-max-bytes", "32MiB"));
         assert!(has(&live, "demuxer-max-back-bytes", "16MiB"));
         let seek = profile_options(Profile::Seekable, &p);
@@ -838,7 +865,7 @@ mod tests {
         );
         // inner list: "X-API-Key: k\,1" (15 bytes), the comma escaped for mpv's list parser
         assert!(s.contains("http-header-fields=%15%X-API-Key: k\\,1"), "{s}");
-        assert!(s.contains("cache-secs=%1%2"));
+        assert!(s.contains("cache-secs=%1%6"));
     }
 
     #[test]

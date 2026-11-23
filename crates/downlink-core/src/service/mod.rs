@@ -1370,7 +1370,7 @@ impl Service {
                 let n = v
                     .as_f64()
                     .ok_or_else(|| AppError::local("Live buffer must be a number."))?;
-                cur.insert(k, Value::from(n.round().clamp(1.0, 10.0) as i64));
+                cur.insert(k, Value::from(n.round().clamp(3.0, 10.0) as i64));
             } else if k == SET_AUTO_REFRESH_HOURS {
                 let n = v
                     .as_f64()

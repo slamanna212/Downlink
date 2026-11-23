@@ -27,58 +27,12 @@ Downlink is a player. It ships no channels, playlists, guide data or credentials
 
 _Screenshots will be added here. They will only show synthetic test data, never real channels or provider artwork._
 
-## Install
-
-Download the latest build from the [Releases](../../releases) page. Dev builds are marked "pre-release".
-
-Current builds are **not code-signed**, so each system asks you to confirm the first launch.
-
-### Windows
-
-Run the `Downlink_*_x64-setup.exe` installer (per-user, no admin rights needed).
-SmartScreen may say "Windows protected your PC": choose **More info**, then **Run anyway**.
-
-### macOS
-
-Open the `.dmg` and drag Downlink to Applications. Builds are ad-hoc signed, so macOS blocks the first launch.
-Clear the quarantine flag once, then open it normally:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Downlink.app
-```
-
-### Linux
-
-Pick one:
-
-- **AppImage**: `chmod +x Downlink_*.AppImage && ./Downlink_*.AppImage`
-- **Debian / Ubuntu**: `sudo apt install ./downlink_*_amd64.deb`
-- **Fedora / openSUSE**: `sudo dnf install ./downlink-*.x86_64.rpm`
-
-The packages carry their own libmpv; they do not depend on your distribution's mpv. On GNOME the tray icon needs an
-AppIndicator extension. Each Linux release also lists `SHA256SUMS-linux-x86_64.txt` and `.sig` files.
-
 ## Getting started
 
 1. Start Downlink and choose **Add a source**.
 2. For Dispatcharr, enter the server address and an API key (Dispatcharr: user menu, API keys).
 3. Wait for the first sync, then pick a channel.
 
-More in [`docs/user/testing.md`](docs/user/testing.md) (what to check and how to report a problem).
-
-## Building from source
-
-```bash
-rustup toolchain install stable
-corepack enable && corepack prepare pnpm@10 --activate
-pnpm install
-pnpm -C apps/ui build
-cargo run -p downlink-desktop            # dev: DOWNLINK_MPV_PATH=/path/to/libmpv.so.2 uses a system libmpv
-```
-
-Linux build dependencies: `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
-pkg-config build-essential`. See [`docs/dev-setup.md`](docs/dev-setup.md) for the local test environment and
-[`docs/PLAN.md`](docs/PLAN.md) for the design.
 
 ## Legal
 
