@@ -1,0 +1,53 @@
+# Manual: build only the macOS libmpv (tools/mpv/macos.sh) on the arm64 runner, without the tests, the other
+# platforms or a release. For debugging the Mac engine build quickly. On success it saves the same cache entry
+# the release build restores, so the next Dev build / Release skips the libmpv build.
+name: macOS libmpv
+
+on:
+  workflow_dispatch:
+    inputs:
+      ignore_cache:
+        description: Build even if a cached libmpv exists for this macos.sh + pins.env
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-libmpv-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  libmpv:
+    name: Build libmpv (macOS Apple Silicon)
+    runs-on: macos-15 # arm64
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - id: libmpv
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: tools/mpv/out/macos
+          key: libmpv-macos-arm64-${{ hashFiles('tools/mpv/pins.env', 'tools/mpv/macos.sh') }}
+          lookup-only: ${{ inputs.ignore_cache }}
+
+      - name: Build libmpv
+        if: inputs.ignore_cache || steps.libmpv.outputs.cache-hit != 'true'
+        run: |
+          brew install meson ninja pkgconf
+          ./tools/mpv/macos.sh tools/mpv/out/macos
+
+      - if: steps.libmpv.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: tools/mpv/out/macos
+          key: ${{ steps.libmpv.outputs.cache-primary-key }}
+
+      - name: Show the staged library
+        run: |
+          cat tools/mpv/out/macos/licenses/MANIFEST.txt
+          otool -L tools/mpv/out/macos/Frameworks/libmpv.2.dylib

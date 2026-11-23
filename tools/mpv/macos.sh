@@ -57,11 +57,23 @@ fetch() { # fetch <url> <sha256> <dest_dir>: download, verify, unpack
 }
 
 meson_build() { # meson_build <src_dir> <static|shared> [meson -D options...]
-  local dir="$1" kind="$2"
+  # meson and ninja report errors on stdout, so output goes to a log that is dumped when a step fails.
+  local dir="$1" kind="$2" log
   shift 2
-  meson setup "$dir/build" "$dir" --prefix="$PREFIX" --libdir=lib --buildtype=release \
-    --default-library="$kind" --native-file "$WORK/native.ini" "$@" >/dev/null
-  ninja -C "$dir/build" install >/dev/null
+  log="$WORK/$(basename "$dir").log"
+  echo "building $(basename "$dir")"
+  if ! meson setup "$dir/build" "$dir" --prefix="$PREFIX" --libdir=lib --buildtype=release \
+    --default-library="$kind" --native-file "$WORK/native.ini" "$@" >"$log" 2>&1; then
+    echo "meson setup failed for $(basename "$dir"):" >&2
+    tail -n 80 "$log" >&2
+    [ -f "$dir/build/meson-logs/meson-log.txt" ] && tail -n 80 "$dir/build/meson-logs/meson-log.txt" >&2
+    exit 1
+  fi
+  if ! ninja -C "$dir/build" install >"$log" 2>&1; then
+    echo "ninja failed for $(basename "$dir"):" >&2
+    grep -E -B2 -A12 'FAILED:|error:' "$log" | head -n 200 >&2 || tail -n 120 "$log" >&2
+    exit 1
+  fi
 }
 
 # --- FreeType, FriBidi, HarfBuzz, libass (subtitles; CoreText font provider) --------------------------------
