@@ -16,7 +16,7 @@
 ---
 
 # What Is Downlink
-I wanted a desktop IPTV player that could take advantage of all Dispatcharr offers. Support for Live channels, VOD, and DVR. Fast, Easy to Use, and reliable.
+I wanted a desktop IPTV player that could take advantage of all Dispatcharr offers. Support for Live channels, VOD, and DVR. Fast, easy to use, and reliable.
 
 While not required, this app is best used with [Dispatcharr](https://github.com/dispatcharr/dispatcharr).
 
@@ -29,8 +29,8 @@ While not required, this app is best used with [Dispatcharr](https://github.com/
 - Fast channel changes: the playback engine is pre-warmed and nothing waits on the network before a zap.
 - Playback powered by MPV: H.264, HEVC, MPEG-2, AC-3/E-AC-3, teletext, hardware decode where the
   machine allows it.
-- System tray, media keys and OS media controls (MPRIS, Windows media overlay, macOS Now Playing), keeps the screen
-  awake while playing, pauses and releases the stream when the machine sleeps.
+- Full HDR Support: Correctly plays both SDR and HDR content on all display types with tone mapping where required
+- System tray, media keys and OS media controls (MPRIS, Windows media overlay, macOS Now Playing), keeps the screen awake while playing, pauses and releases the stream when the machine sleeps.
 - Single instance and `downlink://channel/<uuid>` deep links.
 - Updates through signed releases, checked in the background and installed when you quit. Never mid-playback.
 - Your credentials live in the operating system keychain and are never written to the database or the logs.

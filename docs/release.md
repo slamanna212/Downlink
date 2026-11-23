@@ -12,13 +12,15 @@ dev builds are a button.
 >   then `gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (it prompts for the value).
 > - [x] Paste the public key (`~/.tauri/downlink.key.pub`) into `plugins.updater.pubkey` in `apps/desktop/tauri.conf.json`.
 > - [x] Re-enable the Release workflow on GitHub (it was disabled by hand): `gh workflow enable release.yml`.
+> - [ ] Add the five Apple secrets for a signed, notarised macOS build (see "macOS signing and notarisation").
+>   Without them the macOS build is ad-hoc signed, with a warning.
 
 ## Workflows
 
 | Workflow | Trigger | Result |
 |---|---|---|
-| `release.yml` | every push to `main` (or manual retry) | Linux tests, then Windows + Linux build into a **draft** release `vX.Y.Z` (version from the root `package.json`). Skipped if that release exists. A `-suffix` version is marked pre-release. |
-| `dev-build.yml` | manual only: Actions -> Dev build -> Run workflow, pick the branch (normally `dev`) | Linux tests, then Windows + Linux build, published straight away as pre-release `vX.Y.Z-dev.N`. Points the in-app dev channel at it and keeps only the 5 newest dev builds. |
+| `release.yml` | every push to `main` (or manual retry) | Linux tests, then Windows + Linux + macOS build into a **draft** release `vX.Y.Z` (version from the root `package.json`). Skipped if that release exists. A `-suffix` version is marked pre-release. |
+| `dev-build.yml` | manual only: Actions -> Dev build -> Run workflow, pick the branch (normally `dev`) | Linux tests, then Windows + Linux + macOS build, published straight away as pre-release `vX.Y.Z-dev.N`. Points the in-app dev channel at it and keeps only the 5 newest dev builds. |
 | `release-notes.yml` | you publish or edit a release | Copies the release text into that release's `latest.json` as an offline fallback. The app itself reads the GitHub release body (see "Release notes in the app"). |
 | `ci.yml` | called by the above; manual | Quality gates on Linux only: fmt, clippy, deny, nextest, UI lint/typecheck/test/build. |
 | `pr-ci.yml` | pull requests to `dev` | `ci.yml`. |
@@ -80,17 +82,21 @@ the installed one.
 | `Downlink_<ver>_x64-setup.exe` + `.sig` | `windows-x86_64` |
 | `Downlink_<ver>_amd64.AppImage` + `.sig` | `linux-x86_64` |
 | `Downlink_<ver>_amd64.deb` + `.sig` | `linux-x86_64-deb` (Tauri signs only the AppImage; the workflow signs the deb) |
+| `Downlink_<ver>_aarch64.dmg` | none (the installer people download) |
+| `Downlink_<ver>_aarch64.app.tar.gz` + `.sig` | `darwin-aarch64` (made by the macOS job from the notarised `.app`) |
 | `latest.json` | built by `tools/release/make-latest-json.py` |
 
 Stable releases also get fixed-name copies for website links (`/releases/latest/download/<name>`):
-`Downlink_x64-setup.exe`, `Downlink_amd64.AppImage`, `Downlink_amd64.deb`.
+`Downlink_x64-setup.exe`, `Downlink_amd64.AppImage`, `Downlink_amd64.deb`, `Downlink_aarch64.dmg`.
 
 Every platform ships the same mpv release, pinned in `tools/mpv/pins.env` (currently 0.42.0). Windows uses
 mpv's official libmpv zip. Linux builds libplacebo + mpv from verified source inside the pinned Debian 13
 container (`tools/mpv/build-linux.sh`), and the Linux CI and release jobs run in that same container, so the
 floor is glibc 2.41 / Wayland 1.23 (Debian 13, Ubuntu 25.04, Fedora 42 and newer). CI caches the libmpv build
 keyed on the pins and scripts. Dev machines get the identical bundle with `tools/mpv/linux-docker.sh`, then
-`export DOWNLINK_MPV_PATH=$PWD/tools/mpv/out/linux/lib/libmpv.so.2`.
+`export DOWNLINK_MPV_PATH=$PWD/tools/mpv/out/linux/lib/libmpv.so.2`. macOS builds FFmpeg, libass and
+libplacebo from verified source and links them statically into one `libmpv.2.dylib` (`tools/mpv/macos.sh`, run
+natively on the arm64 runner), also cached.
 
 If a build fails, the half-filled draft and its tag are deleted.
 
@@ -100,6 +106,11 @@ If a build fails, the half-filled draft and its tag are deleted.
 |---|---|---|
 | `TAURI_SIGNING_PRIVATE_KEY` | secret | minisign private key (contents of the key file) for updater `.sig` files |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret | its password |
+| `APPLE_CERTIFICATE` | secret | Developer ID Application certificate + private key, exported as `.p12`, base64 |
+| `APPLE_CERTIFICATE_PASSWORD` | secret | the `.p12` export password |
+| `APPLE_API_ISSUER` | secret | App Store Connect API issuer ID (UUID), for notarisation |
+| `APPLE_API_KEY_ID` | secret | App Store Connect API key ID (10 characters) |
+| `APPLE_API_PRIVATE_KEY` | secret | contents of that key's `AuthKey_<id>.p8` |
 | `LINUX_RUNNER` | variable (optional) | Linux runner label for build and CI (default `ubuntu-24.04`); the Linux jobs run in a container, so a self-hosted runner needs Docker |
 | `CI_RUNNER` | variable (optional) | runner for PR CI from trusted actors; unset = GitHub-hosted |
 
@@ -112,10 +123,30 @@ files or `latest.json`, so in-app updates don't work until the key is added.
 - The private key file contents and password are the two secrets above.
 - Losing the private key means installed clients can never update again. Back it up offline.
 
+## macOS signing and notarisation
+
+Apple Silicon only (macOS 13+); Intel Macs are not built. The `build-macos` job in `build.yml`, on `macos-15`:
+
+1. Restores or builds `tools/mpv/out/macos` (`tools/mpv/macos.sh`).
+2. Imports `APPLE_CERTIFICATE` into a throwaway keychain and finds the `Developer ID Application: …` identity in it
+   (so the identity name is not a secret of its own).
+3. Signs `libmpv.2.dylib` with that identity, hardened runtime and a secure timestamp.
+4. Builds with `bundle.macOS.signingIdentity` set to the identity; tauri signs the app (hardened runtime,
+   `apps/desktop/entitlements.plist`), notarises it with the App Store Connect API key and staples the ticket.
+5. Verifies: `codesign --verify --deep --strict`, `stapler validate`, `spctl --assess`, then runs the bundled app's
+   `--self-test` (loads the bundled libmpv under the hardened runtime and plays a test pattern).
+6. Uploads the dmg and `Downlink_<ver>_aarch64.app.tar.gz`; publish signs the archive for the updater.
+
+All five `APPLE_*` secrets or none: none gives an ad-hoc signed, un-notarised build with a warning (testers run
+`xattr -dr com.apple.quarantine /Applications/Downlink.app` once); a partial set fails the job.
+
+Renewing: the Developer ID certificate lasts 5 years. Builds signed before it expires keep working (the timestamp
+proves when they were signed). Make a new one, re-export the `.p12` and replace `APPLE_CERTIFICATE` and
+`APPLE_CERTIFICATE_PASSWORD`. If the API key is revoked, make a new one and replace the three `APPLE_API_*` secrets.
+
 ## Not in the pipeline (yet)
 
-- **macOS.** The overlay (`apps/desktop/tauri.release.macos.conf.json`) is kept. Adding it means a macOS build job
-  that builds the pinned mpv from source (no Homebrew libmpv; universal via `lipo`), Developer ID signing and
-  notarisation, and passing `--macos` to `make-latest-json.py`.
+- macOS on Intel (would need an x86_64 libmpv and a universal build), notarising the dmg itself (the app inside is
+  notarised and stapled, which is what Gatekeeper checks).
 - rpm, build-provenance attestation, smoke-testing installers on clean runners (`--self-test` still exists in the
   app for manual checks), Windows code signing.

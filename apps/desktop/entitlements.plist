@@ -2,11 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <!-- Hardened runtime: load the bundled libmpv/ffmpeg dylibs. They are signed with our own
-       identity, not Apple's, so library validation would otherwise reject them. -->
+  <!-- Hardened runtime, library validation off. A Developer ID build signs the bundled libmpv.2.dylib with the
+       same Team ID as the app, which library validation accepts on its own; this key is what lets the
+       ad-hoc fallback build (no Apple secrets, docs/release.md) load it too. Safe to drop once every release
+       is Developer ID signed and the CI self-test passes without it. -->
   <key>com.apple.security.cs.disable-library-validation</key>
   <true/>
-  <!-- No allow-jit / allow-unsigned-executable-memory: libmpv and ffmpeg are ahead-of-time compiled
-       (no JIT; no Lua JIT, scripting is off), and WKWebView's JIT runs in Apple's own process. -->
+  <!-- No allow-jit / allow-unsigned-executable-memory: libmpv and FFmpeg are ahead-of-time compiled (Lua and
+       JavaScript are not built), and WKWebView's JIT runs in Apple's own process. -->
 </dict>
 </plist>

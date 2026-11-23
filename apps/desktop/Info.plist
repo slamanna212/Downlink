@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!-- Merged into the macOS bundle's Info.plist by Tauri. -->
+<dict>
+  <!-- macOS 15+ asks before an app talks to the local network (a Dispatcharr server on the LAN). -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Downlink connects to your IPTV server and streams on your local network.</string>
+</dict>
+</plist>

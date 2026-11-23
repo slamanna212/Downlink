@@ -39,7 +39,7 @@
 | Scope | A **viewing client**. No admin console — Dispatcharr's web UI is the admin console |
 | Must-have | Live TV, guide, **catch-up**, VOD, DVR scheduling/playback, M3U/XMLTV/Xtream sources, **multiview** |
 | Releases | Same artefact mix as Apogee (§10), signed updater artefacts, `latest.json`, auto-update with stable + dev channels |
-| Platforms | Windows x64, macOS universal (two Mac testers), Linux x86_64 (Wayland and X11) |
+| Platforms | Windows x64, macOS Apple Silicon (two Mac testers), Linux x86_64 (Wayland and X11) |
 | Licence | GPL-3.0 with a GPL mpv build (default; confirm in §12) |
 
 ---
@@ -540,13 +540,12 @@ than the one we tested.
 | Artefact | What ships | Load |
 |---|---|---|
 | Windows NSIS | `libmpv-2.dll` + dependencies in `resources/mpv/` (zhongfly GPL x86_64 build, pinned by tag) | `LoadLibraryW` on the app-relative path |
-| macOS universal `.app` / `.dmg` | **Universal** `libmpv.dylib` + every dependent dylib in `Contents/Frameworks/` | `@rpath` / `@loader_path`, fixed with `install_name_tool`; `dlopen` from the Frameworks dir |
+| macOS arm64 `.app` / `.dmg` | One self-contained `libmpv.2.dylib` (FFmpeg, libass, libplacebo linked statically) in `Contents/Frameworks/` | id `@rpath/libmpv.2.dylib`; `dlopen` from the Frameworks dir |
 | Linux AppImage | `.so` set in `usr/lib/` | `rpath=$ORIGIN/../lib`; scrub `APPDIR`/`LD_LIBRARY_PATH` from child environments |
 | Linux `.deb` / `.rpm` | Private copy in `/usr/lib/downlink/mpv/` (via Tauri `bundle.linux.{deb,rpm}.files`) | `rpath` to the private dir; **no** `Depends: libmpv2` |
 
-macOS universal is the hard one: libmpv and every dependency must be fat binaries. `tools/mpv/macos.sh`
-builds (or collects from Homebrew bottles) on an arm64 runner and an x86_64 runner, collects each
-dylib tree, and `lipo -create`s them. This is an M1 task, not M6.
+macOS is Apple Silicon only (decided 2026-11-23): `tools/mpv/macos.sh` builds every dependency from verified
+source on an arm64 runner and links them statically into one dylib, so there is no dependency tree to relocate.
 
 Linux libs are collected in a pinned build container (Ubuntu 22.04 glibc baseline, image digest
 pinned), so the bundled set is reproducible and never the end user's distro libmpv.
@@ -1347,8 +1346,11 @@ README and About show "Works with Dispatcharr ≥ 0.32.0, tested with <latest>".
 Updater signatures (minisign) are required regardless of OS code signing.
 
 **Decided 2026-11-20 (Sam):** releases start with **Windows and Linux**; Windows stays unsigned for now.
-**macOS** follows soon, signed and notarised with Sam's existing **Apple Developer ID** (macOS release jobs are added to
-`build.yml` then; the staging script and overlay already exist). Azure Trusted Signing is not planned.
+**macOS** follows soon, signed and notarised with Sam's existing **Apple Developer ID**. Azure Trusted Signing is not planned.
+
+**Done 2026-11-23:** the `build-macos` job in `build.yml` ships Apple Silicon only (no Intel/universal build),
+Developer ID signed and notarised on both the dev and stable channels via an App Store Connect API key; ad-hoc signed
+with a warning if the Apple secrets are missing. See docs/release.md.
 
 ---
 

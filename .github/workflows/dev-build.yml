@@ -1,4 +1,4 @@
-# Manual dev build: "Run workflow", pick a branch (normally `dev`). Runs the Linux tests, builds Windows + Linux
+# Manual dev build: "Run workflow", pick a branch (normally `dev`). Runs the Linux tests, builds Windows, Linux, macOS
 # and publishes a pre-release straight away, then points the in-app dev update channel at it. See docs/release.md.
 #
 # Version: vX.Y.Z-dev.<run number>. The run number always increases, so the updater can order dev builds.

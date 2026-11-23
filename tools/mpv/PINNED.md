@@ -8,7 +8,7 @@ by editing `pins.env` (and this file if the source changes) in one commit, with 
 |---|---|---|---|---|
 | Windows x86_64 | 0.42.0 | mpv's official `libmpv-v0.42.0-x86_64-w64-mingw32-gpl.zip` (GitHub release asset), SHA-256 in `pins.env`. Only `libmpv-2.dll` and `LICENSE.GPL` are kept. | `windows.ps1 -OutDir <dir>` | `resources/mpv/` |
 | Linux x86_64 | 0.42.0 | Built from source in the pinned `debian:13@sha256:…` image: libplacebo 7.387.0 (git tag, commit verified) + mpv 0.42.0 (release tarball, SHA-256 verified) against Debian's FFmpeg 7.1 (Vulkan, VA-API, VDPAU, NVDEC). LuaJIT is on, like the official Windows build, so both accept the same options (`osc`, `ytdl`; scripts stay off via `load-scripts=no`). | `build-linux.sh <dir>` inside the image; `linux-docker.sh [dir]` runs it there from any Docker host | AppImage `usr/lib/`; deb `/usr/lib/downlink/mpv/` |
-| macOS | — | Not built yet. Will build the same pinned mpv from source (no Homebrew libmpv) when a macOS job exists. | — | `Contents/Frameworks/` |
+| macOS arm64 | 0.42.0 | Built from source on an Apple Silicon runner, minimum macOS 13.0: FFmpeg 7.1.5, libass 0.17.5 (FreeType, FriBidi, HarfBuzz; CoreText fonts) and libplacebo 7.387.0 (OpenGL only), all static, linked into one `libmpv.2.dylib` that needs only the OS. Tarballs SHA-256 verified, libplacebo commit verified. Lua is off (no scripting runtime ships; `osc`/`ytdl` are logged as rejected options). | `macos.sh <dir>` | `Contents/Frameworks/libmpv.2.dylib`; manifest + licences in `Contents/Resources/mpv-licenses/` |
 
 ## Linux
 
@@ -23,6 +23,18 @@ by editing `pins.env` (and this file if the source changes) in one commit, with 
   DRM/gbm, Vulkan, VA-API/VDPAU, ALSA/Pulse/PipeWire/JACK, systemd/dbus/udev, fontconfig/freetype), so GPU and
   audio come from the user's machine.
 - CI runs the libmpv tests with `DOWNLINK_REQUIRE_MPV=1`: they fail, not skip, if the bundle cannot load.
+
+## macOS
+
+- **Apple Silicon only**, `MPV_MACOS_MIN` (13.0). The script checks the architecture, the `minos` load command and
+  that `otool -L` lists only `/usr/lib` and `/System/Library`, and fails otherwise.
+- Homebrew supplies build tools only (meson, ninja, pkgconf). `PKG_CONFIG_LIBDIR` points at the private prefix
+  and FFmpeg is configured with `--disable-autodetect`, so no Homebrew library can be linked in.
+- VideoToolbox decoding, CoreAudio output, SecureTransport TLS (FFmpeg 7.1 still has it; FFmpeg 8 dropped it, so
+  moving past 7.1 needs another TLS backend).
+- The staged dylib is unsigned. The release job signs it (Developer ID, hardened runtime, timestamp) before
+  bundling; `Contents/Frameworks` may only hold code, so the manifest and licences go to Resources.
+- CI caches the output keyed on `pins.env` and `macos.sh`.
 
 ## Rules
 

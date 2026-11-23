@@ -1,6 +1,6 @@
 # Reusable build + publish pipeline (PLAN §10), called by release.yml (main, stable) and dev-build.yml
-# (manual, dev channel). Creates a draft release, builds Windows + Linux in parallel, writes latest.json,
-# then publishes (dev) or leaves the draft for a manual publish (stable). See docs/release.md.
+# (manual, dev channel). Creates a draft release, builds Windows, Linux and macOS (Apple Silicon) in parallel,
+# writes latest.json, then publishes (dev) or leaves the draft for a manual publish (stable). See docs/release.md.
 name: Build and publish
 
 on:
@@ -170,9 +170,166 @@ jobs:
           includeUpdaterJson: false # publish writes the one latest.json; two jobs uploading their own race
 
   # ---------------------------------------------------------------------------
+  build-macos:
+    name: Build (macOS Apple Silicon dmg)
+    needs: prepare
+    runs-on: macos-15 # arm64
+    permissions:
+      contents: write
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Unsigned output of tools/mpv/macos.sh, saved straight after the build so a later failure in this job does
+      # not throw away a ~20 min libmpv build. The signing step below re-signs it on every run.
+      - id: libmpv
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: tools/mpv/out/macos
+          key: libmpv-macos-arm64-${{ hashFiles('tools/mpv/pins.env', 'tools/mpv/macos.sh') }}
+
+      - name: Build libmpv (cache miss)
+        if: steps.libmpv.outputs.cache-hit != 'true'
+        run: |
+          brew install meson ninja pkgconf
+          ./tools/mpv/macos.sh tools/mpv/out/macos
+
+      - if: steps.libmpv.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: tools/mpv/out/macos
+          key: ${{ steps.libmpv.outputs.cache-primary-key }}
+
+      # Developer ID signing + notarisation need all five Apple secrets (docs/release.md). With none of them the
+      # build is ad-hoc signed and testers must clear the quarantine flag; a partial set is a configuration error.
+      - id: apple
+        name: Import the Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          have=0
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_API_ISSUER APPLE_API_KEY_ID APPLE_API_PRIVATE_KEY; do
+            [[ -n "${!v}" ]] && have=$((have + 1))
+          done
+          if [[ "$have" == 0 ]]; then
+            { echo "signed=false"; echo "identity=-"; } >> "$GITHUB_OUTPUT"
+            echo "::warning title=Unsigned macOS build::The Apple signing secrets are not set, so the macOS build is ad-hoc signed and not notarised. Testers must run xattr -dr com.apple.quarantine /Applications/Downlink.app once. See docs/release.md."
+            exit 0
+          fi
+          if [[ "$have" != 5 ]]; then
+            echo "::error::Only $have of the 5 Apple secrets are set (APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_API_ISSUER, APPLE_API_KEY_ID, APPLE_API_PRIVATE_KEY)."
+            exit 1
+          fi
+
+          # Throwaway keychain with a random password, first in the search list so codesign finds the identity.
+          keychain="$RUNNER_TEMP/downlink-signing.keychain-db"
+          kc_pass="$(openssl rand -hex 24)"
+          printf '%s' "$APPLE_CERTIFICATE" | tr -d '\r\n ' | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$kc_pass" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$kc_pass" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -f pkcs12 \
+            -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$kc_pass" "$keychain" >/dev/null
+          # shellcheck disable=SC2046 # the existing keychain list is a word list
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+                      | sed -n 's/.*"\(Developer ID Application: .*\)"$/\1/p' | head -n1)"
+          if [[ -z "$identity" ]]; then
+            echo "::error::APPLE_CERTIFICATE holds no 'Developer ID Application' identity (an Apple Development or Apple Distribution certificate will not do)."
+            exit 1
+          fi
+          echo "Signing as: $identity"
+
+          # The App Store Connect API key tauri notarises with.
+          key="$RUNNER_TEMP/AuthKey_notary.p8"
+          printf '%s\n' "$APPLE_API_PRIVATE_KEY" > "$key"
+          { echo "signed=true"; echo "identity=$identity"; echo "api_key_path=$key"; } >> "$GITHUB_OUTPUT"
+
+      # Sign libmpv ourselves before bundling: notarisation rejects any Mach-O without a Developer ID signature,
+      # hardened runtime and a secure timestamp, and the bundler is not relied on to sign Contents/Frameworks.
+      - name: Sign libmpv
+        env:
+          IDENTITY: ${{ steps.apple.outputs.identity }}
+        run: |
+          lib=tools/mpv/out/macos/Frameworks/libmpv.2.dylib
+          if [[ "$IDENTITY" == "-" ]]; then
+            codesign --force --sign - "$lib"
+          else
+            codesign --force --timestamp --options runtime --sign "$IDENTITY" "$lib"
+          fi
+          codesign --verify --strict --verbose=2 "$lib"
+
+      - uses: ./.github/actions/setup-build
+        with:
+          channel-version: ${{ inputs.version }}
+          signed: "false"
+          overlay: macos
+
+      - name: Set the signing identity
+        env:
+          IDENTITY: ${{ steps.apple.outputs.identity }}
+        run: |
+          jq --arg id "$IDENTITY" '.bundle.macOS.signingIdentity = $id' release-config.json > "$RUNNER_TEMP/rc.json"
+          mv "$RUNNER_TEMP/rc.json" release-config.json
+
+      # tauri signs the app with the hardened runtime, notarises it with the API key, and staples the ticket.
+      - name: Build, sign and notarise
+        working-directory: apps/desktop
+        env:
+          SIGNED: ${{ steps.apple.outputs.signed }}
+          NOTARY_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          NOTARY_KEY_PATH: ${{ steps.apple.outputs.api_key_path }}
+        run: |
+          if [[ "$SIGNED" == true ]]; then
+            export APPLE_API_ISSUER="$NOTARY_ISSUER" APPLE_API_KEY="$NOTARY_KEY_ID" APPLE_API_KEY_PATH="$NOTARY_KEY_PATH"
+          fi
+          cargo tauri build --bundles app,dmg --config ../../release-config.json
+
+      # Also proves the hardened-runtime app can load its bundled libmpv (library validation) and play a frame.
+      - name: Verify the app
+        env:
+          SIGNED: ${{ steps.apple.outputs.signed }}
+        run: |
+          app=target/release/bundle/macos/Downlink.app
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --entitlements - "$app"
+          if [[ "$SIGNED" == true ]]; then
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=4 "$app"
+          fi
+          exe="$(find "$app/Contents/MacOS" -maxdepth 1 -type f -perm -u+x | head -n1)"
+          DOWNLINK_REQUIRE_BUNDLED=1 "$exe" --self-test
+
+      # The updater archive is made here rather than by tauri: updater signing happens in publish, away from the
+      # build (createUpdaterArtifacts is off in every build job).
+      - name: Upload the dmg and the updater archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          cd target/release/bundle
+          dmgs=(dmg/*_aarch64.dmg)
+          [[ ${#dmgs[@]} == 1 && -s "${dmgs[0]}" ]] || { echo "::error::expected one *_aarch64.dmg, got: ${dmgs[*]}"; exit 1; }
+          archive="Downlink_${VERSION}_aarch64.app.tar.gz"
+          COPYFILE_DISABLE=1 tar -czf "$archive" -C macos Downlink.app
+          gh release upload "$TAG" --clobber -- "${dmgs[0]}" "$archive"
+
+  # ---------------------------------------------------------------------------
   publish:
     name: Publish (latest.json)
-    needs: [prepare, build-windows, build-linux]
+    needs: [prepare, build-windows, build-linux, build-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -210,7 +367,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          for asset in assets/*_x64-setup.exe assets/*_amd64.AppImage assets/*_amd64.deb; do
+          for asset in assets/*_x64-setup.exe assets/*_amd64.AppImage assets/*_amd64.deb assets/*_aarch64.app.tar.gz; do
             test -s "$asset"
             cargo tauri signer sign --app-version "$VERSION" "$asset"
             test -s "$asset.sig"
@@ -236,7 +393,8 @@ jobs:
           cp ./*_x64-setup.exe Downlink_x64-setup.exe
           cp ./*_amd64.AppImage Downlink_amd64.AppImage
           cp ./*_amd64.deb Downlink_amd64.deb
-          gh release upload "$TAG" Downlink_x64-setup.exe Downlink_amd64.AppImage Downlink_amd64.deb --clobber
+          cp ./*_aarch64.dmg Downlink_aarch64.dmg
+          gh release upload "$TAG" Downlink_x64-setup.exe Downlink_amd64.AppImage Downlink_amd64.deb Downlink_aarch64.dmg --clobber
 
       - name: Publish (dev) or leave the draft (stable)
         run: |
@@ -276,8 +434,8 @@ jobs:
   # A failed build must not leave a half-filled release (or its tag) behind.
   cleanup:
     name: Delete incomplete release
-    needs: [prepare, build-windows, build-linux, publish]
-    if: ${{ always() && needs.prepare.result == 'success' && (contains(fromJSON('["failure","cancelled"]'), needs.build-windows.result) || contains(fromJSON('["failure","cancelled"]'), needs.build-linux.result) || contains(fromJSON('["failure","cancelled"]'), needs.publish.result)) }}
+    needs: [prepare, build-windows, build-linux, build-macos, publish]
+    if: ${{ always() && needs.prepare.result == 'success' && (contains(fromJSON('["failure","cancelled"]'), needs.build-windows.result) || contains(fromJSON('["failure","cancelled"]'), needs.build-linux.result) || contains(fromJSON('["failure","cancelled"]'), needs.build-macos.result) || contains(fromJSON('["failure","cancelled"]'), needs.publish.result)) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
