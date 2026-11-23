@@ -129,13 +129,15 @@ meson_build "$SRC/libplacebo" static \
 # --- mpv (release tarball, SHA-256 verified; libmpv only, no Swift, no Lua) ----------------------------------
 # Lua is off: base_options' `osc`/`ytdl` are then unknown and logged as rejected, which is harmless (the
 # engine never fails on a rejected option) and means no scripting runtime ships at all.
+# Extra link flags go through LDFLAGS: meson took the environment over -Dc_link_args and silently dropped them.
 # -lc++: HarfBuzz and libplacebo contain C++ and are linked statically into a C library.
+# IOSurface: hwdec_mac_gl (VideoToolbox -> GL interop) calls IOSurface*, and mpv's meson does not link it.
 fetch "https://github.com/mpv-player/mpv/archive/refs/tags/v$MPV_VERSION.tar.gz" "$MPV_SRC_SHA256" "$SRC/mpv"
 # mpv 0.42 does not build or run with cocoa but without Swift; see the patch header. b_lundef=true (mpv defaults it
 # to false) makes any symbol still left undefined a link error here instead of a crash in the app.
 patch -p1 -d "$SRC/mpv" --forward --quiet < "$HERE/patches/mpv-macos-cocoa-without-swift.patch"
-meson_build "$SRC/mpv" shared -Db_lundef=true \
-  -Dlibmpv=true -Dcplayer=false -Dgpl=true -Dtests=false -Dbuild-date=false -Dc_link_args="$LDFLAGS -lc++" \
+LDFLAGS="$LDFLAGS -lc++ -framework IOSurface" meson_build "$SRC/mpv" shared -Db_lundef=true \
+  -Dlibmpv=true -Dcplayer=false -Dgpl=true -Dtests=false -Dbuild-date=false \
   -Dcocoa=enabled -Dcoreaudio=enabled -Dgl=enabled -Dgl-cocoa=enabled -Dplain-gl=enabled \
   -Dvideotoolbox-gl=enabled -Dlibavdevice=enabled -Diconv=enabled -Dzlib=enabled \
   -Dswift-build=disabled -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled -Dmacos-touchbar=disabled \
