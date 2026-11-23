@@ -16,6 +16,8 @@ impl Default for PlaybackInhibitor {
 }
 
 impl PlaybackInhibitor {
+    // `State` is a unit struct on the stub platforms (macOS) and a real struct elsewhere.
+    #[allow(clippy::default_constructed_unit_structs)]
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(imp::State::default()),

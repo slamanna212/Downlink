@@ -66,3 +66,12 @@ for n in movie1 movie2 movie3 movie4 series1 series2 backdrop; do
 done
 
 ls -lh "$OUT"
+
+# 7. Two audio languages (track menu tests)
+if [ ! -f "$OUT/two_audio.ts" ] || [ "$FORCE" = "--force" ]; then
+  echo "making two_audio.ts"
+  "${FF[@]}" -f lavfi -i "testsrc2=size=640x360:rate=25:duration=20" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=20" \
+    -f lavfi -i "sine=frequency=880:sample_rate=48000:duration=20" -map 0 -map 1 -map 2 \
+    -c:v libx264 -preset veryfast -g 50 -pix_fmt yuv420p -c:a aac -b:a 64k \
+    -metadata:s:a:0 language=eng -metadata:s:a:1 language=deu -f mpegts "$OUT/two_audio.ts"
+fi

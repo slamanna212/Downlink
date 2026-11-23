@@ -44,7 +44,7 @@ interface UiState {
   densityExplicit: boolean;
   /** Apply an auto-detected density without persisting it. */
   setAutoDensity: (d: DensitySetting) => void;
-  /** User preference. 'auto' = collapsed on Guide/Player, expanded elsewhere (DESIGN §8). */
+  /** User preference. 'auto' = expanded on every route (DESIGN §8). */
   railPref: RailPref;
   setRailPref: (p: RailPref) => void;
   /** The window is in mini player mode (compact, always on top; PLAN §8.2). */

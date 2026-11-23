@@ -101,14 +101,12 @@ async fn miss_fetches_once_resizes_both_sizes_then_hits_disk() {
         "second size came from the same fetch"
     );
 
-    // Files are content-addressed on disk.
-    assert!(
-        cache
-            .dir()
-            .join(&hash[..2])
-            .join(format!("{hash}-160.png"))
-            .exists()
-    );
+    let path: String = sqlx::query_scalar("SELECT path FROM image_cache WHERE key = ?")
+        .bind(ImageCache::key(&hash, size))
+        .fetch_one(cache.store.pool())
+        .await
+        .unwrap();
+    assert!(cache.dir().join(path).exists());
     assert_eq!(cache.get(&hash, size, &stub).await.unwrap(), g);
     assert_eq!(stub.calls.load(Ordering::SeqCst), 1);
 }
@@ -117,8 +115,8 @@ async fn miss_fetches_once_resizes_both_sizes_then_hits_disk() {
 async fn simultaneous_requests_for_two_sizes_share_the_download() {
     let (cache, sid, _d) = setup(DEFAULT_MAX_BYTES).await;
     let url = "https://d.test/shared";
-    cache.register(sid, url, ImageSize::Grid).await.unwrap();
-    let hash = hash_url(url);
+    let dl = cache.register(sid, url, ImageSize::Grid).await.unwrap();
+    let (hash, _) = parse_dlimg(&dl).unwrap();
     let stub = Stub {
         calls: AtomicUsize::new(0),
         bytes: png(600, 400, true),
@@ -221,11 +219,219 @@ async fn lru_eviction_drops_oldest_first() {
         "only the most recent hash survives: {left:?}"
     );
     assert!(capped.total_bytes().await.unwrap() <= per_hash + per_hash / 2);
+    let remaining = std::fs::read_dir(cache.dir())
+        .unwrap()
+        .map(|entry| std::fs::read_dir(entry.unwrap().path()).unwrap().count())
+        .sum::<usize>();
+    assert_eq!(remaining, left.len());
+}
+
+struct Failing;
+
+#[async_trait]
+impl ImageFetcher for Failing {
+    async fn fetch(&self, _s: i64, _u: &str) -> Result<RawImage> {
+        Err(AppError::network("offline"))
+    }
+}
+
+async fn age_entries(cache: &ImageCache, secs: i64) {
+    sqlx::query("UPDATE image_cache SET fetched_at = ?")
+        .bind(now_utc() - secs)
+        .execute(cache.store.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn old_images_are_served_stale_then_rechecked_once() {
+    let (cache, sid, _d) = setup(DEFAULT_MAX_BYTES).await;
+    let dl = cache
+        .register(sid, "https://d.test/logo.png", ImageSize::Grid)
+        .await
+        .unwrap();
+    let (hash, size) = parse_dlimg(&dl).unwrap();
+    let logo = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(64, 64, true),
+    };
+    assert!(!cache.get(&hash, size, &logo).await.unwrap().stale);
+    assert!(!cache.get(&hash, size, &logo).await.unwrap().stale);
+
+    age_entries(&cache, REVALIDATE_AFTER_SECS + 60).await;
+    let old = cache.get(&hash, size, &logo).await.unwrap();
     assert!(
-        !cache
-            .dir()
-            .join(&hashes[0][..2])
-            .join(format!("{}-160.png", hashes[0]))
-            .exists()
+        old.stale && old.mime == "image/png",
+        "old copy still served"
     );
+    assert_eq!(
+        logo.calls.load(Ordering::SeqCst),
+        1,
+        "serving stale fetches nothing"
+    );
+
+    // The picture changed behind the same URL (now opaque: re-encoded as JPEG).
+    let replaced = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(64, 64, false),
+    };
+    cache.refresh(&hash, &replaced).await.unwrap();
+    cache.refresh(&hash, &replaced).await.unwrap();
+    assert_eq!(
+        replaced.calls.load(Ordering::SeqCst),
+        1,
+        "fresh after one re-check"
+    );
+    let new = cache.get(&hash, size, &replaced).await.unwrap();
+    assert!(!new.stale && new.mime == "image/jpeg");
+    let pngs = std::fs::read_dir(cache.dir().join(&hash[..2]))
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|x| x == "png")
+        })
+        .count();
+    assert_eq!(pngs, 0, "the replaced files are removed");
+}
+
+#[tokio::test]
+async fn a_failed_recheck_keeps_the_copy_and_waits_a_day() {
+    let (cache, sid, _d) = setup(DEFAULT_MAX_BYTES).await;
+    let dl = cache
+        .register(sid, "https://d.test/logo2.png", ImageSize::Grid)
+        .await
+        .unwrap();
+    let (hash, size) = parse_dlimg(&dl).unwrap();
+    let logo = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(64, 64, true),
+    };
+    cache.get(&hash, size, &logo).await.unwrap();
+    age_entries(&cache, REVALIDATE_AFTER_SECS + 60).await;
+    assert!(cache.refresh(&hash, &Failing).await.is_err());
+    let hit = cache.get(&hash, size, &logo).await.unwrap();
+    assert!(!hit.stale, "not retried on every request");
+    assert_eq!(hit.mime, "image/png", "cached copy kept");
+}
+
+#[tokio::test]
+async fn identical_artwork_urls_are_scoped_to_the_account_uuid() {
+    let (cache, first, _dir) = setup(DEFAULT_MAX_BYTES).await;
+    let second = cache
+        .store
+        .insert_source(&NewSource {
+            kind: "m3u".into(),
+            name: "Second account".into(),
+            base_url: None,
+            secret_ref: None,
+            username: None,
+            tls_insecure: false,
+            created_at: 1,
+        })
+        .await
+        .unwrap()
+        .id;
+    let url = "https://source.test/image?token={dl:token}";
+    let page = cache
+        .register_page(&[(first, url), (second, url)])
+        .await
+        .unwrap();
+    assert_ne!(page[&first][url], page[&second][url]);
+    let stub = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(80, 40, true),
+    };
+    let old_hash = parse_dlimg(&page[&second][url]).unwrap().0;
+    cache.get(&old_hash, ImageSize::Grid, &stub).await.unwrap();
+    cache.store.delete_source(second).await.unwrap();
+    assert!(cache.get(&old_hash, ImageSize::Grid, &stub).await.is_err());
+
+    let replacement = cache
+        .store
+        .insert_source(&NewSource {
+            kind: "m3u".into(),
+            name: "Replacement account".into(),
+            base_url: None,
+            secret_ref: None,
+            username: None,
+            tls_insecure: false,
+            created_at: 1,
+        })
+        .await
+        .unwrap()
+        .id;
+    assert_eq!(second, replacement);
+    let icon = cache
+        .register(replacement, url, ImageSize::Grid)
+        .await
+        .unwrap();
+    assert_ne!(parse_dlimg(&icon).unwrap().0, old_hash);
+}
+
+#[tokio::test]
+async fn eviction_keeps_failed_removals_accounted_until_retry() {
+    let (cache, sid, _dir) = setup(DEFAULT_MAX_BYTES).await;
+    let dl = cache
+        .register(sid, "https://source.test/art", ImageSize::Grid)
+        .await
+        .unwrap();
+    let (hash, size) = parse_dlimg(&dl).unwrap();
+    let stub = Stub {
+        calls: AtomicUsize::new(0),
+        bytes: png(64, 64, true),
+    };
+    let image = cache.get(&hash, size, &stub).await.unwrap();
+    let path: String = sqlx::query_scalar("SELECT path FROM image_cache WHERE key = ?")
+        .bind(ImageCache::key(&hash, size))
+        .fetch_one(cache.store.pool())
+        .await
+        .unwrap();
+    let path = cache.dir().join(path);
+    std::fs::remove_file(&path).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let cache = cache.with_max_bytes(0);
+    assert!(cache.evict().await.is_err());
+    assert_eq!(cache.total_bytes().await.unwrap(), image.bytes.len() as u64);
+    std::fs::remove_dir(path).unwrap();
+    assert_eq!(cache.evict().await.unwrap(), 1);
+    assert_eq!(cache.total_bytes().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn reconciliation_removes_old_orphaned_files() {
+    let (cache, _sid, _dir) = setup(DEFAULT_MAX_BYTES).await;
+    let path = cache.dir().join("ab");
+    std::fs::create_dir_all(&path).unwrap();
+    let orphan = path.join("old-or-interrupted.part");
+    std::fs::write(&orphan, b"orphaned").unwrap();
+    sqlx::query("UPDATE image_cache_size SET bytes = 100")
+        .execute(cache.store.pool())
+        .await
+        .unwrap();
+    cache.reconcile().await.unwrap();
+    assert!(!orphan.exists());
+    assert_eq!(cache.total_bytes().await.unwrap(), 0);
+}
+
+#[tokio::test]
+async fn rejects_oversized_images_before_resizing() {
+    let image = image::RgbImage::new(MAX_IMAGE_DIMENSION + 1, 1);
+    let mut bytes = Cursor::new(Vec::new());
+    DynamicImage::ImageRgb8(image)
+        .write_to(&mut bytes, ImageFormat::Png)
+        .unwrap();
+    let pipeline = IMAGE_PIPELINES.acquire().await.unwrap();
+    let error = prepare_image(bytes.into_inner(), pipeline)
+        .await
+        .unwrap_err();
+    assert_eq!(error.message, "That image is too large.");
+}
+
+#[test]
+fn decode_reservations_scale_with_decoded_pixels() {
+    assert_eq!(codec_allocation_mib(800 * 450 * 3), 5);
+    assert_eq!(codec_allocation_mib(64 * MIB), MAX_DECODE_MIB);
 }

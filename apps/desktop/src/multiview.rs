@@ -79,6 +79,8 @@ fn failure_name(k: FailureKind) -> &'static str {
 struct Tile {
     player: Arc<Player>,
     surface: Arc<Mutex<Surface>>,
+    hls: Option<crate::hls_proxy::HlsProxy>,
+    generation: u64,
 }
 
 #[derive(Default)]
@@ -208,9 +210,12 @@ impl Multiview {
             e.insert(self.create_tile(slot).await?);
         }
         let dense = 1 + tiles.len() as u32 > BASE_TILES;
-        let Some(tile) = tiles.get(&slot) else {
+        let Some(tile) = tiles.get_mut(&slot) else {
             return Err(mv_err("The tile could not be created."));
         };
+        tile.generation += 1;
+        let generation = tile.generation;
+        tile.hls = None;
         {
             let mut g = lock(&self.shared);
             let audible = g.audible == slot;
@@ -223,14 +228,29 @@ impl Multiview {
         let player = tile.player.clone();
         drop(tiles);
         player.begin_resolving();
-        let plan = match self.service.tile_plan(channel_id).await {
-            Ok(p) => p,
-            Err(e) => {
-                player.mark_failed(e.message.clone());
+        let prepared = async {
+            let mut plan = self.service.tile_plan(channel_id).await?;
+            let proxy = crate::hls_proxy::prepare(&mut plan, false, Some(self.app.clone())).await?;
+            Ok::<_, AppError>((plan, proxy))
+        }
+        .await;
+        let mut tiles = self.tiles.lock().await;
+        let Some(tile) = tiles
+            .get_mut(&slot)
+            .filter(|tile| tile.generation == generation && Arc::ptr_eq(&tile.player, &player))
+        else {
+            return Ok(());
+        };
+        let (plan, proxy) = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                player.mark_failed(error.message.clone());
+                drop(tiles);
                 self.emit(main_channel).await;
-                return Err(e);
+                return Err(error);
             }
         };
+        tile.hls = proxy;
         let mut req = crate::player_glue::plan_request(&plan, PlayMode::Live, false);
         req.profile = if dense {
             Profile::MultiviewDense
@@ -241,6 +261,7 @@ impl Multiview {
             .play(req)
             .map(|_| ())
             .map_err(|e| mv_err(e.to_string()));
+        drop(tiles);
         self.emit(main_channel).await;
         r
     }
@@ -267,7 +288,12 @@ impl Multiview {
         let surface = Arc::new(Mutex::new(surface));
         let for_rebind = surface.clone();
         player.on_engine_replaced(move |engine| lock(&for_rebind).rebind(engine));
-        Ok(Tile { player, surface })
+        Ok(Tile {
+            player,
+            surface,
+            hls: None,
+            generation: 0,
+        })
     }
 
     /// Stop the tile's stream, free its surface (main thread), then its engine.
@@ -341,9 +367,9 @@ impl Multiview {
             .iter()
             .map(|(s, t)| {
                 let snap = t.player.snapshot();
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 let frames = lock(&t.surface).render_count();
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                 let frames = 0;
                 (*s, snap.position_secs, snap.dropped_frames, frames)
             })

@@ -127,6 +127,8 @@ export interface PlayerState {
   programme: Programme | null;
   /** Title of VOD / recording media being played (null for live and catch-up, which use `programme`). */
   title: string | null;
+  /** VOD item / recording id being played (with `mode`); null for live and catch-up. */
+  mediaId: number | null;
   /** A saved resume point (seconds) the UI may offer; null when none. */
   resumeAt: number | null;
   /** Seconds. Null while not seekable. */
@@ -149,6 +151,21 @@ export interface PlayerState {
   transitionedAt: number;
   /** Audio and subtitle tracks of the current file (teletext / DVB subtitles are `sub`). */
   tracks: Track[];
+  /** Wall-clock timeline of a live or catch-up session; null for VOD and recordings. */
+  timeline: Timeline | null;
+}
+
+/** Channel timeline in UTC seconds (fractional). Older than the buffer is the archive, when there is one. */
+export interface Timeline {
+  playheadUtc: number;
+  /** Newest playable moment. */
+  liveEdgeUtc: number;
+  /** Oldest moment in the local timeshift buffer (live only). */
+  bufferStartUtc: number | null;
+  /** Oldest moment in the server archive (channels with catch-up only). */
+  archiveStartUtc: number | null;
+  behindLiveSecs: number;
+  source: 'buffer' | 'archive' | 'live';
 }
 
 export interface Track {
@@ -157,6 +174,9 @@ export interface Track {
   lang: string | null;
   title: string | null;
   codec: string | null;
+  /** Audio layout such as "stereo" or "5.1"; audio tracks only. */
+  channels: string | null;
+  default: boolean;
   selected: boolean;
 }
 
@@ -215,6 +235,8 @@ export interface AppError {
   message: string;
   /** Seconds. */
   retryAfter: number | null;
+  /** Source that requires a new certificate trust decision. */
+  sourceId?: number;
   /** More specific cause for code 'stream'/'media' (PLAN §4.9): server stream limit, undecodable codec, engine crash. */
   reason?: 'limit' | 'codec' | 'engine';
   /** Codec name when reason is 'codec'. */
@@ -237,6 +259,10 @@ export type PlayerCommand =
   | { kind: 'stop' }
   /** Absolute position in seconds (catch-up / VOD). */
   | { kind: 'seek'; seconds: number }
+  /** Wall-clock seek on a live / catch-up timeline (UTC seconds). */
+  | { kind: 'seekTo'; utc: number }
+  /** Relative seek on a live / catch-up timeline. */
+  | { kind: 'seekBy'; seconds: number }
   | { kind: 'goLive' }
   | { kind: 'setVolume'; volume: number }
   | { kind: 'setMuted'; muted: boolean }
@@ -258,6 +284,8 @@ export type HdrOutput = 'auto' | 'off';
 export interface AppSettings {
   /** 1..10 seconds. */
   liveBufferSecs: number;
+  /** Live timeshift buffer in minutes: 0 = off, 15..180. Missing in older settings; treat as 60. */
+  timeshiftMinutes?: number;
   hwdec: HwdecSetting;
   debugLogging: boolean;
   /** Null = system default. */
@@ -266,11 +294,26 @@ export interface AppSettings {
   deinterlace: Deinterlace;
   /** Missing in settings saved before it existed; treat as `auto`. */
   hdrOutput?: HdrOutput;
+  /** NVIDIA RTX Video Super Resolution (single player only). Missing = off. */
+  rtxSuperResolution?: boolean;
+  /** NVIDIA RTX Video HDR, SDR shown as HDR (needs `hdrOutput` auto). Missing = off. */
+  rtxHdr?: boolean;
   /** Percent, 50..150. */
   subtitleSize: number;
   subtitleBackground: boolean;
   /** Open the player on the most recently watched channel at launch (off by default). */
   resumeLastChannel: boolean;
+  /** Hours between background refreshes of every source, 0 = off (0..24, default 4). */
+  autoRefreshHours?: number;
+  /** Background refreshes may run while something is playing (default on). */
+  refreshDuringPlayback?: boolean;
+}
+
+/** Graphics features the player can use on this machine. */
+export interface VideoCaps {
+  /** An NVIDIA RTX card on Windows: RTX Super Resolution and RTX HDR can be turned on. */
+  rtxVideo: boolean;
+  rtxAdapter: string | null;
 }
 
 export interface AudioDevice {
@@ -297,8 +340,14 @@ export interface SessionStats {
   hdr: boolean | null;
   /** mpv transfer name, e.g. "pq", "hlg", "bt.1886". */
   transfer: string | null;
-  /** HDR source rendered to an SDR display; null unless `hdr`. */
+  /** HDR (source, or RTX HDR output) rendered to an SDR display; null unless HDR is shown. */
   toneMapped: boolean | null;
+  /** RTX Super Resolution factor requested from the driver; null when not in use. Missing on older builds. */
+  rtxUpscale?: number | null;
+  /** RTX HDR was requested for this video. */
+  rtxHdrRequested?: boolean;
+  /** RTX HDR is turning this SDR video into HDR; null unless requested and known. */
+  rtxHdrActive?: boolean | null;
   /** e.g. "bt.709", "bt.2020". */
   primaries: string | null;
   bitDepth: number | null;
@@ -330,6 +379,14 @@ export interface UpdateStatus {
   lastChecked?: number | null;
   /** The available update is downloaded and can be installed now. */
   ready?: boolean;
+}
+
+export interface ReleaseNotes {
+  version: string;
+  /** Markdown; null when there is nothing to show. */
+  body: string | null;
+  /** `github` = the release body, `manifest` = the notes in latest.json. */
+  source: 'github' | 'manifest';
 }
 
 export interface AddSourceInput {
@@ -532,6 +589,11 @@ export type RecordingStatus = 'scheduled' | 'recording' | 'completed' | 'failed'
 export interface Recording {
   id: number;
   title: string;
+  /** Episode title, when the programme had one. */
+  subtitle: string | null;
+  description: string | null;
+  season: number | null;
+  episode: number | null;
   channelId: number | null;
   channelName: string;
   startUtc: number;
@@ -565,3 +627,112 @@ export type DeepLink =
   | { kind: 'channel'; uuid: string }
   /** `channel` is a channel uuid; `programme` an opaque programme id (catch-up); `start` is informational. */
   | { kind: 'play'; channel: string; programme?: string; start?: number };
+
+// ---- media servers (Plex) ---------------------------------------------------------------------
+
+export interface PlexStatus {
+  signedIn: boolean;
+  accountName: string | null;
+  serverId: string | null;
+  serverName: string | null;
+}
+
+export interface MediaServerStatus {
+  plex: PlexStatus;
+}
+
+/** A Plex sign-in in progress; the desktop has opened `authUrl` in the browser. */
+export interface PlexPin {
+  id: number;
+  code: string;
+  authUrl: string;
+}
+
+export interface PlexServer {
+  id: string;
+  name: string;
+  owned: boolean;
+}
+
+/** What the player is showing, for a media-server lookup. */
+export type MediaTarget = { kind: 'vod'; id: number } | { kind: 'recording'; id: number } | { kind: 'programme'; id: string };
+
+/** The playing title, found on the user's media server. */
+export interface MediaMatch {
+  server: 'plex';
+  serverName: string;
+  kind: 'movie' | 'show' | 'episode';
+  title: string;
+  url: string;
+}
+
+/** A credited person on a details view. */
+export interface Person {
+  name: string;
+  /** Character (cast) or job. */
+  role: string | null;
+  /** `dlimg://` headshot. */
+  photo: string | null;
+  guest: boolean;
+}
+
+export type CrewJob = 'creator' | 'director' | 'writer' | 'producer' | 'presenter';
+
+export interface Crew {
+  job: CrewJob;
+  names: string[];
+}
+
+/** Rich details for a programme, recording or VOD title: the source first, TMDB for the gaps. */
+export interface MediaDetails {
+  kind: 'programme' | 'recording' | 'movie' | 'series' | 'episode';
+  title: string;
+  episodeTitle: string | null;
+  season: number | null;
+  episode: number | null;
+  /** This airing / episode / movie. */
+  description: string | null;
+  /** The show's own overview, when it differs from `description`. */
+  overview: string | null;
+  tagline: string | null;
+  genres: string[];
+  year: number | null;
+  /** Original air date or release date, `YYYY-MM-DD`. */
+  airDate: string | null;
+  runtimeMins: number | null;
+  certification: string | null;
+  /** 0..10. */
+  score: number | null;
+  country: string | null;
+  language: string | null;
+  network: string | null;
+  status: string | null;
+  seasonCount: number | null;
+  cast: Person[];
+  crew: Crew[];
+  poster: string | null;
+  backdrop: string | null;
+  still: string | null;
+  /** Transparent title logo. */
+  logo: string | null;
+  videoQuality: string | null;
+  aspectRatio: string | null;
+  audio: string | null;
+  isNew: boolean;
+  isLive: boolean;
+  isPremiere: boolean;
+  isFinale: boolean;
+  /** Shown before. */
+  isRepeat: boolean;
+  advisories: string[];
+  trailerUrl: string | null;
+  /** The title's TMDB page (attribution link). */
+  tmdbUrl: string | null;
+  fromTmdb: boolean;
+}
+
+export interface TmdbStatus {
+  /** A key is saved (it never comes back to the UI). */
+  configured: boolean;
+  language: string;
+}

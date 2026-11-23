@@ -1,18 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Select, UnstyledButton } from '@mantine/core';
-import { IconArrowLeft } from '@tabler/icons-react';
+import { IconArrowLeft, IconStarFilled } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
 import type { Episode, Movie, SeriesDetail } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
+import { Icon } from '../../components/Icon/Icon';
 import { Poster } from '../../components/Poster/Poster';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { resolveImg } from '../../lib/dlimg';
 import { t } from '../../lib/i18n';
 import { formatDuration } from '../../lib/time';
 import { playVod } from '../player/actions';
-import { progressOf, resumeUseful, runtimeLabel } from './vod';
+import { progressOf, ratingLabel, resumeUseful, runtimeLabel, seasonsLabel } from './vod';
+import { VodExtras } from './VodExtras';
 import classes from './Vod.module.css';
 
 function useStart() {
@@ -36,7 +38,7 @@ function Problem({ message, back }: { message: string; back: () => void }) {
   );
 }
 
-function Hero({ title, poster, backdrop, meta, plot, onBack, children }: { title: string; poster: string | null; backdrop: string | null; meta: (string | null | undefined | false)[]; plot: string | null; onBack: () => void; children: React.ReactNode }) {
+function Hero({ title, poster, backdrop, meta, rating, plot, onBack, children }: { title: string; rating?: number | null; poster: string | null; backdrop: string | null; meta: (string | null | undefined | false)[]; plot: string | null; onBack: () => void; children: React.ReactNode }) {
   const parts = meta.filter(Boolean) as string[];
   return (
     <div className={classes.hero}>
@@ -48,8 +50,14 @@ function Hero({ title, poster, backdrop, meta, plot, onBack, children }: { title
         <DLButton className={classes.backLink} variant="subtle" size="sm" icon={IconArrowLeft} onClick={onBack}>{t('vod.back')}</DLButton>
         <h1 className={classes.dTitle}>{title}</h1>
         <div className={classes.meta}>
+          {ratingLabel(rating) && (
+            <span className={classes.metaRating} aria-label={t('vod.rating', { value: ratingLabel(rating) ?? '' })}>
+              <Icon icon={IconStarFilled} size={16} filled />
+              {ratingLabel(rating)}
+            </span>
+          )}
           {parts.map((p, i) => (
-            <span key={p} className={i ? classes.dot : undefined}>{p}</span>
+            <span key={p} className={i || ratingLabel(rating) ? classes.dot : undefined}>{p}</span>
           ))}
         </div>
         {plot && <p className={classes.plot}>{plot}</p>}
@@ -72,7 +80,8 @@ export function MovieDetail() {
   return (
     <div className={classes.detail}>
       <Hero title={m.title} poster={m.poster} backdrop={m.backdrop} onBack={back} plot={m.plot}
-        meta={[m.year ? String(m.year) : null, runtimeLabel(m.durationSecs), m.rating != null ? `${m.rating.toFixed(1)} / 10` : null, m.genres.join(', ')]}>
+        rating={m.rating}
+        meta={[m.year ? String(m.year) : null, runtimeLabel(m.durationSecs), m.genres.join(', ')]}>
         <div className={classes.actions}>
           <DLButton variant="filled" size="lg" onClick={() => void start('movie', m.id, resume)}>
             {resume ? t('vod.resume', { time: formatDuration(m.resumeSecs ?? 0) }) : t('vod.play')}
@@ -81,6 +90,9 @@ export function MovieDetail() {
         </div>
         {error && <p className={classes.msg} role="alert">{error}</p>}
       </Hero>
+      <div className={classes.body}>
+        <VodExtras id={m.id} />
+      </div>
     </div>
   );
 }
@@ -95,6 +107,7 @@ function EpisodeRow({ ep, season, next, onPlay }: { ep: Episode; season: number;
       </span>
       <span className={classes.epMain}>
         <span className={classes.epTitle}>{ep.title}</span>
+        {ep.plot && <span className={classes.epPlot}>{ep.plot}</span>}
         <span className={classes.epSub}>{runtimeLabel(ep.durationSecs)}</span>
       </span>
       <span className={classes.epState}>
@@ -110,6 +123,12 @@ export function SeriesDetailPage() {
   const q = useQuery({ queryKey: ['catalog', 'seriesDetail', id], queryFn: () => invoke('get_series', { id: Number(id) }) });
   const { start, error } = useStart();
   const data: SeriesDetail | undefined = q.data;
+  const qc = useQueryClient();
+  const knownSeasons = data?.series.seasonCount ?? 0;
+  // Opening a series stores its episodes; refresh the listing so its card shows the real season count.
+  useEffect(() => {
+    if (knownSeasons > 0) void qc.invalidateQueries({ queryKey: ['catalog', 'vod', 'series'] });
+  }, [knownSeasons, qc]);
   let nextInfo: { season: number; ep: Episode } | null = null;
   for (const sn of data?.seasons ?? []) for (const e of sn.episodes) if (e.id === data?.nextEpisodeId) nextInfo = { season: sn.number, ep: e };
   const [seasonNo, setSeasonNo] = useState<number | null>(null);
@@ -124,7 +143,8 @@ export function SeriesDetailPage() {
   return (
     <div className={classes.detail}>
       <Hero title={s.title} poster={s.poster} backdrop={s.backdrop} onBack={back} plot={s.plot}
-        meta={[s.year ? String(s.year) : null, s.seasonCount === 1 ? t('vod.season1') : t('vod.seasons', { count: s.seasonCount }), s.rating != null ? `${s.rating.toFixed(1)} / 10` : null, s.genres.join(', ')]}>
+        rating={s.rating}
+        meta={[s.year ? String(s.year) : null, seasonsLabel(s.seasonCount), s.genres.join(', ')]}>
         <div className={classes.actions}>
           {nextInfo && (
             <DLButton variant="filled" size="lg" onClick={() => void start('episode', nextInfo.ep.id, !!resume)}>{label(nextInfo)}</DLButton>
@@ -149,6 +169,7 @@ export function SeriesDetailPage() {
         {season?.episodes.map((ep) => (
           <EpisodeRow key={ep.id} ep={ep} season={season.number} next={ep.id === data.nextEpisodeId} onPlay={() => void start('episode', ep.id, resumeUseful(ep.resumeSecs, ep.durationSecs))} />
         ))}
+        <VodExtras id={s.id} />
       </div>
     </div>
   );

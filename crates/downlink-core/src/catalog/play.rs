@@ -60,6 +60,7 @@ pub async fn resolve_play_plan(
                 })
                 .collect();
             Ok(PlayPlan {
+                tls_pin: None,
                 url,
                 headers,
                 surface: Surface::Direct,

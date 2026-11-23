@@ -1,7 +1,7 @@
 import {
   IconHome,
   IconListDetails,
-  IconLayoutNavbar,
+  IconCalendarTime,
   IconMovie,
   IconSearch,
   IconSettings,
@@ -26,20 +26,14 @@ export interface NavEntry {
 export const PRIMARY_NAV: NavEntry[] = [
   { id: 'search', to: '/search', label: 'nav.search', icon: IconSearch, hint: '#mod' },
   { id: 'home', to: '/', label: 'nav.home', icon: IconHome },
+  { id: 'guide', to: '/guide', label: 'nav.guide', icon: IconCalendarTime, hint: 'G' },
   { id: 'channels', to: '/channels', label: 'nav.channels', icon: IconListDetails, hint: 'L' },
-  { id: 'guide', to: '/guide', label: 'nav.guide', icon: IconLayoutNavbar, hint: 'G' },
   { id: 'movies', to: '/movies', label: 'nav.movies', icon: IconMovie, requires: (c) => c.vod },
   { id: 'series', to: '/series', label: 'nav.series', icon: IconDeviceTv, requires: (c) => c.vod },
   { id: 'recordings', to: '/recordings', label: 'nav.recordings', icon: IconCircle, requires: (c) => c.dvr },
 ];
 
 export const SETTINGS_NAV: NavEntry = { id: 'settings', to: '/settings', label: 'nav.settings', icon: IconSettings };
-
-/** Routes where the rail starts collapsed (DESIGN §8). */
-export const COLLAPSED_ROUTES = ['/guide', '/player', '/multiview'];
-
-export const isCollapsedRoute = (pathname: string): boolean =>
-  COLLAPSED_ROUTES.some((r) => pathname === r || pathname.startsWith(`${r}/`));
 
 export function visibleNav(caps: Caps): NavEntry[] {
   return PRIMARY_NAV.filter((e) => !e.requires || e.requires(caps));

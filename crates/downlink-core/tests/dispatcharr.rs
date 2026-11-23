@@ -406,6 +406,38 @@ async fn endpoint_catchup_create_position_delete() {
 }
 
 #[tokio::test]
+async fn a_cross_origin_catchup_address_is_rejected_and_the_session_cleaned_up() {
+    let source = MockServer::start().await;
+    let other = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/catchup/sessions/"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+            "session_id": "test-session",
+            "playback_url": format!("{}/archive.m3u8", other.uri())
+        })))
+        .mount(&source)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path("/api/catchup/sessions/test-session/"))
+        .and(header("X-API-Key", KEY))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&source)
+        .await;
+
+    let channel = ChannelKey {
+        uuid: Some(UUID1.into()),
+        ..Default::default()
+    };
+    let error = client(&source)
+        .catchup(channel, &programme())
+        .await
+        .unwrap_err();
+    assert!(error.message.contains("another server"));
+    assert!(other.received_requests().await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn catchup_position_404_before_playback_is_not_fatal() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -775,7 +807,7 @@ async fn resolve_redirect_function_variants() {
         .up_to_n_times(1)
         .mount(&server)
         .await;
-    let loc = resolve_redirect(&url, &h, false).await.unwrap();
+    let loc = resolve_redirect(&url, &h, None).await.unwrap();
     assert_eq!(loc.expose(), format!("{}/relative/out.ts", server.uri()));
     assert_eq!(format!("{loc:?}"), "Location(<redirect-url>)");
 
@@ -786,7 +818,7 @@ async fn resolve_redirect_function_variants() {
         .mount(&server)
         .await;
     assert_eq!(
-        resolve_redirect(&url, &h, false).await.unwrap_err().code,
+        resolve_redirect(&url, &h, None).await.unwrap_err().code,
         ErrorCode::Stream
     );
 
@@ -796,7 +828,7 @@ async fn resolve_redirect_function_variants() {
         .up_to_n_times(1)
         .mount(&server)
         .await;
-    let e = resolve_redirect(&url, &h, false).await.unwrap_err();
+    let e = resolve_redirect(&url, &h, None).await.unwrap_err();
     assert_eq!((e.code, e.retry_after), (ErrorCode::Stream, Some(5)));
 
     Mock::given(method("GET"))
@@ -806,7 +838,7 @@ async fn resolve_redirect_function_variants() {
         .mount(&server)
         .await;
     assert_eq!(
-        resolve_redirect(&url, &h, false).await.unwrap_err().code,
+        resolve_redirect(&url, &h, None).await.unwrap_err().code,
         ErrorCode::Auth
     );
 }

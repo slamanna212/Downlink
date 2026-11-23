@@ -15,11 +15,8 @@ mod wayland_hdr;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
-/// How many video surfaces (main player + multiview tiles) this platform can show at once
-/// (PLAN §4.11). macOS keeps a single surface until its implementation is reworked (M7).
-#[cfg(target_os = "macos")]
-pub const MAX_SURFACES: u32 = 1;
-#[cfg(not(target_os = "macos"))]
+/// How many video surfaces (main player + multiview tiles) can be shown at once (PLAN §4.11).
+/// The same on every platform.
 pub const MAX_SURFACES: u32 = 9;
 
 /// Video rectangle in **physical pixels**, relative to the window's client area, plus the

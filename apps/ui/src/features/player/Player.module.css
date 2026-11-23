@@ -106,6 +106,14 @@
   font-weight: 650;
   color: var(--dl-on-video);
 }
+.epLine {
+  margin-top: calc(var(--mantine-spacing-xs) * -1);
+  margin-bottom: var(--mantine-spacing-sm);
+  font-size: var(--mantine-font-size-lg);
+  font-weight: 600;
+  color: var(--dl-on-video);
+  opacity: 0.85;
+}
 .next {
   font-size: var(--mantine-font-size-sm);
   color: var(--dl-text-dim);
@@ -126,13 +134,26 @@
 .progressSection { background: var(--dl-accent); }
 
 .controls {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: var(--mantine-spacing-sm);
   margin-top: var(--mantine-spacing-md);
 }
-.spacer { flex: 1; }
-.volume { width: 96px; }
+/* control bar slots: start (back, volume) | transport | end (menus). One layout for live, catch-up, VOD and
+   recordings; a control that does nothing for the current content is not rendered. */
+.group { display: flex; align-items: center; gap: var(--mantine-spacing-sm); min-width: 0; }
+.groupEnd { justify-content: flex-end; }
+/* play/pause stays dead centre: restart + back 10 s fill the left cell, forward 10 s + go live the right. */
+.transport {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+}
+.volume { width: 96px; flex: 0 1 96px; min-width: 0; }
+/* narrow windows: the volume slider goes first (mute stays) so the sides never reach the centre transport */
+@media (width <= 900px) { .volume { display: none; } }
 
 /* resting 10% fill on play/pause */
 .playPause button { background: var(--dl-video-btn); }

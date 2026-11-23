@@ -185,8 +185,9 @@ fn no_xml_declaration_and_gzip_sniffing() {
 fn xz_is_sniffed_too() {
     use std::io::Write;
     let xml = b"<tv><channel id=\"x.test\"><display-name>X</display-name></channel><programme start=\"20260101120000 +0000\" stop=\"20260101130000 +0000\" channel=\"x.test\"><title>Xz</title></programme></tv>";
-    let mut out = Vec::new();
-    lzma_rs::xz_compress(&mut &xml[..], &mut out).unwrap();
+    let mut encoder = liblzma::write::XzEncoder::new(Vec::new(), 0);
+    encoder.write_all(xml).unwrap();
+    let out = encoder.finish().unwrap();
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("guide");
     std::fs::File::create(&p).unwrap().write_all(&out).unwrap();
@@ -200,4 +201,63 @@ fn episode_number_helpers() {
     assert_eq!(parse_xmltv_ns("garbage"), (None, None));
     assert_eq!(parse_onscreen("S02E10"), (Some(2), Some(10)));
     assert_eq!(parse_onscreen("nothing"), (None, None));
+}
+
+#[test]
+fn compression_errors_are_not_reported_as_successful_xmltv() {
+    use std::io::Write;
+
+    let mut encoder = liblzma::write::XzEncoder::new(Vec::new(), 0);
+    encoder
+        .write_all(b"<tv><channel id=\"test\"/></tv>")
+        .unwrap();
+    let mut bytes = encoder.finish().unwrap();
+    let file = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(file.path(), &bytes).unwrap();
+    assert!(
+        !parse_programmes(file.path(), Tz::UTC, |_| {})
+            .unwrap()
+            .truncated
+    );
+
+    let footer_byte = bytes.len() - 1;
+    bytes[footer_byte] ^= 1;
+    std::fs::write(file.path(), bytes).unwrap();
+    assert!(parse_channels(file.path()).is_err());
+    assert!(parse_programmes(file.path(), Tz::UTC, |_| {}).is_err());
+}
+
+#[test]
+fn xmltv_limits_fields_events_and_nesting() {
+    let path = tempfile::NamedTempFile::new().unwrap();
+    let field = format!(
+        "<tv><channel id=\"test\"><display-name>{}</display-name></channel></tv>",
+        "x".repeat(MAX_FIELD_BYTES + 1)
+    );
+    let event = format!("<tv><!--{}--></tv>", "x".repeat(MAX_EVENT_BYTES + 1));
+    let nested = format!(
+        "<tv>{}{}</tv>",
+        "<n>".repeat(MAX_NESTING),
+        "</n>".repeat(MAX_NESTING)
+    );
+
+    std::fs::write(path.path(), field).unwrap();
+    assert_eq!(
+        parse_channels(path.path()).unwrap_err().kind(),
+        io::ErrorKind::FileTooLarge
+    );
+
+    for payload in [event, nested] {
+        std::fs::write(path.path(), payload).unwrap();
+        assert_eq!(
+            parse_channels(path.path()).unwrap_err().kind(),
+            io::ErrorKind::FileTooLarge
+        );
+        assert_eq!(
+            parse_programmes(path.path(), Tz::UTC, |_| {})
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::FileTooLarge
+        );
+    }
 }

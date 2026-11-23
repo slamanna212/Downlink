@@ -80,7 +80,7 @@ async fn one_programme_row_gives_the_same_start_and_length_on_both_paths() {
         &x.uri(),
         "testuser",
         SecretString::new("testpass_secret"),
-        false,
+        None,
     )
     .unwrap();
     xc.connect().await.unwrap(); // learns the server zone (Europe/London in the fixture)

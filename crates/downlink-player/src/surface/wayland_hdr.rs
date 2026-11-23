@@ -625,6 +625,21 @@ fn content_is_hdr(engine: &Engine) -> bool {
     )
 }
 
+/// Pick the render mode. The user's setting wins over everything: with HDR output off the
+/// surface always renders SDR (mpv tone-maps HDR sources) and carries no image description.
+fn choose_mode(user_auto: bool, output: Option<OutputInfo>, content_hdr: bool) -> Mode {
+    match output {
+        Some(out) if user_auto && out.hdr && content_hdr => Mode::Hdr {
+            peak: if out.peak > 0 {
+                out.peak
+            } else {
+                DEFAULT_PEAK_NITS
+            },
+        },
+        _ => Mode::Sdr,
+    }
+}
+
 fn apply_mode(engine: &Engine, mode: Mode) {
     let set = |k: &str, v: &str| {
         if let Err(e) = engine.set_property(k, v) {
@@ -633,6 +648,8 @@ fn apply_mode(engine: &Engine, mode: Mode) {
     };
     match mode {
         Mode::Sdr => {
+            // Explicit SDR target: mpv tone-maps PQ/HLG sources instead of passing them through.
+            set("target-colorspace-hint", "no");
             set("target-trc", "auto");
             set("target-prim", "auto");
             set("target-peak", "auto");
@@ -898,16 +915,11 @@ fn render_thread(
         }
         shown = true;
 
-        let want = match wl.state.current_output() {
-            Some(out) if out.hdr && content_is_hdr(&engine) => Mode::Hdr {
-                peak: if out.peak > 0 {
-                    out.peak
-                } else {
-                    DEFAULT_PEAK_NITS
-                },
-            },
-            _ => Mode::Sdr,
-        };
+        let want = choose_mode(
+            super::hdr_output_auto(),
+            wl.state.current_output(),
+            content_is_hdr(&engine),
+        );
         if want != mode {
             tracing::info!("HDR surface: rendering {want:?}");
             apply_mode(&engine, want);
@@ -950,6 +962,10 @@ fn render_thread(
     if let Some((_, d)) = tagged.take() {
         d.destroy();
     }
+    if mode != Mode::Sdr {
+        // The engine outlives this surface; do not leave it targeting PQ for an SDR surface.
+        apply_mode(&engine, Mode::Sdr);
+    }
     drop(rc); // with the EGL context still current
     drop(gl);
     teardown(&wl);
@@ -969,4 +985,35 @@ fn teardown(wl: &Wl) {
     wl.surface.destroy();
     wl.manager.destroy();
     let _ = wl.conn.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn out(hdr: bool, peak: u32) -> Option<OutputInfo> {
+        Some(OutputInfo { hdr, peak })
+    }
+
+    #[test]
+    fn hdr_only_when_setting_output_and_content_agree() {
+        assert_eq!(
+            choose_mode(true, out(true, 800), true),
+            Mode::Hdr { peak: 800 }
+        );
+        assert_eq!(
+            choose_mode(true, out(true, 0), true),
+            Mode::Hdr {
+                peak: DEFAULT_PEAK_NITS
+            }
+        );
+        assert_eq!(choose_mode(true, out(true, 800), false), Mode::Sdr);
+        assert_eq!(choose_mode(true, out(false, 800), true), Mode::Sdr);
+        assert_eq!(choose_mode(true, None, true), Mode::Sdr);
+    }
+
+    #[test]
+    fn setting_off_always_tone_maps() {
+        assert_eq!(choose_mode(false, out(true, 1000), true), Mode::Sdr);
+    }
 }

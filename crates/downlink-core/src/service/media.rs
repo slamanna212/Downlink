@@ -9,6 +9,7 @@ use crate::source::{
 use crate::store::{RecordingRow, ResumeRow, VodRow};
 
 const CAT_STRIDE: i64 = 1_000_000;
+const VOD_CATS_ENTITY: &str = "vod_categories";
 
 /// What `play_vod` hands the desktop.
 #[derive(Debug)]
@@ -44,7 +45,8 @@ fn compose_cat(source_id: i64, ext: &str) -> i64 {
 
 fn rating_of(r: Option<&str>) -> Option<f64> {
     let v: f64 = r?.trim().parse().ok()?;
-    (0.0..=10.0).contains(&v).then_some(v)
+    // 0 means "no rating" to every source; NaN/inf and out-of-scale values are garbage.
+    (v > 0.0 && v <= 10.0).then_some(v)
 }
 
 fn genres_of(g: Option<&str>) -> Vec<String> {
@@ -65,6 +67,8 @@ fn to_item(r: &VodRow) -> VodItem {
         parent_ext: r.parent_ext.clone(),
         title: r.name.clone(),
         container: r.container.clone(),
+        tmdb_id: r.tmdb_id.clone(),
+        imdb_id: r.imdb_id.clone(),
         ..Default::default()
     }
 }
@@ -99,10 +103,12 @@ impl Service {
         self.vod_categories(kind, true).await
     }
 
+    /// Categories with items, read from the cache the catalog sync fills (no provider requests).
+    /// `with_counts` is kept for the command signature: counts are always known from the cache.
     pub async fn vod_categories(
         &self,
         kind: VodKindArg,
-        with_counts: bool,
+        _with_counts: bool,
     ) -> Result<Vec<VodCategoryDto>> {
         let k = if kind == VodKindArg::Movie {
             VodKind::Movie
@@ -111,14 +117,24 @@ impl Service {
         };
         let mut out = Vec::new();
         for src in self.caps_sources(Caps::VOD).await? {
-            let client = self.client(src.id).await?;
+            // A source that has never completed a VOD category sync (e.g. upgraded install) gets
+            // one now; afterwards only the catalog sync refreshes it.
+            let synced = self
+                .store
+                .sync_state(src.id, VOD_CATS_ENTITY)
+                .await?
+                .is_some_and(|(ok, _)| ok.is_some());
+            if !synced && let Err(e) = self.refresh_vod_categories(src.id).await {
+                tracing::warn!(error = %e, "vod category refresh failed");
+            }
             // Categories the server reports as empty are hidden (unknown counts stay listed).
-            let categories = if with_counts {
-                client.vod_categories(k).await?
-            } else {
-                client.vod_category_names(k).await?
-            };
-            for c in categories.into_iter().filter(|c| c.count != Some(0)) {
+            for c in self
+                .store
+                .vod_categories(src.id, k)
+                .await?
+                .into_iter()
+                .filter(|c| c.count != Some(0))
+            {
                 let id = compose_cat(src.id, &c.ext_id);
                 if let Ok(mut g) = self.vod_cats.lock() {
                     g.insert(id, (src.id, c.ext_id.clone()));
@@ -127,11 +143,40 @@ impl Service {
                     id,
                     name: c.name,
                     count: c.count.unwrap_or(0),
-                    count_pending: !with_counts && c.count.is_none(),
+                    count_pending: false,
                 });
             }
         }
         Ok(out)
+    }
+
+    /// Recompute and persist a source's non-empty VOD categories (movies and series). Called by
+    /// the catalog sync; on failure the previous cache is kept and the error recorded.
+    pub(super) async fn refresh_vod_categories(&self, source_id: i64) -> Result<()> {
+        let r = async {
+            let client = self.client(source_id).await?;
+            for k in [VodKind::Movie, VodKind::Series] {
+                let categories = client.vod_categories(k).await?;
+                self.store
+                    .replace_vod_categories(source_id, k, &categories)
+                    .await?;
+            }
+            Ok::<(), crate::AppError>(())
+        }
+        .await;
+        match &r {
+            Ok(()) => {
+                self.store
+                    .set_sync_ok(source_id, VOD_CATS_ENTITY, now_utc())
+                    .await?
+            }
+            Err(e) => {
+                self.store
+                    .set_sync_error(source_id, VOD_CATS_ENTITY, &e.message)
+                    .await?
+            }
+        }
+        r
     }
 
     fn decode_cat(&self, id: i64) -> (i64, String) {
@@ -200,11 +245,7 @@ impl Service {
             id: r.id,
             title: r.name.clone(),
             year: r.year,
-            rating: if compact {
-                None
-            } else {
-                rating_of(r.rating.as_deref())
-            },
+            rating: rating_of(r.rating.as_deref()),
             duration_secs: r.duration_secs,
             poster,
             backdrop,
@@ -232,11 +273,7 @@ impl Service {
             id: r.id,
             title: r.name.clone(),
             year: r.year,
-            rating: if compact {
-                None
-            } else {
-                rating_of(r.rating.as_deref())
-            },
+            rating: rating_of(r.rating.as_deref()),
             poster,
             backdrop,
             plot: if compact { None } else { r.description.clone() },
@@ -250,7 +287,11 @@ impl Service {
         }
     }
 
-    async fn page_art(&self, rows: &[VodRow], compact: bool) -> HashMap<String, String> {
+    async fn page_art(
+        &self,
+        rows: &[VodRow],
+        compact: bool,
+    ) -> HashMap<i64, HashMap<String, String>> {
         let entries: Vec<_> = rows
             .iter()
             .flat_map(|r| {
@@ -270,10 +311,12 @@ impl Service {
         match self.images.register_page(&entries).await {
             Ok(art) => art,
             Err(_) => {
-                let mut art = HashMap::new();
+                let mut art: HashMap<i64, HashMap<String, String>> = HashMap::new();
                 for (source_id, url) in entries {
                     if let Some(registered) = self.art(source_id, Some(url)).await {
-                        art.insert(url.to_owned(), registered);
+                        art.entry(source_id)
+                            .or_default()
+                            .insert(url.to_owned(), registered);
                     }
                 }
                 art
@@ -297,12 +340,16 @@ impl Service {
         Ok(rows
             .iter()
             .map(|r| {
-                let poster = r.art_key.as_ref().and_then(|url| art.get(url)).cloned();
+                let poster = r
+                    .art_key
+                    .as_ref()
+                    .and_then(|url| art.get(&r.source_id)?.get(url))
+                    .cloned();
                 let backdrop = (!compact)
                     .then(|| {
                         r.backdrop_key
                             .as_ref()
-                            .and_then(|url| art.get(url))
+                            .and_then(|url| art.get(&r.source_id)?.get(url))
                             .cloned()
                     })
                     .flatten();
@@ -329,12 +376,16 @@ impl Service {
         Ok(rows
             .iter()
             .map(|r| {
-                let poster = r.art_key.as_ref().and_then(|url| art.get(url)).cloned();
+                let poster = r
+                    .art_key
+                    .as_ref()
+                    .and_then(|url| art.get(&r.source_id)?.get(url))
+                    .cloned();
                 let backdrop = (!compact)
                     .then(|| {
                         r.backdrop_key
                             .as_ref()
-                            .and_then(|url| art.get(url))
+                            .and_then(|url| art.get(&r.source_id)?.get(url))
                             .cloned()
                     })
                     .flatten();
@@ -391,7 +442,9 @@ impl Service {
         let resume = self.resume_of(&row).await?;
         let poster = self.art(row.source_id, row.art_key.as_deref()).await;
         let backdrop = self.art(row.source_id, row.backdrop_key.as_deref()).await;
-        Ok(self.movie_dto(&row, resume.as_ref(), poster, backdrop, false))
+        let mut dto = self.movie_dto(&row, resume.as_ref(), poster, backdrop, false);
+        self.fill_movie(&row, &mut dto).await;
+        Ok(dto)
     }
 
     pub async fn get_series(&self, id: i64) -> Result<SeriesDetailDto> {
@@ -495,11 +548,13 @@ impl Service {
         let poster = self.art(row.source_id, row.art_key.as_deref()).await;
         let backdrop = self.art(row.source_id, row.backdrop_key.as_deref()).await;
         let series = self.series_dto(&row, season_count, poster, backdrop, false);
-        Ok(SeriesDetailDto {
+        let mut dto = SeriesDetailDto {
             series,
             seasons,
             next_episode_id: next,
-        })
+        };
+        self.fill_series(&row, &mut dto).await;
+        Ok(dto)
     }
 
     /// Plan for a movie or episode (`/proxy/vod/…` for Dispatcharr, `/movie|series/…` for Xtream).
@@ -705,6 +760,10 @@ impl Service {
         Ok(RecordingDto {
             id: r.id,
             title,
+            subtitle: r.subtitle.clone(),
+            description: r.description.clone(),
+            season: r.season,
+            episode: r.episode,
             channel_id: r.channel_id,
             channel_name,
             start_utc: r.start_utc,
@@ -758,7 +817,10 @@ impl Service {
             tvg_id: ch.tvg_id.clone(),
             programme_ext_id: prog.ext_id.clone(),
             title: prog.title.clone().unwrap_or_else(|| ch.name.clone()),
+            subtitle: prog.subtitle.clone(),
             description: prog.description.clone(),
+            season: prog.season,
+            episode: prog.episode,
             start_utc: prog.start_utc,
             end_utc: prog.end_utc,
         };
@@ -932,6 +994,11 @@ impl Service {
             file_url: r.file_url.clone(),
             rule_ext: r.rule_ext.clone(),
             tvg_id: r.tvg_id.clone(),
+            subtitle: r.subtitle.clone(),
+            description: r.description.clone(),
+            season: r.season,
+            episode: r.episode,
+            programme_ext: r.programme_ext.clone(),
         };
         let plan = c.recording_plan(&info).await?;
         let resume_secs = self
@@ -984,5 +1051,20 @@ impl Service {
             p.is_scheduled = set.contains(&(p.channel_id, p.start_utc));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rating_of;
+
+    #[test]
+    fn rating_of_accepts_only_a_real_ten_point_score() {
+        assert_eq!(rating_of(Some(" 7.4 ")), Some(7.4));
+        assert_eq!(rating_of(Some("10")), Some(10.0));
+        for bad in ["0", "0.0", "-1", "11", "n/a", "NaN", "inf", ""] {
+            assert_eq!(rating_of(Some(bad)), None, "{bad}");
+        }
+        assert_eq!(rating_of(None), None);
     }
 }

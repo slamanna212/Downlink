@@ -14,6 +14,23 @@ pub use attrs::{Attrs, parse_attrs};
 
 /// Longest line kept. Longer lines are skipped (and counted) rather than buffered.
 pub const MAX_LINE: usize = 1 << 20;
+const MAX_PLAYLIST_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_PLAYLIST_ENTRIES: usize = 200_000;
+
+#[derive(Clone, Copy)]
+struct ParseBudget {
+    bytes: u64,
+    entries: usize,
+}
+
+impl Default for ParseBudget {
+    fn default() -> Self {
+        Self {
+            bytes: MAX_PLAYLIST_BYTES,
+            entries: MAX_PLAYLIST_ENTRIES,
+        }
+    }
+}
 
 /// Playlist-level attributes from `#EXTM3U`.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -303,7 +320,12 @@ struct Pending {
 
 /// Parse a playlist from any reader, streaming.
 pub fn parse<R: Read>(r: R) -> std::io::Result<Playlist> {
-    let mut lines = Lines::new(r);
+    parse_with_budget(r, &mut ParseBudget::default())
+}
+
+fn parse_with_budget<R: Read>(r: R, budget: &mut ParseBudget) -> std::io::Result<Playlist> {
+    let mut input = crate::util::BoundedReader::new(r, budget.bytes);
+    let mut lines = Lines::new(&mut input);
     let mut pl = Playlist::default();
     let mut buf = Vec::new();
     let mut pending: Option<Pending> = None;
@@ -396,6 +418,10 @@ pub fn parse<R: Read>(r: R) -> std::io::Result<Playlist> {
                     .filter(|g| !g.trim().is_empty())
                     .map(str::to_owned)
                     .or(p.group_line);
+                if budget.entries == 0 {
+                    return Err(crate::util::import_limit());
+                }
+                budget.entries -= 1;
                 pl.entries.push(M3uEntry {
                     name: p.name,
                     url,
@@ -412,6 +438,7 @@ pub fn parse<R: Read>(r: R) -> std::io::Result<Playlist> {
     if pending.is_some() {
         pl.stats.dropped += 1; // truncated: EXTINF at EOF
     }
+    budget.bytes = input.remaining;
     Ok(pl)
 }
 

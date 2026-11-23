@@ -26,6 +26,9 @@ pub struct PlayRequest {
     pub headers: Vec<(String, String)>,
     pub profile: Profile,
     pub start_secs: Option<f64>,
+    /// Load the file paused (`pause=yes`), so nothing plays until the caller sends `Resume`. Used while the
+    /// UI asks whether to resume or start over. Applies to the first load only.
+    pub start_paused: bool,
     /// `Caps::FAILOVER` present on the source.
     pub failover_capable: bool,
     pub mode: PlayMode,
@@ -85,7 +88,30 @@ pub struct Track {
     pub lang: Option<String>,
     pub title: Option<String>,
     pub codec: Option<String>,
+    /// Audio layout ("stereo", "5.1", "6 ch"); audio tracks only.
+    pub channels: Option<String>,
+    /// The container's default-track flag.
+    pub default: bool,
     pub selected: bool,
+}
+
+/// Human layout for an audio track: mpv's `demux-channels` string, else a name from the channel count.
+fn channel_layout(t: &serde_json::Value) -> Option<String> {
+    if let Some(l) = t
+        .get("demux-channels")
+        .and_then(|x| x.as_str())
+        .filter(|l| !l.is_empty())
+    {
+        return Some(l.to_owned());
+    }
+    let n = t.get("demux-channel-count")?.as_i64().filter(|n| *n > 0)?;
+    Some(match n {
+        1 => "mono".to_owned(),
+        2 => "stereo".to_owned(),
+        6 => "5.1".to_owned(),
+        8 => "7.1".to_owned(),
+        n => format!("{n} ch"),
+    })
 }
 
 /// Parse mpv's `track-list` JSON.
@@ -105,10 +131,52 @@ pub fn parse_tracks(json: &str) -> Vec<Track> {
                 lang: str_of("lang"),
                 title: str_of("title"),
                 codec: str_of("codec"),
+                channels: channel_layout(t),
+                default: t.get("default").and_then(|x| x.as_bool()).unwrap_or(false),
                 selected: t.get("selected").and_then(|x| x.as_bool()).unwrap_or(false),
             })
         })
         .collect()
+}
+
+/// The audio track the user chose, kept so a reconnect (which reloads the file and lets mpv pick
+/// its default again) can restore it by language and title rather than by id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioPick {
+    pub id: i64,
+    pub lang: Option<String>,
+    pub title: Option<String>,
+}
+
+impl AudioPick {
+    /// The pick for track `id` of `tracks`; `None` when it is not an audio track in the list.
+    pub fn of(id: i64, tracks: &[Track]) -> Option<Self> {
+        tracks
+            .iter()
+            .find(|t| t.kind == "audio" && t.id == id)
+            .map(|t| Self {
+                id,
+                lang: t.lang.clone(),
+                title: t.title.clone(),
+            })
+    }
+}
+
+/// The audio track of a (re)loaded file that matches `pick`: same language and title, then same
+/// language, then same id. `None` when nothing matches (the stream's own default stays).
+pub fn match_audio_pick(pick: &AudioPick, tracks: &[Track]) -> Option<i64> {
+    let audio: Vec<&Track> = tracks.iter().filter(|t| t.kind == "audio").collect();
+    let same_lang = |t: &Track| pick.lang.is_some() && t.lang == pick.lang;
+    audio
+        .iter()
+        .find(|t| same_lang(t) && t.title == pick.title)
+        .or_else(|| audio.iter().find(|t| same_lang(t)))
+        .or_else(|| {
+            audio
+                .iter()
+                .find(|t| pick.lang.is_none() && t.id == pick.id)
+        })
+        .map(|t| t.id)
 }
 
 /// An output device from `audio-device-list`.
@@ -166,6 +234,14 @@ pub struct StatsSnapshot {
     pub tone_mapped: Option<bool>,
     /// mpv `video-params/primaries`, e.g. "bt.709", "bt.2020".
     pub primaries: Option<String>,
+    /// RTX Super Resolution upscale factor requested from the driver; `None` when not in use.
+    /// The driver never reports whether it engaged, so this is the request only.
+    pub rtx_upscale: Option<f64>,
+    /// RTX HDR was requested for this video.
+    pub rtx_hdr_requested: bool,
+    /// RTX HDR is converting this SDR video to HDR: the filter tagged its output HDR, which it
+    /// only does once the driver accepted the request. `None` unless requested and params known.
+    pub rtx_hdr_active: Option<bool>,
     pub bit_depth: Option<u8>,
     /// e.g. "stereo", "5.1".
     pub audio_channels: Option<String>,
@@ -175,6 +251,25 @@ pub struct StatsSnapshot {
     pub avsync_ms: Option<f64>,
     /// mpv `file-format`, e.g. "mpegts", "hls".
     pub container: Option<String>,
+}
+
+/// Parse `mpv-version` ("mpv v0.42.0-...", "mpv 0.40.0") into (major, minor).
+fn parse_mpv_version(v: &str) -> Option<(u32, u32)> {
+    let t = v.split_whitespace().nth(1)?.trim_start_matches('v');
+    let mut it = t.split(['.', '-']);
+    Some((it.next()?.parse().ok()?, it.next()?.parse().ok()?))
+}
+
+/// Log which libmpv really runs; older than the 0.42 bundle means a system fallback or a stale
+/// `DOWNLINK_MPV_PATH`, where colour handling differs.
+fn log_mpv_version(engine: &Engine, source: &LoadSource) {
+    let version = engine.get_property("mpv-version").unwrap_or_default();
+    tracing::info!(%version, source = ?source, "mpv engine version");
+    if parse_mpv_version(&version).is_some_and(|v| v < (0, 42)) {
+        tracing::warn!(
+            "mpv {version} is older than the supported 0.42; HDR/colour behaviour may differ"
+        );
+    }
 }
 
 fn is_hdr_transfer(gamma: &str) -> bool {
@@ -228,6 +323,7 @@ impl fmt::Debug for PlayRequest {
             )
             .field("profile", &self.profile)
             .field("start_secs", &self.start_secs)
+            .field("start_paused", &self.start_paused)
             .field("failover_capable", &self.failover_capable)
             .finish()
     }
@@ -279,6 +375,10 @@ pub struct PlayerSnapshot {
     pub reconnecting: bool,
     /// Classification of the failure when `state` is `failed`.
     pub failure: Option<FailureInfo>,
+    /// Seekable range of the demuxer cache (media seconds) around the position.
+    pub seek_range: Option<(f64, f64)>,
+    /// Live sessions: media time ↔ wall clock (see [`crate::timeshift`]).
+    pub live_anchor: Option<crate::timeshift::LiveAnchor>,
 }
 
 #[derive(Debug, Clone)]
@@ -404,6 +504,8 @@ struct Stats {
     height: Option<i64>,
     fps: Option<f64>,
     dropped: Option<i64>,
+    seek_range: Option<(f64, f64)>,
+    live_anchor: Option<crate::timeshift::LiveAnchor>,
 }
 
 struct Shared {
@@ -424,11 +526,23 @@ struct Shared {
     file_loaded: bool,
     last_stats: Option<Instant>,
     audio_fell_back: bool,
+    /// The user's audio choice for this session, and whether it still has to be restored on the
+    /// file mpv just (re)loaded.
+    audio_pick: Option<AudioPick>,
+    audio_pick_pending: bool,
     last_http_status: Option<u16>,
     decoder_codec: Option<String>,
     /// Engine deaths in the current session (one restart is allowed).
     engine_restarts: u32,
     engine_failure: Option<String>,
+    /// Source video size (`video-params/dw`×`dh`), before any filter scales it.
+    video_size: (i64, i64),
+    /// Render output size in pixels (`osd-width`×`osd-height`).
+    output_size: (i64, i64),
+    /// The RTX Video `vf` chain last set on the engine ("" = none).
+    rtx_vf: String,
+    /// mpv accepted `rtx_vf`.
+    rtx_applied: bool,
 }
 
 struct Inner {
@@ -508,11 +622,16 @@ const OBSERVED: &[(&str, i32)] = &[
     ("duration", ffi::FORMAT_DOUBLE),
     ("hwdec-current", ffi::FORMAT_STRING),
     ("video-codec", ffi::FORMAT_STRING),
-    ("dwidth", ffi::FORMAT_INT64),
-    ("dheight", ffi::FORMAT_INT64),
+    // Source size, not `dwidth`/`dheight`: those are after filters, so RTX Super Resolution would
+    // report the upscaled size.
+    ("video-params/dw", ffi::FORMAT_INT64),
+    ("video-params/dh", ffi::FORMAT_INT64),
+    ("osd-width", ffi::FORMAT_INT64),
+    ("osd-height", ffi::FORMAT_INT64),
     ("estimated-vf-fps", ffi::FORMAT_DOUBLE),
-    ("vo-drop-frame-count", ffi::FORMAT_INT64),
+    ("frame-drop-count", ffi::FORMAT_INT64),
     ("demuxer-cache-time", ffi::FORMAT_DOUBLE),
+    ("demuxer-cache-state", ffi::FORMAT_STRING),
     ("volume", ffi::FORMAT_DOUBLE),
     ("mute", ffi::FORMAT_FLAG),
     ("track-list", ffi::FORMAT_STRING),
@@ -534,6 +653,7 @@ impl Player {
             opts.push(("vo".to_owned(), vo));
         }
         let engine = Arc::new(Engine::new(loaded, &opts)?);
+        log_mpv_version(&engine, &loaded.source);
         let recipe = (loaded.clone(), opts.clone());
         if let Err(e) = engine.request_log_messages("warn") {
             tracing::warn!("could not request mpv log messages: {e}");
@@ -565,10 +685,16 @@ impl Player {
                 file_loaded: false,
                 last_stats: None,
                 audio_fell_back: false,
+                audio_pick: None,
+                audio_pick_pending: false,
                 last_http_status: None,
                 decoder_codec: None,
                 engine_restarts: 0,
                 engine_failure: None,
+                video_size: (0, 0),
+                output_size: (0, 0),
+                rtx_vf: String::new(),
+                rtx_applied: false,
             }),
             cv: Condvar::new(),
             stop: AtomicBool::new(false),
@@ -627,6 +753,8 @@ impl Player {
         if let Ok(mut p) = self.inner.prefs.lock() {
             *p = prefs;
         }
+        let mut s = lock(&self.inner);
+        apply_rtx_filter(&self.inner, &mut s);
     }
 
     pub fn preferences(&self) -> Preferences {
@@ -686,6 +814,8 @@ impl Player {
         s.decoder_codec = None;
         s.engine_restarts = 0;
         s.engine_failure = None;
+        s.audio_pick = None;
+        s.audio_pick_pending = false;
         s.stats = Stats::default();
         go(
             &self.inner,
@@ -761,7 +891,14 @@ impl Player {
             PlayerCommand::Mute { muted } => {
                 e.set_property("mute", if muted { "yes" } else { "no" })
             }
-            PlayerCommand::AudioTrack { id } => e.set_property("aid", &id.to_string()),
+            PlayerCommand::AudioTrack { id } => {
+                {
+                    let mut s = self.lock();
+                    s.audio_pick = AudioPick::of(id, &s.stats.tracks);
+                    s.audio_pick_pending = false;
+                }
+                e.set_property("aid", &id.to_string())
+            }
             PlayerCommand::SubtitleTrack { id } => {
                 e.set_property("sid", &id.map_or("no".to_owned(), |i| i.to_string()))
             }
@@ -815,7 +952,7 @@ impl Player {
             "video-params/primaries",
             "estimated-vf-fps",
             "container-fps",
-            "vo-drop-frame-count",
+            "frame-drop-count",
             "decoder-frame-drop-count",
             "avsync",
             "audio-codec-name",
@@ -914,6 +1051,8 @@ fn snapshot(s: &Shared) -> PlayerSnapshot {
             s.file_loaded,
             s.first_frame_ms.is_some(),
         ),
+        seek_range: s.stats.seek_range,
+        live_anchor: s.stats.live_anchor,
     }
 }
 
@@ -936,13 +1075,65 @@ fn load_current(inner: &Inner, s: &mut Shared) -> Result<(), PlayerError> {
         Ok(p) => p.clone(),
         Err(p) => p.into_inner().clone(),
     };
-    let opts = options::loadfile_options(req.profile, &prefs, &req.headers, req.start_secs);
+    let opts = options::loadfile_options(
+        req.profile,
+        &prefs,
+        &req.headers,
+        req.start_secs,
+        req.start_paused,
+    );
+    // Only the first load starts paused; a reload (retry) must not freeze a session the user resumed.
+    if let Some(r) = s.request.as_mut() {
+        r.start_paused = false;
+    }
     s.load_started = Some(Instant::now());
     s.first_frame_ms = None;
+    // A new file starts a new timeline and a new cache.
+    s.stats.seek_range = None;
+    s.stats.live_anchor = None;
+    s.audio_pick_pending = s.audio_pick.is_some();
+    // The new file's size is unknown until its video params arrive; the profile may differ.
+    s.video_size = (0, 0);
+    rtx_filter_for(inner, s, &prefs, req.profile);
     inner.eng().command_named(
         "loadfile",
         &[("url", &req.url), ("flags", "replace"), ("options", &opts)],
     )
+}
+
+/// Bring the engine's RTX Video filter in line with the preferences, the current profile and the
+/// video/output sizes. No-op unless the chain actually changes (changing `vf` rebuilds the filter).
+fn apply_rtx_filter(inner: &Inner, s: &mut Shared) {
+    let Some(profile) = s.request.as_ref().map(|r| r.profile) else {
+        return;
+    };
+    let prefs = match inner.prefs.lock() {
+        Ok(p) => p.clone(),
+        Err(p) => p.into_inner().clone(),
+    };
+    rtx_filter_for(inner, s, &prefs, profile);
+}
+
+fn rtx_filter_for(inner: &Inner, s: &mut Shared, prefs: &Preferences, profile: Profile) {
+    let caps = crate::gpu::video_caps();
+    let scale = options::rtx_scale(s.video_size, s.output_size);
+    let vf = options::rtx_video_filter(prefs, profile, scale, caps.rtx_video);
+    if vf == s.rtx_vf {
+        return;
+    }
+    match inner.eng().set_property("vf", &vf) {
+        Ok(()) => {
+            tracing::info!(filter = %vf, "RTX Video filter");
+            s.rtx_vf = vf;
+            s.rtx_applied = true;
+        }
+        Err(e) => {
+            tracing::warn!("RTX Video filter `{vf}` not applied: {e}");
+            // Remember it anyway so a failing chain is not retried on every resize.
+            s.rtx_vf = vf;
+            s.rtx_applied = false;
+        }
+    }
 }
 
 fn on_failure(inner: &Inner, s: &mut Shared, cause: FailureCause) {
@@ -967,6 +1158,7 @@ fn on_failure(inner: &Inner, s: &mut Shared, cause: FailureCause) {
                 format!("reconnect failed, asking for the next stream: {last_error}"),
             );
             s.error = Some(last_error.clone());
+            release_engine(inner);
             go(inner, s, SessionState::Failed, Some(last_error.clone()));
             s.outbox.push(PlayerEvent::FailoverNeeded {
                 session: s.session,
@@ -976,8 +1168,18 @@ fn on_failure(inner: &Inner, s: &mut Shared, cause: FailureCause) {
         RetryDecision::GiveUp { last_error } => {
             note(inner, format!("giving up: {last_error}"));
             s.error = Some(last_error.clone());
+            release_engine(inner);
             go(inner, s, SessionState::Failed, Some(last_error));
         }
+    }
+}
+
+/// A session gave up: make sure mpv is not still half-way through the failed load. Without this a
+/// slow stream can start playing behind the error overlay (the state machine rightly ignores
+/// first-frame events once `Failed`), and the engine is not idle for the next `loadfile`.
+fn release_engine(inner: &Inner) {
+    if let Err(e) = inner.eng().command(&["stop"]) {
+        tracing::debug!("stop after a failed session: {e}");
     }
 }
 
@@ -1079,6 +1281,33 @@ fn handle_event(inner: &Inner, ev: EngineEvent) {
     }
 }
 
+/// After a reload, select the audio track the user had chosen (once per load).
+fn restore_audio_pick(inner: &Inner, s: &mut Shared) {
+    if !s.audio_pick_pending || s.request.is_none() {
+        return;
+    }
+    let Some(pick) = s.audio_pick.clone() else {
+        return;
+    };
+    if !s.stats.tracks.iter().any(|t| t.kind == "audio") {
+        return;
+    }
+    s.audio_pick_pending = false;
+    let Some(id) = match_audio_pick(&pick, &s.stats.tracks) else {
+        return;
+    };
+    if s.stats
+        .tracks
+        .iter()
+        .any(|t| t.kind == "audio" && t.id == id && t.selected)
+    {
+        return;
+    }
+    if let Err(e) = inner.eng().set_property("aid", &id.to_string()) {
+        tracing::debug!("could not restore the audio track: {e}");
+    }
+}
+
 fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) {
     match (name, value) {
         ("pause", PropValue::Flag(p)) => {
@@ -1126,6 +1355,23 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
             };
             s.throttle.mark_dirty();
         }
+        ("demuxer-cache-state", v) => {
+            let range = if let PropValue::Str(j) = v {
+                crate::timeshift::parse_seek_range(&j, s.stats.position)
+            } else {
+                None
+            };
+            s.stats.seek_range = range;
+            let live = s.request.as_ref().is_some_and(|r| r.profile.is_live());
+            if let (true, Some((_, end))) = (live, range) {
+                s.stats.live_anchor = Some(crate::timeshift::advance_anchor(
+                    s.stats.live_anchor,
+                    end,
+                    unix_ms(),
+                ));
+            }
+            s.throttle.mark_dirty();
+        }
         ("volume", PropValue::Double(v)) => {
             s.stats.volume = Some(v);
             s.throttle.mark_dirty();
@@ -1140,6 +1386,7 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
             } else {
                 Vec::new()
             };
+            restore_audio_pick(inner, s);
             s.throttle.mark_dirty();
         }
         ("hwdec-current", v) => {
@@ -1158,21 +1405,33 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
             };
             s.throttle.mark_dirty();
         }
-        ("dwidth", v) => {
+        ("video-params/dw", v) => {
             s.stats.width = if let PropValue::Int(i) = v {
                 Some(i)
             } else {
                 None
             };
+            s.video_size.0 = s.stats.width.unwrap_or(0);
+            apply_rtx_filter(inner, s);
             s.throttle.mark_dirty();
         }
-        ("dheight", v) => {
+        ("video-params/dh", v) => {
             s.stats.height = if let PropValue::Int(i) = v {
                 Some(i)
             } else {
                 None
             };
+            s.video_size.1 = s.stats.height.unwrap_or(0);
+            apply_rtx_filter(inner, s);
             s.throttle.mark_dirty();
+        }
+        ("osd-width", v) => {
+            s.output_size.0 = if let PropValue::Int(i) = v { i } else { 0 };
+            apply_rtx_filter(inner, s);
+        }
+        ("osd-height", v) => {
+            s.output_size.1 = if let PropValue::Int(i) = v { i } else { 0 };
+            apply_rtx_filter(inner, s);
         }
         ("estimated-vf-fps", v) => {
             s.stats.fps = if let PropValue::Double(d) = v {
@@ -1182,7 +1441,7 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
             };
             s.throttle.mark_dirty();
         }
-        ("vo-drop-frame-count", v) => {
+        ("frame-drop-count", v) => {
             s.stats.dropped = if let PropValue::Int(i) = v {
                 Some(i)
             } else {
@@ -1249,6 +1508,15 @@ fn note(inner: &Inner, msg: String) {
     }
 }
 
+/// Dropped frames shown in the info panel: VO drops (`frame-drop-count`) plus decoder drops
+/// (`decoder-frame-drop-count`). `None` only when mpv exposes neither.
+fn total_dropped(vo: Option<i64>, decoder: Option<i64>) -> Option<i64> {
+    match (vo, decoder) {
+        (None, None) => None,
+        (a, b) => Some(a.unwrap_or(0).saturating_add(b.unwrap_or(0))),
+    }
+}
+
 fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
     let eng = inner.eng();
     let e = &eng;
@@ -1259,8 +1527,22 @@ fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
     };
     let transfer = e.get_property("video-params/gamma").filter(|g| g != "auto");
     let hdr = transfer.as_deref().map(is_hdr_transfer);
-    let tone_mapped = match (hdr, e.get_property("video-target-params/gamma")) {
-        (Some(true), Some(t)) if t != "auto" => Some(!is_hdr_transfer(&t)),
+    let (rtx_upscale, rtx_hdr_requested) = if s.rtx_applied {
+        options::rtx_filter_parts(&s.rtx_vf)
+    } else {
+        (None, false)
+    };
+    // After filters: PQ out of an SDR source means RTX HDR is running.
+    let rtx_hdr_active = match (rtx_hdr_requested, hdr) {
+        (true, Some(false)) => e
+            .get_property("video-out-params/gamma")
+            .filter(|g| g != "auto")
+            .map(|g| is_hdr_transfer(&g)),
+        _ => None,
+    };
+    let shown_hdr = hdr == Some(true) || rtx_hdr_active == Some(true);
+    let tone_mapped = match (shown_hdr, e.get_property("video-target-params/gamma")) {
+        (true, Some(t)) if t != "auto" => Some(!is_hdr_transfer(&t)),
         _ => None,
     };
     StatsSnapshot {
@@ -1271,7 +1553,12 @@ fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
         video_codec: s.stats.codec.clone(),
         audio_codec: e.get_property("audio-codec-name"),
         bitrate_kbps: bitrate,
-        dropped_frames: s.stats.dropped,
+        dropped_frames: total_dropped(
+            num("frame-drop-count")
+                .map(|v| v as i64)
+                .or(s.stats.dropped),
+            num("decoder-frame-drop-count").map(|v| v as i64),
+        ),
         buffer_secs: num("demuxer-cache-duration"),
         deinterlace: e.get_property("deinterlace"),
         hwdec_current: s.stats.hwdec.clone(),
@@ -1283,6 +1570,9 @@ fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
         primaries: e
             .get_property("video-params/primaries")
             .filter(|v| v != "auto"),
+        rtx_upscale,
+        rtx_hdr_requested,
+        rtx_hdr_active,
         bit_depth: e
             .get_property("video-params/hw-pixelformat")
             .or_else(|| e.get_property("video-params/pixelformat"))
@@ -1358,6 +1648,9 @@ fn supervise_engine_death(inner: &Arc<Inner>) {
             Err(e) => tracing::error!("engine restart failed: {e}"),
         }
     }
+    // Out of restarts for this session (or the rebuild failed). A dead handle reports shutdown
+    // at once; do not spin on it until the next `play` resets the restart budget and rebuilds.
+    std::thread::sleep(Duration::from_millis(250));
     let mut s = lock(inner);
     s.engine_failure = Some(crash_id.clone());
     s.error = Some("The playback engine stopped unexpectedly.".to_owned());
@@ -1388,6 +1681,12 @@ fn rebuild_engine(inner: &Arc<Inner>) -> Result<(), PlayerError> {
     for (k, v) in prefs.live_options() {
         let _ = engine.set_property(&k, &v);
     }
+    // The new engine has no `vf`; the replayed `loadfile` re-applies the RTX chain.
+    {
+        let mut s = lock(inner);
+        s.rtx_vf.clear();
+        s.rtx_applied = false;
+    }
     match inner.engine.write() {
         Ok(mut g) => *g = engine.clone(),
         Err(p) => *p.into_inner() = engine.clone(),
@@ -1402,7 +1701,25 @@ fn rebuild_engine(inner: &Arc<Inner>) -> Result<(), PlayerError> {
 
 #[cfg(test)]
 mod tests {
+    use super::total_dropped;
+
+    #[test]
+    fn dropped_frames_combine_vo_and_decoder() {
+        assert_eq!(total_dropped(None, None), None);
+        assert_eq!(total_dropped(Some(0), Some(0)), Some(0));
+        assert_eq!(total_dropped(Some(3), None), Some(3));
+        assert_eq!(total_dropped(None, Some(4)), Some(4));
+        assert_eq!(total_dropped(Some(3), Some(4)), Some(7));
+    }
+
     use super::*;
+
+    #[test]
+    fn mpv_version_parses() {
+        assert_eq!(parse_mpv_version("mpv v0.42.0-dirty"), Some((0, 42)));
+        assert_eq!(parse_mpv_version("mpv 0.40.0"), Some((0, 40)));
+        assert_eq!(parse_mpv_version(""), None);
+    }
 
     #[test]
     fn hdr_and_bit_depth_from_video_params() {
@@ -1437,6 +1754,7 @@ mod tests {
             headers: vec![("X-API-Key".into(), "sekrit".into())],
             profile: Profile::Live,
             start_secs: None,
+            start_paused: false,
             failover_capable: true,
             mode: PlayMode::Live,
             source_index: 0,
@@ -1551,6 +1869,59 @@ mod tests {
         assert_eq!(t[1].lang.as_deref(), Some("eng"));
         assert!(!t[2].selected);
         assert!(parse_tracks("not json").is_empty());
+    }
+
+    #[test]
+    fn audio_tracks_carry_channels_and_default_flag() {
+        let j = r#"[{"id":1,"type":"audio","lang":"eng","codec":"ac3","default":true,"selected":true,"demux-channels":"5.1(side)","demux-channel-count":6},
+                    {"id":2,"type":"audio","lang":"spa","codec":"aac","demux-channel-count":2},
+                    {"id":3,"type":"audio","demux-channel-count":0},
+                    {"id":4,"type":"audio","demux-channel-count":3}]"#;
+        let t = parse_tracks(j);
+        assert_eq!(t[0].channels.as_deref(), Some("5.1(side)"));
+        assert!(t[0].default && t[0].selected);
+        assert_eq!(t[1].channels.as_deref(), Some("stereo"));
+        assert!(!t[1].default);
+        assert_eq!(t[2].channels, None);
+        assert_eq!(t[3].channels.as_deref(), Some("3 ch"));
+    }
+
+    fn audio(id: i64, lang: Option<&str>, title: Option<&str>) -> Track {
+        Track {
+            id,
+            kind: "audio".into(),
+            lang: lang.map(Into::into),
+            title: title.map(Into::into),
+            codec: None,
+            channels: None,
+            default: false,
+            selected: false,
+        }
+    }
+
+    #[test]
+    fn audio_pick_is_restored_by_language_then_title() {
+        let before = [
+            audio(1, Some("eng"), None),
+            audio(2, Some("deu"), Some("Dub")),
+        ];
+        let pick = AudioPick::of(2, &before).expect("audio track");
+        // Same tracks, different ids after a reconnect.
+        let after = [
+            audio(5, Some("eng"), None),
+            audio(7, Some("deu"), Some("Dub")),
+        ];
+        assert_eq!(match_audio_pick(&pick, &after), Some(7));
+        // Title changed: language still wins; unknown language: nothing to restore.
+        let retitled = [audio(1, Some("eng"), None), audio(2, Some("deu"), None)];
+        assert_eq!(match_audio_pick(&pick, &retitled), Some(2));
+        let gone = [audio(1, Some("eng"), None)];
+        assert_eq!(match_audio_pick(&pick, &gone), None);
+        // No language: fall back to the same id.
+        let anon = [audio(1, None, None), audio(2, None, None)];
+        let pick = AudioPick::of(2, &anon).expect("audio track");
+        assert_eq!(match_audio_pick(&pick, &anon), Some(2));
+        assert!(AudioPick::of(9, &anon).is_none());
     }
 
     #[test]

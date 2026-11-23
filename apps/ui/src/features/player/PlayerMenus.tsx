@@ -9,11 +9,35 @@ import { notifyError } from '../../components/Notify/notify';
 import { t } from '../../lib/i18n';
 import classes from './Player.module.css';
 
-/** "ENG · Main · AC3"; falls back to "Track 2". */
+const AUDIO_CODECS: Record<string, string> = {
+  ac3: 'AC-3', eac3: 'E-AC-3', aac: 'AAC', aac_latm: 'AAC', mp2: 'MP2', mp3: 'MP3', dts: 'DTS', truehd: 'TrueHD', opus: 'Opus', flac: 'FLAC', vorbis: 'Vorbis',
+};
+
+let languageNames: Intl.DisplayNames | null | undefined;
+
+/** "eng" → "English"; unknown or invalid codes come back upper-cased ("QAA"). */
+export function languageName(code: string): string {
+  if (languageNames === undefined) {
+    try {
+      languageNames = new Intl.DisplayNames(['en'], { type: 'language' });
+    } catch {
+      languageNames = null;
+    }
+  }
+  try {
+    const name = languageNames?.of(code);
+    if (name && name.toLowerCase() !== code.toLowerCase()) return name;
+  } catch {
+    // invalid language tag: fall through
+  }
+  return code.toUpperCase();
+}
+
+/** "English · Main · AC-3 5.1"; falls back to "Track 2". Channels follow the codec, as in the stream picker. */
 export function trackLabel(track: Track): string {
-  const parts = [track.lang?.toUpperCase(), track.title, track.codec?.replace(/_/g, ' ').toUpperCase()].filter(
-    (p): p is string => !!p,
-  );
+  const codec = track.codec ? (AUDIO_CODECS[track.codec.toLowerCase()] ?? track.codec.replace(/_/g, ' ').toUpperCase()) : null;
+  const format = [codec, track.kind === 'audio' ? track.channels : null].filter(Boolean).join(' ');
+  const parts = [track.lang ? languageName(track.lang) : null, track.title, format || null].filter((p): p is string => !!p);
   return parts.length ? parts.join(' · ') : t('player.track', { n: track.id });
 }
 
@@ -53,7 +77,7 @@ function Check({ on }: { on: boolean }) {
   return <span className={classes.menuCheck}>{on && <Icon icon={IconCheck} size={16} />}</span>;
 }
 
-/** Audio track menu (`A`). Hidden by the caller when the file has fewer than two audio tracks. */
+/** Audio track menu (`A`). Hidden by the caller when the file has no audio track; a single track is still listed so the user can see what plays. */
 export function AudioMenu({ tracks, opened, onChange }: MenuProps & { tracks: Track[] }) {
   const audio = tracks.filter((x) => x.kind === 'audio');
   return (
@@ -148,4 +172,12 @@ export function StreamMenu({ channelId, opened, onChange, onDenied }: MenuProps 
       </Menu.Dropdown>
     </Menu>
   );
+}
+
+/** "2 of 3" for the stream in use; null (row hidden) when the position or total is unknown. */
+export function streamPosition(stats: { sourceIndex: number | null; sourceCount: number | null } | null | undefined): string | null {
+  const n = stats?.sourceIndex;
+  const total = stats?.sourceCount;
+  if (n == null || total == null || total < 1 || n < 1 || n > total) return null;
+  return t('player.info.streamOf', { n, total });
 }

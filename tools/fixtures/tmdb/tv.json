@@ -1,0 +1,16 @@
+{
+  "id": 4242, "name": "Harbour Lights", "original_name": "Harbour Lights",
+  "overview": "A small coastal police team untangles the town's oldest secrets.", "tagline": "",
+  "first_air_date": "2022-09-04", "episode_run_time": [44], "status": "Returning Series",
+  "number_of_seasons": 3, "vote_average": 8.12, "vote_count": 2,
+  "genres": [{"name": "Crime"}, {"name": "Drama"}], "origin_country": ["GB"],
+  "networks": [{"name": "Synthetic One"}], "created_by": [{"name": "Cy Creator"}],
+  "poster_path": "/poster4242.jpg", "backdrop_path": null,
+  "aggregate_credits": {"cast": [
+    {"name": "Ann Example", "roles": [{"character": "Detective Vale"}], "profile_path": "/ann.jpg"}
+  ]},
+  "content_ratings": {"results": [{"iso_3166_1": "GB", "rating": "15"}, {"iso_3166_1": "US", "rating": "TV-14"}]},
+  "external_ids": {"imdb_id": "tt1112223"},
+  "images": {"logos": []},
+  "videos": {"results": []}
+}

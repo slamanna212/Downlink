@@ -3,6 +3,7 @@
 
 pub mod dispatcharr;
 pub mod m3u;
+pub mod meta;
 pub mod play;
 pub mod vod;
 pub mod xtream;
@@ -15,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, Result};
 
+pub use meta::{Credit, ProgrammeExtra, VodExtra};
 pub use play::{
     Location, PlayPlan, PlayProfile, RedactedPlan, RedirectOutcome, SessionId, Surface,
     probe_redirect, resolve_redirect,
@@ -286,7 +288,10 @@ impl ChannelKey {
 
 /// A downloaded guide file (XMLTV) ready for `xmltv::ingest`. Deleted on drop.
 pub struct GuideFeed {
-    pub file: crate::m3u::load::Fetched,
+    /// `None`: the server confirmed the previously downloaded feed is unchanged (HTTP 304).
+    pub file: Option<crate::m3u::load::Fetched>,
+    /// Cache validators to send next time.
+    pub validators: crate::m3u::load::Validators,
     /// Zone for stamps without an offset (the server's, when known).
     pub default_tz: Option<String>,
 }
@@ -374,8 +379,12 @@ pub trait Source: Send + Sync {
     }
     /// Load previously persisted credentials before channels are mapped or played.
     fn load_credentials(&self, _map: std::collections::HashMap<String, String>) {}
-    /// A whole-guide file to ingest (XMLTV), for sources without a windowed guide API.
-    async fn guide_feed(&self) -> Result<Option<GuideFeed>> {
+    /// A whole-guide file to ingest (XMLTV), for sources without a windowed guide API. `prev` are
+    /// the validators from the last download, so an unchanged feed is not downloaded again.
+    async fn guide_feed(
+        &self,
+        _prev: Option<&crate::m3u::load::Validators>,
+    ) -> Result<Option<GuideFeed>> {
         Ok(None)
     }
     /// Ask the server to move an active channel to its next provider stream (failover). `false`
@@ -387,6 +396,11 @@ pub trait Source: Send + Sync {
     /// picker). `false` when the source has no such notion or the channel is not active there.
     async fn change_stream(&self, _ch: &ChannelKey, _stream_id: &str) -> Result<bool> {
         Ok(false)
+    }
+    /// The provider stream id the server is currently feeding this channel from (a status
+    /// endpoint, never a stream endpoint). `None` when unknown or the channel is not active.
+    async fn active_stream_id(&self, _ch: &ChannelKey) -> Result<Option<String>> {
+        Ok(None)
     }
     /// A channel's provider streams in failover order (names and stats only; provider URLs are
     /// never returned).
@@ -415,6 +429,11 @@ pub trait Source: Send + Sync {
     }
     async fn series_episodes(&self, _series_ext_id: &str) -> Result<Vec<VodItem>> {
         Err(no_vod())
+    }
+    /// Extra details for one guide row (`Programme::ext_id`): credits, ratings, artwork, external
+    /// ids. A status call, never a stream. `None` when the source has nothing more to say.
+    async fn programme_detail(&self, _ext_id: &str) -> Result<Option<ProgrammeExtra>> {
+        Ok(None)
     }
     /// A play plan for a movie or episode. `item.uuid`/`container` come from the cached row.
     async fn play_vod(&self, _item: &VodItem) -> Result<PlayPlan> {

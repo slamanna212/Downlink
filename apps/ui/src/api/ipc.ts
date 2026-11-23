@@ -8,6 +8,7 @@ import type {
   AppError,
   AppSettings,
   AudioDevice,
+  VideoCaps,
   GuideArgs,
   GuideResult,
   HomeData,
@@ -26,6 +27,7 @@ import type {
   SessionStats,
   UpdateChannel,
   UpdateStatus,
+  ReleaseNotes,
   CatalogUpdated,
   DeepLink,
   Diagnostics,
@@ -40,6 +42,13 @@ import type {
   Source,
   StreamList,
   MultiviewState,
+  MediaDetails,
+  MediaMatch,
+  MediaServerStatus,
+  MediaTarget,
+  TmdbStatus,
+  PlexPin,
+  PlexServer,
 } from './types';
 
 /** Command name -> args/result. Keep in sync with the Rust `#[tauri::command]` set (PLAN §2.5). */
@@ -62,11 +71,12 @@ export interface Commands {
   test_source: { args: AddSourceInput; result: TestSourceResult };
   remove_source: { args: { sourceId: number }; result: null };
   sync_source: { args: { sourceId: number }; result: null };
+  get_recent_transitions: { args: Record<string, never>; result: Diagnostics['transitions'] };
   get_diagnostics: { args: Record<string, never>; result: Diagnostics };
   set_debug_logging: { args: { enabled: boolean }; result: null };
   get_settings: { args: Record<string, never>; result: AppSettings };
   set_settings: { args: { patch: Partial<AppSettings> }; result: AppSettings };
-  set_video_bounds: { args: VideoBounds; result: null };
+  set_video_bounds: { args: VideoBounds & { seq?: number }; result: null };
   set_fullscreen: { args: { enabled: boolean }; result: null };
   set_mini_player: { args: { enabled: boolean }; result: null };
   get_guide: { args: GuideArgs; result: GuideResult };
@@ -79,6 +89,7 @@ export interface Commands {
   set_stats_enabled: { args: { enabled: boolean }; result: null };
   get_counts: { args: Record<string, never>; result: Counts };
   list_audio_devices: { args: Record<string, never>; result: AudioDevice[] };
+  get_video_caps: { args: Record<string, never>; result: VideoCaps };
   get_channel_streams: { args: { channelId: number }; result: StreamList };
   switch_stream: { args: { channelId: number; index: number }; result: null };
   get_multiview: { args: Record<string, never>; result: MultiviewState };
@@ -86,7 +97,7 @@ export interface Commands {
   multiview_remove_tile: { args: { slot: number }; result: null };
   multiview_set_audio: { args: { slot: number }; result: null };
   multiview_make_main: { args: { slot: number }; result: null };
-  multiview_set_bounds: { args: VideoBounds & { slot: number }; result: null };
+  multiview_set_bounds: { args: VideoBounds & { slot: number; seq?: number }; result: null };
   multiview_exit: { args: Record<string, never>; result: null };
   get_update_status: { args: Record<string, never>; result: UpdateStatus };
   set_update_channel: { args: { channel: UpdateChannel }; result: UpdateStatus };
@@ -117,6 +128,27 @@ export interface Commands {
   quit_app: { args: Record<string, never>; result: null };
   set_source_options: { args: { sourceId: number; hlsTransport: boolean }; result: null };
   report_ui_timing: { args: { name: string; ms: number }; result: null };
+  media_server_status: { args: Record<string, never>; result: MediaServerStatus };
+  /** Starts Plex sign-in and opens the approval page in the browser. */
+  plex_sign_in_start: { args: Record<string, never>; result: PlexPin };
+  /** True once the user approved the sign-in. */
+  plex_sign_in_check: { args: { pinId: number }; result: boolean };
+  plex_servers: { args: Record<string, never>; result: PlexServer[] };
+  plex_select_server: { args: { serverId: string }; result: MediaServerStatus };
+  media_server_sign_out: { args: Record<string, never>; result: null };
+  media_server_match: { args: { target: MediaTarget }; result: MediaMatch | null };
+  /** Opens a page from `media_server_match` in the browser. */
+  media_server_open: { args: { url: string }; result: null };
+  /** Rich details (source first, then TMDB). Never touches a stream. */
+  media_details: { args: { target: MediaTarget }; result: MediaDetails };
+  tmdb_status: { args: Record<string, never>; result: TmdbStatus };
+  /** Checks the key with TMDB, then keeps it in the keychain. */
+  tmdb_set_key: { args: { key: string }; result: TmdbStatus };
+  tmdb_clear_key: { args: Record<string, never>; result: TmdbStatus };
+  /** GitHub release body for a version (Markdown), or the latest.json notes if GitHub is unreachable. */
+  get_release_notes: { args: { version: string }; result: ReleaseNotes };
+  /** Opens a web link from release notes in the system browser. */
+  open_external_link: { args: { url: string }; result: null };
 }
 export type CommandName = keyof Commands;
 
@@ -124,6 +156,7 @@ export type CommandName = keyof Commands;
 export interface Events {
   'catalog://updated': CatalogUpdated;
   'player://state': PlayerState;
+  'source://certificate': AppError;
   'task://progress': TaskProgress;
   'session://stats': SessionStats;
   'update://status': UpdateStatus;
@@ -193,7 +226,7 @@ export async function invoke<C extends CommandName>(cmd: C, args: Commands[C]['a
   try {
     return await (await getBackend()).invoke(cmd, args);
   } catch (e) {
-    if (isAppError(e)) noteBlockingError(e.message);
+    if (isAppError(e)) noteBlockingError(e.message, e.sourceId);
     throw e;
   }
 }

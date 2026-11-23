@@ -14,12 +14,8 @@ use downlink_core::store::{NewSource, Store};
 use downlink_core::{ErrorCode, tls};
 use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use tokio::sync::Mutex as AsyncMutex;
 
 const HOST: &str = "127.0.0.1";
-
-/// The pin registry is per host and these tests share one host: run them one at a time.
-static SERIAL: AsyncMutex<()> = AsyncMutex::const_new(());
 
 fn fx(name: &str) -> Vec<u8> {
     std::fs::read(format!(
@@ -95,8 +91,9 @@ impl TlsServer {
     }
 }
 
-async fn get(url: &str) -> downlink_core::Result<String> {
-    let client = tls::apply(reqwest::Client::builder(), true)?
+async fn get(url: &str, pin: Option<&tls::Pin>) -> downlink_core::Result<String> {
+    let url = reqwest::Url::parse(url)?;
+    let client = tls::apply(reqwest::Client::builder(), &url, pin)?
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
     Ok(client.get(url).send().await?.text().await?)
@@ -104,7 +101,6 @@ async fn get(url: &str) -> downlink_core::Result<String> {
 
 #[tokio::test]
 async fn the_fingerprint_of_what_the_server_presents_is_learned() {
-    let _g = SERIAL.lock().await;
     let s = TlsServer::start("a");
     assert_eq!(
         tls::fetch_fingerprint(&s.url()).await.unwrap(),
@@ -119,21 +115,20 @@ async fn the_fingerprint_of_what_the_server_presents_is_learned() {
 
 #[tokio::test]
 async fn a_pinned_certificate_connects_and_a_different_one_is_refused() {
-    let _g = SERIAL.lock().await;
     let s = TlsServer::start("a");
-    tls::set_pin(HOST, &fp("a.sha256"));
-    assert_eq!(get(&s.url()).await.unwrap(), "ok");
+    let pin = tls::Pin::new(&s.url(), fp("a.sha256"), Some(42)).unwrap();
+    assert_eq!(get(&s.url(), Some(&pin)).await.unwrap(), "ok");
 
     s.switch_to("b");
-    let e = get(&s.url()).await.unwrap_err();
+    let e = get(&s.url(), Some(&pin)).await.unwrap_err();
     assert_eq!(e.code, ErrorCode::Auth, "{e:?}");
     assert!(e.blocking);
     assert_eq!(e.message, "The server's certificate changed.");
+    assert_eq!(e.source_id(), Some(42));
 
     // Only an explicit new pin lets the new certificate in.
-    tls::set_pin(HOST, &fp("b.sha256"));
-    assert_eq!(get(&s.url()).await.unwrap(), "ok");
-    tls::clear_pin(HOST);
+    let replacement = tls::Pin::new(&s.url(), fp("b.sha256"), Some(42)).unwrap();
+    assert_eq!(get(&s.url(), Some(&replacement)).await.unwrap(), "ok");
 }
 
 async fn service_with_source(url: &str, pin: Option<&str>) -> (Arc<Service>, i64) {
@@ -164,20 +159,16 @@ async fn service_with_source(url: &str, pin: Option<&str>) -> (Arc<Service>, i64
 
 #[tokio::test]
 async fn trusting_the_new_certificate_re_pins_the_source() {
-    let _g = SERIAL.lock().await;
     let s = TlsServer::start("a");
     let (svc, id) = service_with_source(&s.url(), Some(&fp("a.sha256"))).await;
     s.switch_to("b");
     svc.trust_new_certificate(id).await.unwrap();
     let row = svc.store().source(id).await.unwrap();
     assert_eq!(row.tls_pin.as_deref(), Some(fp("b.sha256").as_str()));
-    assert_eq!(tls::pin_for(HOST).as_deref(), Some(fp("b.sha256").as_str()));
-    tls::clear_pin(HOST);
 }
 
 #[tokio::test]
 async fn trust_new_certificate_refuses_a_source_that_does_not_allow_self_signed() {
-    let _g = SERIAL.lock().await;
     let (svc, id) = service_with_source("https://example.invalid", None).await;
     sqlx::query("UPDATE source SET tls_insecure = 0 WHERE id = ?")
         .bind(id)
@@ -185,4 +176,52 @@ async fn trust_new_certificate_refuses_a_source_that_does_not_allow_self_signed(
         .await
         .unwrap();
     assert!(svc.trust_new_certificate(id).await.is_err());
+}
+
+#[tokio::test]
+async fn a_missing_pin_rejects_a_self_signed_certificate() {
+    let s = TlsServer::start("a");
+    assert!(get(&s.url(), None).await.is_err());
+}
+
+#[tokio::test]
+async fn a_saved_https_source_does_not_enroll_a_missing_pin() {
+    let s = TlsServer::start("a");
+    let (svc, id) = service_with_source(&s.url(), None).await;
+    let error = svc.sync_source(id).await.unwrap_err();
+    assert_eq!(error.code, ErrorCode::Auth);
+    assert!(error.message.contains("no trusted certificate"));
+    assert_eq!(error.source_id(), Some(id));
+    assert!(svc.store().source(id).await.unwrap().tls_pin.is_none());
+    svc.trust_new_certificate(id).await.unwrap();
+    assert_eq!(
+        svc.store().source(id).await.unwrap().tls_pin,
+        Some(fp("a.sha256"))
+    );
+}
+
+#[tokio::test]
+async fn pins_are_isolated_between_sources_on_the_same_host() {
+    let a = TlsServer::start("a");
+    let b = TlsServer::start("b");
+    let pin_a = tls::Pin::new(&a.url(), fp("a.sha256"), Some(1)).unwrap();
+    let pin_b = tls::Pin::new(&b.url(), fp("b.sha256"), Some(2)).unwrap();
+    let url_a = a.url();
+    let url_b = b.url();
+    let (response_a, response_b) =
+        tokio::join!(get(&url_a, Some(&pin_a)), get(&url_b, Some(&pin_b)));
+    assert_eq!(response_a.unwrap(), "ok");
+    assert_eq!(response_b.unwrap(), "ok");
+    assert_eq!(
+        get(&b.url(), Some(&pin_a)).await.unwrap_err().code,
+        ErrorCode::Network
+    );
+
+    // Two sources can also trust different fingerprints at exactly the same address.
+    let sibling = tls::Pin::new(&a.url(), fp("b.sha256"), Some(3)).unwrap();
+    assert_eq!(
+        get(&a.url(), Some(&sibling)).await.unwrap_err().source_id(),
+        Some(3)
+    );
+    assert_eq!(get(&a.url(), Some(&pin_a)).await.unwrap(), "ok");
 }

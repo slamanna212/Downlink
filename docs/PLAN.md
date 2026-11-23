@@ -39,7 +39,7 @@
 | Scope | A **viewing client**. No admin console — Dispatcharr's web UI is the admin console |
 | Must-have | Live TV, guide, **catch-up**, VOD, DVR scheduling/playback, M3U/XMLTV/Xtream sources, **multiview** |
 | Releases | Same artefact mix as Apogee (§10), signed updater artefacts, `latest.json`, auto-update with stable + dev channels |
-| Platforms | Windows x64, macOS universal (two Mac testers), Linux x86_64 (Wayland and X11) |
+| Platforms | Windows x64, macOS Apple Silicon (two Mac testers), Linux x86_64 (Wayland and X11) |
 | Licence | GPL-3.0 with a GPL mpv build (default; confirm in §12) |
 
 ---
@@ -270,8 +270,9 @@ sources, connection limit), `media` (codec/format), `local` (disk/DB). Only `aut
 - API keys, passwords and JWT refresh tokens live in the OS keychain (`keyring`: Credential Manager,
   Keychain, Secret Service). SQLite stores only a keychain reference. A test asserts no secret is
   written to the DB.
-- TLS: self-signed allowed per source behind an explicit toggle with a warning; re-prompt if the
-  certificate changes. Verification is never silently disabled.
+- TLS: self-signed certificates require explicit trust for each source and its configured HTTPS
+  origin. A missing or changed fingerprint requires another trust decision for that source.
+  Connections to other origins use normal certificate verification.
 - **Redaction** (hard rule, unit-tested): `/live/<u>/<p>/`, `/movie/<u>/<p>/`, `/series/<u>/<p>/`,
   `/timeshift/<u>/<p>/`, `player_api.php` / `get.php` / `xmltv.php` / `timeshift.php` query
   credentials, `X-API-Key`, `Authorization`, and provider URLs from redirects. Applied at the logging
@@ -539,13 +540,12 @@ than the one we tested.
 | Artefact | What ships | Load |
 |---|---|---|
 | Windows NSIS | `libmpv-2.dll` + dependencies in `resources/mpv/` (zhongfly GPL x86_64 build, pinned by tag) | `LoadLibraryW` on the app-relative path |
-| macOS universal `.app` / `.dmg` | **Universal** `libmpv.dylib` + every dependent dylib in `Contents/Frameworks/` | `@rpath` / `@loader_path`, fixed with `install_name_tool`; `dlopen` from the Frameworks dir |
+| macOS arm64 `.app` / `.dmg` | One self-contained `libmpv.2.dylib` (FFmpeg, libass, libplacebo linked statically) in `Contents/Frameworks/` | id `@rpath/libmpv.2.dylib`; `dlopen` from the Frameworks dir |
 | Linux AppImage | `.so` set in `usr/lib/` | `rpath=$ORIGIN/../lib`; scrub `APPDIR`/`LD_LIBRARY_PATH` from child environments |
 | Linux `.deb` / `.rpm` | Private copy in `/usr/lib/downlink/mpv/` (via Tauri `bundle.linux.{deb,rpm}.files`) | `rpath` to the private dir; **no** `Depends: libmpv2` |
 
-macOS universal is the hard one: libmpv and every dependency must be fat binaries. `tools/mpv/macos.sh`
-builds (or collects from Homebrew bottles) on an arm64 runner and an x86_64 runner, collects each
-dylib tree, and `lipo -create`s them. This is an M1 task, not M6.
+macOS is Apple Silicon only (decided 2026-11-23): `tools/mpv/macos.sh` builds every dependency from verified
+source on an arm64 runner and links them statically into one dylib, so there is no dependency tree to relocate.
 
 Linux libs are collected in a pinned build container (Ubuntu 22.04 glibc baseline, image digest
 pinned), so the bundled set is reproducible and never the end user's distro libmpv.
@@ -565,11 +565,11 @@ A CI job runs each artefact on a clean VM/container with **no mpv or libmpv inst
   its pre-warmed instance and the full failover policy); tiles 2–9 get their own instances, created
   on entering multiview and destroyed on exit. Live channels only (no catch-up, VOD, recordings).
 - **Surfaces.** Linux: one `GtkGLArea` per tile in the same `GtkOverlay`, each with its own render
-  context. Windows: one `--wid` child HWND per tile beneath WebView2. macOS: one NSView per tile;
-  until the macOS surface is reworked for several instances, macOS reports a cap of 1 tile and the
-  entry points are hidden.
+  context. Windows: one `--wid` popup per tile behind the main window. macOS: one `NSOpenGLView`
+  per tile below the `WKWebView`, each with its own GL and render context. Every platform has the
+  same tile cap.
 - **Rendering.** While more than one surface is attached, render calls pass
-  `MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME=0`: every surface renders on the GTK main thread, and one
+  `MPV_RENDER_PARAM_BLOCK_FOR_TARGET_TIME=0`: every surface renders on the main thread (GTK, AppKit), and one
   blocking render starves the rest (observed: tiles froze after two frames). The audio output list
   excludes SDL, whose global init crashed when several instances started at once (§4.3).
 - **Options.** Tiles use profile `multiview` (owned by `downlink-player`): the `live` profile plus
@@ -684,7 +684,7 @@ Ingestion is separate from the source:
 | Thing | Handling |
 |---|---|
 | Extended M3U playlist (`#EXTM3U`/`#EXTINF`) | Parsed by `m3u/` |
-| HLS manifest (`#EXT-X-*`) | Never parsed by us; mpv consumes it |
+| HLS manifest (`#EXT-X-*`) | For HTTP playback with per-file headers, the loopback proxy identifies playlists from the response, rewrites resource URIs, and passes the result to mpv. It streams other media responses and applies credentials only to the configured stream origin. |
 | Dispatcharr's `/output/m3u` | Just another M3U URL; has no catch-up tags |
 | Xtream Codes (`player_api.php`, `get.php`, `/live/`) | `xtream/` adapter; covers Dispatcharr's XC surface and third-party panels |
 
@@ -1242,8 +1242,8 @@ Acceptance:
 
 ### M7 — macOS
 
-Add the macOS build job; Developer ID signing and notarisation (§10.5); universal libmpv; the macOS
-surface reworked for several instances so multiview works; Mac testers verify the M0 checks and every
+Add the macOS build job; Developer ID signing and notarisation (§10.5); universal libmpv; Mac testers
+verify multiview (one surface per tile, as on Linux and Windows), the M0 checks and every
 milestone's acceptance; fix what they find, then ship macOS on the stable channel.
 
 ### Definition of done (every milestone)
@@ -1346,8 +1346,11 @@ README and About show "Works with Dispatcharr ≥ 0.32.0, tested with <latest>".
 Updater signatures (minisign) are required regardless of OS code signing.
 
 **Decided 2026-11-20 (Sam):** releases start with **Windows and Linux**; Windows stays unsigned for now.
-**macOS** follows soon, signed and notarised with Sam's existing **Apple Developer ID** (macOS release jobs are added to
-`build.yml` then; the staging script and overlay already exist). Azure Trusted Signing is not planned.
+**macOS** follows soon, signed and notarised with Sam's existing **Apple Developer ID**. Azure Trusted Signing is not planned.
+
+**Done 2026-11-23:** the `build-macos` job in `build.yml` ships Apple Silicon only (no Intel/universal build),
+Developer ID signed and notarised on both the dev and stable channels via an App Store Connect API key; ad-hoc signed
+with a warning if the Apple secrets are missing. See docs/release.md.
 
 ---
 

@@ -2,6 +2,8 @@
 //! migrations. Nothing secret is ever written here: sources hold only a keychain reference.
 
 mod channels;
+mod legacy_credentials;
+mod meta;
 mod programmes;
 mod sessions;
 mod sources;
@@ -33,23 +35,34 @@ pub struct Store {
 impl Store {
     /// Open (creating if needed) a file database and run migrations.
     pub async fn open(path: impl AsRef<Path>) -> Result<Self> {
-        let opts = SqliteConnectOptions::new()
-            .filename(path.as_ref())
-            .create_if_missing(true)
-            .journal_mode(SqliteJournalMode::Wal)
-            .synchronous(SqliteSynchronous::Normal)
-            .foreign_keys(true)
-            .busy_timeout(Duration::from_secs(5));
-        let pool = SqlitePoolOptions::new()
-            .max_connections(4)
-            .connect_with(opts)
-            .await?;
-        if let Err(e) = refuse_newer(&pool).await {
-            pool.close().await;
-            return Err(e);
+        Self::open_file(path.as_ref(), None).await
+    }
+
+    pub(crate) async fn open_with_secrets(
+        path: &Path,
+        secrets: &dyn crate::auth::SecretStore,
+    ) -> Result<Self> {
+        Self::open_file(path, Some(secrets)).await
+    }
+
+    async fn open_file(
+        path: &Path,
+        secrets: Option<&dyn crate::auth::SecretStore>,
+    ) -> Result<Self> {
+        let pool = open_pool(path).await?;
+        let result = async {
+            refuse_newer(&pool).await?;
+            if let Some(secrets) = secrets {
+                legacy_credentials::migrate(&pool, path, secrets).await?;
+            }
+            backup_before_migrate(&pool, path).await?;
+            Self::from_pool(pool.clone()).await
         }
-        backup_before_migrate(&pool, path.as_ref()).await?;
-        Self::from_pool(pool).await
+        .await;
+        if result.is_err() {
+            pool.close().await;
+        }
+        result
     }
 
     /// In-memory database (single connection so every query sees the same data).
@@ -168,6 +181,21 @@ pub fn archive_database(db: &Path, epoch: i64) -> Result<std::path::PathBuf> {
         }
     }
     Ok(dest)
+}
+
+async fn open_pool(path: &Path) -> Result<SqlitePool> {
+    let opts = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .foreign_keys(true)
+        .pragma("secure_delete", "ON")
+        .busy_timeout(Duration::from_secs(5));
+    Ok(SqlitePoolOptions::new()
+        .max_connections(4)
+        .connect_with(opts)
+        .await?)
 }
 
 /// Number of backups kept next to the database (`<db>.bak1` newest, `<db>.bak2` older).

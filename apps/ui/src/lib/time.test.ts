@@ -80,3 +80,68 @@ describe('time', () => {
     expect(dayLabel(T + 3 * 86400, T)).toBe('Sun 22 Nov');
   });
 });
+
+describe('memoised formatting', () => {
+  it('startOfDay and formatClock stay correct across a zone change', async () => {
+    const { setDisplayZone, getDisplayZone, startOfDay, formatClock } = await import('./time');
+    const prev = getDisplayZone();
+    try {
+      const e = 1_700_000_000; // 2023-11-14 22:13:20 UTC
+      setDisplayZone('UTC');
+      expect(formatClock(e)).toBe('22:13');
+      expect(startOfDay(e)).toBe(1_699_920_000);
+      expect(startOfDay(e + 60)).toBe(1_699_920_000);
+      setDisplayZone('Asia/Tokyo');
+      expect(formatClock(e)).toBe('07:13');
+      expect(startOfDay(e)).toBe(1_699_974_000);
+    } finally {
+      setDisplayZone(prev);
+    }
+  });
+});
+
+import { bucketEpoch, epochAtRatio, formatBehindLive, programmeSegments, ratioOfEpoch, timelineWindow } from './time';
+
+describe('channel timeline', () => {
+  const w = timelineWindow(10_000, 3600);
+
+  it('centres the window on the playhead', () => {
+    expect(w).toEqual({ start: 8200, end: 11_800 });
+    expect(ratioOfEpoch(w, 10_000)).toBe(0.5);
+    expect(epochAtRatio(w, 0.25)).toBe(9100);
+    expect(epochAtRatio(w, 2)).toBe(11_800);
+  });
+
+  it('splits only at programme boundaries', () => {
+    expect(programmeSegments([], w)).toEqual([{ start: 0, end: 1, title: null }]);
+    const segs = programmeSegments(
+      [
+        { startUtc: 9000, endUtc: 10_800, title: 'B' },
+        { startUtc: 5000, endUtc: 9000, title: 'A' },
+        { startUtc: 20_000, endUtc: 21_000, title: 'far' },
+      ],
+      w,
+    );
+    expect(segs.map((s) => s.title)).toEqual(['A', 'B', null]);
+    expect(segs[0]).toMatchObject({ start: 0 });
+    expect(segs[1]?.start).toBeCloseTo(800 / 3600);
+    expect(segs[1]?.end).toBeCloseTo(2600 / 3600);
+    expect(segs[2]?.end).toBe(1);
+  });
+
+  it('formats time behind live and buckets epochs', () => {
+    expect(formatBehindLive(2)).toBe('');
+    expect(formatBehindLive(320)).toBe('−5:20');
+    expect(bucketEpoch(1234)).toBe(1200);
+  });
+});
+
+describe('calendar dates', () => {
+  it('formats server dates without shifting them', async () => {
+    const { formatCalendarDate, setDisplayZone } = await import('./time');
+    setDisplayZone('Pacific/Auckland');
+    expect(formatCalendarDate('2024-03-02')).toBe('2 Mar 2024');
+    expect(formatCalendarDate('2024')).toBeNull();
+    expect(formatCalendarDate(null)).toBeNull();
+  });
+});

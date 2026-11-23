@@ -438,6 +438,9 @@ async fn endpoint_schedule_one_off_and_series_rule() {
         programme_ext_id: Some("p".into()),
         title: "Fieldwork".into(),
         description: None,
+        subtitle: None,
+        season: None,
+        episode: None,
         start_utc: 1_767_297_600,
         end_utc: 1_767_301_200,
     };
@@ -552,16 +555,18 @@ async fn recording_plans_hls_while_running_file_when_done_same_origin_only() {
         format!("{}/api/channels/recordings/33/file/", server.uri())
     );
     assert_eq!(done.surface, downlink_core::source::Surface::Direct);
-    assert!(
-        c.recording_plan(&mk(
-            "34",
-            RecStatus::Completed,
-            Some("http://elsewhere.test/f.mkv")
-        ))
-        .await
-        .is_err(),
-        "the key never goes to another server"
-    );
+    for file in [
+        "http://elsewhere.test/f.mkv",
+        "//elsewhere.test/f.mkv",
+        "file:///tmp/f.mkv",
+    ] {
+        assert!(
+            c.recording_plan(&mk("34", RecStatus::Completed, Some(file)))
+                .await
+                .is_err(),
+            "addresses outside the configured origin are refused"
+        );
+    }
     assert!(!format!("{live:?}").contains(KEY));
     assert!(server.received_requests().await.unwrap().is_empty());
 }
@@ -1064,6 +1069,9 @@ async fn a_past_one_off_gets_a_plain_sentence() {
         programme_ext_id: None,
         title: "T".into(),
         description: None,
+        subtitle: None,
+        season: None,
+        episode: None,
         start_utc: 1,
         end_utc: 2,
     };
@@ -1097,6 +1105,9 @@ async fn series_rule_create_is_followed_by_an_evaluate() {
         programme_ext_id: None,
         title: "Pattern Playhouse".into(),
         description: None,
+        subtitle: None,
+        season: None,
+        episode: None,
         start_utc: 1,
         end_utc: 2,
     };
@@ -1264,6 +1275,9 @@ async fn series_rule_carries_the_epg_source_of_the_channels_guide_data() {
         programme_ext_id: None,
         title: "Pattern Playhouse".into(),
         description: None,
+        subtitle: None,
+        season: None,
+        episode: None,
         start_utc: 1,
         end_utc: 2,
     };
@@ -1290,6 +1304,9 @@ async fn series_rule_omits_epg_source_when_it_is_unknown() {
         programme_ext_id: None,
         title: "Pattern Playhouse".into(),
         description: None,
+        subtitle: None,
+        season: None,
+        episode: None,
         start_utc: 1,
         end_utc: 2,
     };

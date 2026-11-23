@@ -110,7 +110,7 @@ fn clip(name: &str) -> Option<Vec<u8>> {
 }
 
 fn player() -> Option<Player> {
-    let loaded = match load(None) {
+    let loaded = match load(&[]) {
         Ok(l) => l,
         Err(e) if std::env::var("DOWNLINK_REQUIRE_MPV").is_ok_and(|v| v == "1") => {
             panic!("DOWNLINK_REQUIRE_MPV=1 but libmpv failed to load: {e}")
@@ -139,6 +139,7 @@ fn req(port: u16, failover: bool) -> PlayRequest {
         headers: vec![],
         profile: Profile::Live,
         start_secs: None,
+        start_paused: false,
         failover_capable: failover,
         mode: PlayMode::Live,
         source_index: 0,
@@ -209,6 +210,39 @@ fn assert_stream(name: &str, codec: &str, w: i64, h: i64) -> Option<Player> {
     );
     assert!(prop_f64(&p, "estimated-frame-number") > 0.0);
     Some(p)
+}
+
+#[test]
+fn audio_tracks_are_listed_and_switchable() {
+    let Some((p, _srv)) = play_clip("two_audio", 20.0) else {
+        return;
+    };
+    let audio = |p: &Player| {
+        p.snapshot()
+            .tracks
+            .into_iter()
+            .filter(|t| t.kind == "audio")
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        wait(|| audio(&p).len() == 2, 10),
+        "{:?}",
+        p.snapshot().tracks
+    );
+    let first = audio(&p);
+    assert_eq!(first[0].lang.as_deref(), Some("eng"));
+    assert_eq!(first[1].lang.as_deref(), Some("deu"));
+    p.command(downlink_player::PlayerCommand::AudioTrack { id: first[1].id })
+        .expect("aid");
+    assert!(
+        wait(
+            || audio(&p).iter().any(|t| t.id == first[1].id && t.selected),
+            10
+        ),
+        "selection never reached the snapshot: {:?} aid={:?}",
+        audio(&p),
+        p.engine().get_property("aid")
+    );
 }
 
 #[test]

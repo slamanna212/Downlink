@@ -13,6 +13,7 @@ mod logging;
 mod multiview;
 mod player_glue;
 mod protocol;
+mod release_notes;
 mod resume;
 mod selftest;
 #[cfg(feature = "spike")]
@@ -147,6 +148,7 @@ macro_rules! handlers {
             commands::player::set_mini_player,
             commands::player::set_stats_enabled,
             commands::player::list_audio_devices,
+            commands::player::get_video_caps,
             commands::player::get_channel_streams,
             commands::player::switch_stream,
             commands::player::get_multiview,
@@ -158,6 +160,7 @@ macro_rules! handlers {
             commands::player::multiview_exit,
             commands::settings::get_settings,
             commands::settings::set_settings,
+            commands::diagnostics::get_recent_transitions,
             commands::diagnostics::get_diagnostics,
             commands::diagnostics::set_debug_logging,
             commands::diagnostics::export_diagnostics,
@@ -171,6 +174,20 @@ macro_rules! handlers {
             commands::updates::set_update_channel,
             commands::updates::check_for_updates,
             commands::updates::install_update,
+            commands::updates::get_release_notes,
+            commands::updates::open_external_link,
+            commands::mediaserver::media_server_status,
+            commands::mediaserver::plex_sign_in_start,
+            commands::mediaserver::plex_sign_in_check,
+            commands::mediaserver::plex_servers,
+            commands::mediaserver::plex_select_server,
+            commands::mediaserver::media_server_sign_out,
+            commands::mediaserver::media_server_match,
+            commands::mediaserver::media_server_open,
+            commands::metadata::media_details,
+            commands::metadata::tmdb_status,
+            commands::metadata::tmdb_set_key,
+            commands::metadata::tmdb_clear_key,
             $($extra),*
         ]
     };

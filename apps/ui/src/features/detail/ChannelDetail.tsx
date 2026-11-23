@@ -5,7 +5,6 @@ import { Drawer, Menu, UnstyledButton } from '@mantine/core';
 import { IconStar, IconLayoutGrid } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
 import { invalidateFavourites, useCaps, useChannel, useOffline } from '../../api/queries';
-import type { Programme } from '../../api/types';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
@@ -15,7 +14,8 @@ import { recentWindowStart, addDays, dayLabel, formatClock, formatRange, minutes
 import { useNowEpoch } from '../../lib/useNow';
 import { t } from '../../lib/i18n';
 import { useDetailStore } from '../../store/detail';
-import { activateProgramme } from '../guide/activate';
+import { openInfo } from '../../store/info';
+import { episodeLine } from '../../lib/episode';
 import { blockState } from '../guide/guideModel';
 import { playChannel } from '../player/actions';
 import { useMultiviewAvailable } from '../multiview/available';
@@ -26,7 +26,6 @@ export function ChannelDetail() {
   const open = useDetailStore((s) => s.open);
   const close = useDetailStore((s) => s.close);
   const multiview = useMultiviewAvailable();
-  const show = useDetailStore((s) => s.show);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { caps } = useCaps();
@@ -55,11 +54,6 @@ export function ChannelDetail() {
   const record = useMutation({
     mutationFn: (v: { programmeId: string; kind: 'once' | 'series' }) => invoke('schedule_recording', v),
   });
-
-  const watch = (p: Programme) => {
-    close();
-    activateProgramme(p, channel, navigate, show);
-  };
 
   return (
     <Drawer opened={!!open} onClose={close} position="right" size={440} title={t('detail.title')} padding="xl">
@@ -110,7 +104,10 @@ export function ChannelDetail() {
           <div className={classes.nn}>
             {current ? (
               <>
-                <div className={classes.nnTitle}>{current.title}</div>
+                <UnstyledButton className={classes.nnTitle} onClick={() => openInfo({ kind: 'programme', programme: current, channel })}>
+                  {current.title}
+                </UnstyledButton>
+                {episodeLine(current) && <div className={classes.nnEp}>{episodeLine(current)}</div>}
                 <div className={classes.track}>
                   <span className={classes.fill} style={{ width: `${progress(current.startUtc, current.endUtc, now) * 100}%` }} />
                 </div>
@@ -136,11 +133,13 @@ export function ChannelDetail() {
                   className={classes.row}
                   data-state={st}
                   data-highlight={open?.programmeId === p.id || undefined}
-                  disabled={st === 'past-none'}
-                  onClick={() => (st === 'future' ? undefined : watch(p))}
+                  onClick={() => openInfo({ kind: 'programme', programme: p, channel })}
                 >
                   <span className={classes.time}>{dayLabel(p.startUtc, now) === 'Today' ? formatClock(p.startUtc) : `${dayLabel(p.startUtc, now)} ${formatClock(p.startUtc)}`}</span>
-                  <span className={classes.rowTitle}>{p.title}</span>
+                  <span className={classes.rowText}>
+                    <span className={classes.rowTitle}>{p.title}</span>
+                    {episodeLine(p) && <span className={classes.rowEp}>{episodeLine(p)}</span>}
+                  </span>
                   {st === 'now' && <StatusBadge kind="live" />}
                   {st === 'past-archive' && <StatusBadge kind="catchup" />}
                   {p.isScheduled && <StatusBadge kind="rec" />}

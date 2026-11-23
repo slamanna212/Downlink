@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Collapse, PasswordInput, Stack, Switch, Tabs, TextInput } from '@mantine/core';
-import { IconAlertTriangle, IconArrowRight, IconCircleCheck, IconDownload } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArrowRight, IconCircleCheck } from '@tabler/icons-react';
 import { toAppError, invoke } from '../../api/ipc';
 import { useCaps } from '../../api/queries';
 import type { AddSourceInput, AppError, SourceKind, TestSourceResult } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { Icon } from '../../components/Icon/Icon';
+import logoUrl from '../../assets/logo.svg';
 import { t } from '../../lib/i18n';
 import classes from './AddSource.module.css';
 
@@ -42,6 +43,7 @@ export function defaultName(kind: SourceKind, url: string): string {
 
 /** Returns a message key-resolved string for the first problem, or null. */
 export function validate(kind: SourceKind, f: AddForm): string | null {
+  if (!f.name.trim()) return t('add.needName');
   if (!f.url.trim()) return t('add.needUrl');
   if (kind === 'dispatcharr' && !f.useLogin && !f.apiKey.trim()) return t('add.needKey');
   if ((kind === 'xtream' || (kind === 'dispatcharr' && f.useLogin)) && (!f.username.trim() || !f.password)) return t('add.needLogin');
@@ -58,6 +60,7 @@ export function AddSourcePage() {
   const [form, setForm] = useState<AddForm>(EMPTY);
   const [test, setTest] = useState<Test>({ state: 'idle' });
   const [advanced, setAdvanced] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const [saveError, setSaveError] = useState<AppError | null>(null);
 
   const set = <K extends keyof AddForm>(k: K, v: AddForm[K]) => {
@@ -67,6 +70,7 @@ export function AddSourcePage() {
   };
 
   const runTest = async () => {
+    setAttempted(true);
     const problem = validate(kind, form);
     if (problem) return setTest({ state: 'error', message: problem });
     setTest({ state: 'testing' });
@@ -100,7 +104,7 @@ export function AddSourcePage() {
         }}
       >
         <div className={classes.mark}>
-          <Icon icon={IconDownload} size={20} />
+          <img src={logoUrl} alt="" width={36} height={36} draggable={false} />
         </div>
         <h1 className={classes.title}>{t('add.title')}</h1>
         <p className={classes.intro}>{t('add.intro')}</p>
@@ -124,12 +128,22 @@ export function AddSourcePage() {
 
           <Stack gap="lg">
             <TextInput
+              label={t('add.name')}
+              placeholder={t('add.namePlaceholder')}
+              value={form.name}
+              onChange={(e) => set('name', e.currentTarget.value)}
+              error={attempted && !form.name.trim() ? t('add.needName') : undefined}
+              required
+              autoFocus
+              autoComplete="off"
+            />
+
+            <TextInput
               className={classes.mono}
               label={kind === 'm3u' ? t('add.playlistUrl') : t('add.serverUrl')}
               placeholder={kind === 'm3u' ? 'https://example.invalid/playlist.m3u' : 'http://192.0.2.10:9191'}
               value={form.url}
               onChange={(e) => set('url', e.currentTarget.value)}
-              autoFocus
               spellCheck={false}
               autoComplete="off"
             />
@@ -187,7 +201,6 @@ export function AddSourcePage() {
             </button>
             <Collapse expanded={advanced}>
               <Stack gap="lg">
-                <TextInput label={t('add.name')} value={form.name} onChange={(e) => set('name', e.currentTarget.value)} autoComplete="off" />
                 <Switch
                   label={t('add.selfSigned')}
                   description={t('add.selfSignedHelp')}

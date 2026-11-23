@@ -14,7 +14,7 @@ use super::{
 };
 use crate::catchup::template::{CatchupTemplate, ExpandCtx, expand};
 use crate::error::{AppError, Result};
-use crate::m3u::load::{Fetcher, HttpFetcher, Location, load};
+use crate::m3u::load::{Fetcher, HttpFetcher, Location, load_complete};
 use crate::m3u::{M3uEntry, Playlist};
 use crate::normalise::{stable_ids, synthetic_id};
 use crate::redact::RedactionSet;
@@ -26,7 +26,7 @@ pub struct M3uSource {
     /// Configured XMLTV URL(s); falls back to the header's `url-tvg` list.
     xmltv: Vec<String>,
     fetcher: Arc<dyn Fetcher>,
-    insecure_tls: bool,
+    tls_pin: Option<crate::tls::Pin>,
     cache: tokio::sync::Mutex<Option<Arc<Playlist>>>,
     any_catchup: AtomicBool,
     has_guide: AtomicBool,
@@ -53,14 +53,14 @@ impl M3uSource {
         id: SourceId,
         location: Location,
         xmltv: Vec<String>,
-        insecure_tls: bool,
+        tls_pin: Option<crate::tls::Pin>,
     ) -> Result<Self> {
         Ok(Self::with_fetcher(
             id,
             location,
             xmltv,
-            Arc::new(HttpFetcher::new(insecure_tls)?),
-            insecure_tls,
+            Arc::new(HttpFetcher::new(tls_pin.as_ref())?),
+            tls_pin,
         ))
     }
 
@@ -69,7 +69,7 @@ impl M3uSource {
         location: Location,
         xmltv: Vec<String>,
         fetcher: Arc<dyn Fetcher>,
-        insecure_tls: bool,
+        tls_pin: Option<crate::tls::Pin>,
     ) -> Self {
         Self {
             id: std::sync::atomic::AtomicI64::new(id.0),
@@ -77,7 +77,7 @@ impl M3uSource {
             location,
             xmltv,
             fetcher,
-            insecure_tls,
+            tls_pin,
             cache: tokio::sync::Mutex::new(None),
             any_catchup: AtomicBool::new(false),
             reuse_once: AtomicBool::new(false),
@@ -88,7 +88,18 @@ impl M3uSource {
     /// A probe built before the row exists can be adopted once it has an id.
     pub fn set_id(&self, id: SourceId) {
         self.id.store(id.0, Ordering::Relaxed);
+        if let Some(pin) = &self.tls_pin {
+            pin.set_source_id(id.0);
+        }
         self.reuse_once.store(true, Ordering::Relaxed);
+    }
+
+    pub(crate) fn attach_credentials(
+        &self,
+        secrets: std::sync::Arc<dyn crate::auth::SecretStore>,
+        uuid: &str,
+    ) -> Result<()> {
+        self.vault.attach(secrets, uuid)
     }
 
     async fn playlist(&self, refresh: bool) -> Result<Arc<Playlist>> {
@@ -97,7 +108,7 @@ impl M3uSource {
         // later refresh re-reads the playlist.
         let reuse = g.is_some() && self.reuse_once.swap(false, Ordering::Relaxed);
         if (refresh && !reuse) || g.is_none() {
-            let (pl, st) = load(&self.location, self.fetcher.as_ref()).await?;
+            let (pl, st) = load_complete(&self.location, self.fetcher.as_ref()).await?;
             tracing::info!(
                 entries = pl.entries.len(),
                 dropped = st.parse.dropped,
@@ -183,6 +194,7 @@ impl M3uSource {
         }
         let hls = url.contains(".m3u8");
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url,
             headers: hdrs
                 .into_iter()
@@ -247,6 +259,7 @@ impl Source for M3uSource {
             .zip(ids)
             .map(|(e, id)| self.to_channel(e, id, &pl))
             .collect();
+        self.vault.persist().await?;
         Ok(ChannelPage {
             count: Some(channels.len() as u64),
             channels,
@@ -273,7 +286,10 @@ impl Source for M3uSource {
         Ok(Vec::new()) // the guide comes from `guide_feed` (XMLTV)
     }
 
-    async fn guide_feed(&self) -> Result<Option<GuideFeed>> {
+    async fn guide_feed(
+        &self,
+        prev: Option<&crate::m3u::load::Validators>,
+    ) -> Result<Option<GuideFeed>> {
         let urls: Vec<String> = if self.xmltv.is_empty() {
             self.playlist(false).await?.header.tvg_urls.clone()
         } else {
@@ -281,14 +297,20 @@ impl Source for M3uSource {
         };
         let mut last_err = None;
         for u in urls {
+            use crate::m3u::load::{Conditional, Fetched, Validators};
             let got = match Location::parse(&u) {
-                Ok(Location::File(p)) => Ok(crate::m3u::load::Fetched::Local(p)),
-                _ => self.fetcher.fetch(&u).await,
+                Ok(Location::File(p)) => Ok((Some(Fetched::Local(p)), Validators::for_url(&u))),
+                _ => match self.fetcher.fetch_if_changed(&u, prev).await {
+                    Ok(Conditional::NotModified) => Ok((None, prev.cloned().unwrap_or_default())),
+                    Ok(Conditional::Fetched(f, v)) => Ok((Some(f), v)),
+                    Err(e) => Err(e),
+                },
             };
             match got {
-                Ok(file) => {
+                Ok((file, validators)) => {
                     return Ok(Some(GuideFeed {
                         file,
+                        validators,
                         default_tz: None,
                     }));
                 }
@@ -350,7 +372,7 @@ impl Source for M3uSource {
     }
 
     async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {
-        crate::images::fetch_public(&self.vault.resolve(url)?, self.insecure_tls).await
+        crate::images::fetch_public(&self.vault.resolve(url)?, self.tls_pin.as_ref()).await
     }
 }
 

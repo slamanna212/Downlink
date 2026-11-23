@@ -45,6 +45,10 @@ The reference uses synthetic channel names. Where this file and the reference di
 catch-up, playing row, links) · `--dl-on-accent #120A33` (text on accent fill, never elsewhere) ·
 `--dl-accent-bar` (accent at 55%: info panel buffer graph bars only; a data mark, not a tint).
 
+### Third-party brand
+- Plex `--dl-plex` (`#E5A00D`): the Plex chevron mark on the player's open-in-Plex icon button (`IconPlex`). A
+  brand colour exception to the accent rules; used nowhere else.
+
 ### Status
 - Live `#F2495C`: dot, now line, REC dot. Text `#FF8B97` on 18% tint. Never solid red with white text.
 - OK `#34D399` (text `#6EE7B7`): connected, test passed.
@@ -127,7 +131,19 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 
 ## 7. Other components
 - **Badges** (20 px, 11/700 caps, radius 4): LIVE/REC = live tint + dot · CATCH-UP = accent tint +
-  IconHistory · NEW/HD/4K/RADIO = outline (hairline 18%) text-2 · DRM = surface-3 + lock, text-dim.
+  IconHistory · NEW/HD/4K/RADIO/PREMIERE/FINALE = outline (hairline 18%) text-2 · content rating (`cert`, text as
+  broadcast, e.g. TV-14) = outline · DRM/REPEAT = surface-3, text-dim.
+- **Episode labels** (`lib/episode.ts`): `S2 E5`, and `S2 E5 · Episode title` wherever a programme, recording or
+  episode is listed (guide block time line, preview, channel rows, channel drawer, search, recordings, home, player).
+- **Details modal** (`features/info`, one instance in the shell, opened via `store/info`): 880 px, radius 12,
+  surface-1. Hero = episode still or backdrop under `--dl-scrim` (none: compact header with the channel logo
+  plate); title or TMDB title logo; the **slate** (episode code 40/650 tabular, episode title 18/600 text-2) is the
+  one large element; slot line (channel, day + range, minutes left). A 2 px ribbon on the hero's lower edge shows
+  progress (accent) only while airing. Body: badge row, actions (one primary: Watch live / Play from start / Play
+  recording, focused on open), then prose (tagline, description, About the show, crew, cast strip of 2:3
+  portraits, radius 8, initials fallback) beside a 14 rem facts list (12/600 text-faint label, 14/500 text-2 value,
+  hairline left rule). TMDB attribution line at the foot whenever TMDB contributed. Clicking a guide block opens
+  it; Enter still plays; `I` opens it from the keyboard.
 - **Inputs**: 40 px (md), surface-2, hairline 10% border; focused = accent border + 3 px glow.
 - **Segmented**: track surface-2 (or surface-0 inside cards), 3 px padding, active `--dl-border` bg.
 - **Nav rows** (rail, groups, settings): 36–40 px, radius 6, active = surface-3 + 600 + accent icon (rail).
@@ -137,18 +153,32 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 - **Errors (player)**: centred 56 px tinted icon circle, 24/650 title, one sentence, primary + "Copy diagnostics".
 
 ## 8. Screens (see reference/screens.html)
-- **Rail** 224 expanded / 68 collapsed / 96 10-foot. Collapsed on Guide, Player, Multiview. Order:
-  Search ⌘K, Home, Channels, Guide, Movies, Series, Recordings · Settings · source status dot.
+- **Rail** 224 expanded / 68 collapsed / 96 10-foot. Same size on every route for a given density; it collapses only when the user toggles it. Order:
+  Search ⌘K, Home, Guide, Channels, Movies, Series, Recordings · Settings · source status dot.
   Hide Movies/Series/Recordings when no source has the cap.
 - **Channels**: group sidebar 220 + virtualised rows (logo 72×36 · number · name + badges · now + 2 px
   progress · next · catch-up days + fav). Playing row: accent wash, accent-text name, speaker icon.
 - **Guide**: preview pane (260 px, 384×216 art / mini player, updates after 300 ms dwell) · 40 px sticky time header · 180 px sticky
   channel column · 64 px rows · red now line + time pill. Blocks: past+archive `--dl-guide-past` + history
   icon · past no archive dashed, disabled text · now `--dl-guide-now` + 10% fill + 2 px bar · future
-  `--dl-guide-future` · scheduled red dot · focused ring.
+  `--dl-guide-future` · scheduled red dot · focused = `--dl-row-focus` tint, no ring.
 - **Player**: full-bleed video, bottom `--dl-scrim` with badge row, 30/650 title, timeline, 44 px controls.
-  Live timeline = programme start→end. Catch-up = position (accent), buffered (white 32%), thumb + time
-  tooltip, Go live (live variant, `End`). Info panel 380 px right, mono values, then
+  One control bar for live, catch-up, VOD and recordings, a `minmax(0,1fr) auto minmax(0,1fr)` grid of three groups: left = back,
+  mute + volume (slider hidden below 900 px), subtitles/CC; centre = transport, with play/pause dead centre whatever else is shown (start over, −10 s on
+  its left; +10 s, go live on its right); right = audio, stream, open in Plex, info,
+  multiview, mini player, full screen. A control that does nothing for the current content is not rendered
+  (never shown disabled): skip needs a seekable stream, start over needs a channel or a VOD/recording past
+  its start, go live needs catch-up or live behind the edge, stream and multiview are live only, audio and
+  subtitles/CC need tracks. The seek slot holds the channel timeline (live/catch-up) or a position bar (VOD/recording).
+  Live and catch-up share one channel timeline: a 1 h window of wall-clock time sliding under a thumb
+  fixed at the centre, so there is always room to rewind. Gaps (0.25rem) only at EPG programme
+  boundaries; no guide data = no gaps. Layers: unplayable (before the buffer/archive, after the live edge)
+  white 6% · rewindable white 18% · watched (oldest → thumb) accent · ahead to the live edge white 32% ·
+  2 px `--dl-live` tick at the live edge. Hovered segment grows ×1.75; tooltip = clock + programme title.
+  Drag pans and seeks on release; click seeks. Left label playhead clock, right label `−m:ss` behind
+  live. ←/→ ±10 s, Shift ±60 s, repeats gathered into one seek. Go live (live variant, `End`) whenever
+  behind live. VOD/recordings keep the position bar: position (accent), buffered (white 32%), thumb + time
+  tooltip. Info panel 380 px right, mono values, then
   a BUFFER · n s graph (last 30 samples at 1 Hz, 36 px bars, `--dl-accent-bar`). Channel logo (tv size) left of the badge row and title; no separate zap pill.
   Number entry pill top-right with accent caret.
 
@@ -162,20 +192,27 @@ In 1.0 (PLAN §1.5, §4.11, D17).
   The canvas covers the whole view except the rects of tiles showing video (one SVG path with holes), so
   gaps, centred short rows and loading tiles never show the desktop through the transparent window.
 - One tile audible: AUDIO badge (accent tint) top-right; others show a muted icon. "Audio follows focus" on.
-- Focused tile: **inset** 3 px accent ring (an outer ring would be clipped) + accent wash.
-- Tile label pill top-left (`--dl-glass`, logo 48×24, number, name). Programme + progress on scrim at bottom.
+- Active tile: **no ring, border or wash** in any state (rest, hover, keyboard focus, idle, TV). The tile
+  marks itself with `data-active`, which the global focus ring does not match; only the audio badge shows it.
+- Tile label pill top-left (`--dl-glass`, bare logo 48×24 with no plate, number, name). Programme + progress on scrim at bottom.
 - Hover / keyboard-focus actions centred: listen, make main, full screen, replace, remove (remove in live-text).
   Buttons sit on `--dl-tile-btn` (hover `--dl-tile-btn-hover`, pressed `--dl-tile-btn-pressed`) with a hairline.
-- Idle chrome: after `controlsIdleMs` without input the focus ring, audio indicator, tile actions and toolbar
+- Idle chrome: after `controlsIdleMs` without input the audio indicator, tile actions and toolbar
   fade out and the cursor hides; any mouse/key input brings them back. The toolbar stays while the pointer
   is on it or a picker is open.
-- Stream budget: toolbar (hidden with the rest of the idle chrome) "3 of 3 streams" with pips, picker footer "Uses 1 stream · 3 of 4 in use".
+- Stream budget: picker footer only, "Uses 1 stream · 3 of 4 in use". The toolbar shows no count.
 - Stream-limit tile: amber gauge icon, "Your server is at its stream limit", one sentence, Replace channel / Remove tile.
-- Picker: popover anchored to the toolbar "Add channel" button (or the single empty slot when nothing
-  plays); the new channel takes the first free slot. Search + Favourites / Recent / All; on-screen
-  channels disabled with "Already in slot N". Each row shows the programme on now under the name (12 px, dim).
+- Add picker: popover anchored to the toolbar "Add channel" button (or the single empty slot when nothing
+  plays). Each row has a checkbox on the right, checked for channels on screen; checking adds the channel
+  to the first free slot, unchecking removes its tile (the main player's channel is checked and locked).
+  The popover stays open across picks and closes on an outside click, Esc, or the Add channel button.
+  Unchecked rows disable when the budget is used up. Search + Favourites / Recent / All; bare logos (no
+  plate). Each row shows the programme on now under the name (12 px, dim).
+- Replace picker (tile action / stream-limit tile): same list, single pick, closes on pick; on-screen
+  channels disabled with "Already in slot N".
+- Tiles never show subtitles or captions (the tile profile sets `sid=no`); make main to use them.
 - Floating toolbar bottom centre: Add channel (N), layout segmented (icons; only when the count has more than
-  one layout), audio-follows-focus switch, budget, Exit (Esc).
+  one layout), audio-follows-focus switch, Exit (Esc).
 - Keys: 1–9 focus · A audio · Enter make main · F full screen · Del remove · N add channel · L cycle layout · Esc exit.
 - Entry: grid icon in the player control bar; "Add to multiview" in the channel context menu.
 

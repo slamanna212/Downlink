@@ -10,6 +10,7 @@ import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { dayLabel, formatRange } from '../../lib/time';
 import { t } from '../../lib/i18n';
+import { episodeLine } from '../../lib/episode';
 import { useVideoBounds } from '../../lib/useVideoBounds';
 import { usePlayerStore } from '../../store/player';
 import { useUiStore } from '../../store/ui';
@@ -31,6 +32,8 @@ export interface PreviewProps {
   onPrimary: () => void;
   onFromStart: () => void;
   onDetails: () => void;
+  /** Opens the details modal for the programme. */
+  onInfo: () => void;
   onFavourite: () => void;
 }
 
@@ -69,7 +72,18 @@ function MiniPlayer() {
  * Preview pane. It follows focus after a 300 ms dwell. Everything shown is already in memory:
  * dwelling never calls a play command or touches a stream endpoint (CLAUDE rule 4).
  */
-export const GuidePreview = memo(function GuidePreview({ programme, channel, state, canRecord, offline, canCatchup, recordOpen, onRecordOpen, onRecord, onPrimary, onFromStart, onDetails, onFavourite }: PreviewProps) {
+/** Record items for the focused guide programme (preview menu and guide right-click menu). */
+export function GuideRecordItems({ offline, onRecord }: { offline: boolean; onRecord: (kind: 'once' | 'series') => void }) {
+  return (
+    <>
+      {offline && <Menu.Label>{t('offline.recording')}</Menu.Label>}
+      <Menu.Item disabled={offline} onClick={() => onRecord('once')}>{t('guide.recordOnce')}</Menu.Item>
+      <Menu.Item disabled={offline} onClick={() => onRecord('series')}>{t('guide.recordSeries')}</Menu.Item>
+    </>
+  );
+}
+
+export const GuidePreview = memo(function GuidePreview({ programme, channel, state, canRecord, offline, canCatchup, recordOpen, onRecordOpen, onRecord, onPrimary, onFromStart, onDetails, onInfo, onFavourite }: PreviewProps) {
   const [shown, setShown] = useState<{ p: Programme | null; ch: Channel | undefined; state: BlockState | null }>({ p: programme, ch: channel, state });
   useEffect(() => {
     const id = setTimeout(() => setShown({ p: programme, ch: channel, state }), dl.previewDwellMs);
@@ -79,7 +93,8 @@ export const GuidePreview = memo(function GuidePreview({ programme, channel, sta
   const playing = usePlayerStore((s) => ACTIVE_PHASES.has(s.player.state));
   const { p, ch, state: st } = shown;
   const action = st ? enterAction(st) : 'none';
-  const primaryLabel = action === 'play-live' ? t('guide.watchLive') : action === 'play-catchup' ? t('guide.playFromStart') : action === 'details' ? t('guide.details') : null;
+  const primaryLabel = action === 'play-live' ? t('guide.watchLive') : action === 'play-catchup' ? t('guide.playFromStart') : action === 'details' ? t('guide.moreInfo') : null;
+  const epLine = p ? episodeLine(p) : null;
   return (
     <div className={classes.preview} data-mini={playing || undefined}>
       <div className={classes.info}>
@@ -91,16 +106,31 @@ export const GuidePreview = memo(function GuidePreview({ programme, channel, sta
               <span>{t('guide.metaLine', { number: ch.number ?? '', channel: ch.name, day: dayLabel(p.startUtc), range: formatRange(p.startUtc, p.endUtc) })}</span>
             </div>
             <h2 className={classes.title}>{p.title}</h2>
+            {(epLine || p.isNew || p.isPremiere || p.isFinale || p.isLive) && (
+              <div className={classes.epRow}>
+                {epLine && <span className={classes.epLine}>{epLine}</span>}
+                {p.isLive && st !== 'now' && <StatusBadge kind="live" />}
+                {p.isPremiere && <StatusBadge kind="premiere" />}
+                {p.isFinale && <StatusBadge kind="finale" />}
+                {p.isNew && <StatusBadge kind="new" />}
+              </div>
+            )}
             <p className={classes.desc}>{p.description}</p>
             <div className={classes.actions}>
               {primaryLabel && (
-                <DLButton variant="filled" size="md" onClick={action === 'details' ? onDetails : onPrimary}>
+                <DLButton variant="filled" size="md" onClick={action === 'details' ? onInfo : onPrimary}>
                   {primaryLabel}
                 </DLButton>
               )}
-              <DLButton variant="default" size="md" onClick={onDetails}>
-                {t('guide.channelDetails')}
-              </DLButton>
+              {action === 'details' ? (
+                <DLButton variant="default" size="md" onClick={onDetails}>
+                  {t('guide.channelDetails')}
+                </DLButton>
+              ) : (
+                <DLButton variant="default" size="md" onClick={onInfo}>
+                  {t('guide.moreInfo')}
+                </DLButton>
+              )}
               <DLIconButton label={t(ch.isFavourite ? 'channels.favourite.remove' : 'channels.favourite.add')} icon={IconStar} size="md" variant="default" pressed={ch.isFavourite} filledGlyph={ch.isFavourite} onClick={onFavourite} />
               {((canRecord && st !== 'past-archive' && st !== 'past-none') || (st === 'now' && canCatchup)) && (
                 <Menu opened={recordOpen} onChange={onRecordOpen} position="bottom-start">
@@ -111,9 +141,7 @@ export const GuidePreview = memo(function GuidePreview({ programme, channel, sta
                   </Menu.Target>
                   <Menu.Dropdown>
                     {st === 'now' && canCatchup && <Menu.Item onClick={onFromStart}>{t('guide.fromStart')}</Menu.Item>}
-                    {canRecord && offline && <Menu.Label>{t('offline.recording')}</Menu.Label>}
-                    {canRecord && <Menu.Item disabled={offline} onClick={() => onRecord('once')}>{t('guide.recordOnce')}</Menu.Item>}
-                    {canRecord && <Menu.Item disabled={offline} onClick={() => onRecord('series')}>{t('guide.recordSeries')}</Menu.Item>}
+                    {canRecord && <GuideRecordItems offline={!!offline} onRecord={onRecord} />}
                   </Menu.Dropdown>
                 </Menu>
               )}

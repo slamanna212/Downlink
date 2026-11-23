@@ -4,7 +4,7 @@
 //! redirect probe inside `Service::play_channel`), auth headers go to mpv per file only, and every
 //! catch-up session is stopped on zap, navigate-away, sleep and quit (CLAUDE.md rules 4-6).
 
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use downlink_core::catchup::{CatchupPlay, PositionReporter};
@@ -19,7 +19,7 @@ use downlink_player::{
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 
-use crate::dto::{SessionInfo, player_state};
+use crate::dto::{SeekRoute, SessionInfo, player_state, seek_route, timeline};
 
 #[derive(Debug, Clone)]
 pub enum LastPlay {
@@ -46,7 +46,7 @@ struct Active {
     hls_reminted: bool,
     /// VOD / recording being played, for position reports.
     media: Option<Media>,
-    /// Loopback playlist proxy for the current recording (aborted when dropped).
+    /// Loopback proxy for the current authenticated playback.
     hls: Option<crate::hls_proxy::HlsProxy>,
     /// 1-based provider stream in use and how many the channel has (0 = unknown).
     source_index: u32,
@@ -60,7 +60,10 @@ enum Media {
 }
 
 pub struct Playback {
+    /// Self-reference for background tasks that start new playbacks (catch-up roll-over).
+    me: Weak<Playback>,
     service: Arc<Service>,
+    app: AppHandle,
     player: Arc<Player>,
     active: Arc<Mutex<Active>>,
     /// Multiview tiles (PLAN §4.11); set once at boot.
@@ -72,6 +75,25 @@ fn lock(a: &Mutex<Active>) -> MutexGuard<'_, Active> {
         Ok(g) => g,
         Err(p) => p.into_inner(),
     }
+}
+
+async fn prepare_playback_proxy(
+    active: &Mutex<Active>,
+    app: &AppHandle,
+    plan: &mut PlayPlan,
+    recording: bool,
+    generation: u64,
+) -> Result<bool, AppError> {
+    if lock(active).generation != generation {
+        return Ok(false);
+    }
+    let prepared = crate::hls_proxy::prepare(plan, recording, Some(app.clone())).await;
+    let mut state = lock(active);
+    if state.generation != generation {
+        return Ok(false);
+    }
+    state.hls = prepared?;
+    Ok(true)
 }
 
 pub(crate) fn plan_request(plan: &PlayPlan, mode: PlayMode, failover: bool) -> PlayRequest {
@@ -87,10 +109,25 @@ pub(crate) fn plan_request(plan: &PlayPlan, mode: PlayMode, failover: bool) -> P
             PlayProfile::Seekable => Profile::Seekable,
         },
         start_secs: None,
+        start_paused: false,
         failover_capable: failover,
         mode,
         source_index: 0,
     }
+}
+
+/// Live plays use the timeshift profile when the buffer is on (single view only; multiview tiles
+/// build their own requests).
+fn live_request(player: &Player, plan: &PlayPlan, failover: bool) -> PlayRequest {
+    let mut req = plan_request(plan, PlayMode::Live, failover);
+    if req.profile == Profile::Live && player.preferences().timeshift_secs_effective().is_some() {
+        req.profile = Profile::Timeshift;
+    }
+    req
+}
+
+fn now_utc() -> f64 {
+    now_ms() as f64 / 1000.0
 }
 
 async fn report_media(svc: &Service, m: Media, pos: f64, duration: Option<f64>) {
@@ -158,6 +195,10 @@ impl SinkContext {
         let Some(player) = self.extras.player.get().cloned() else {
             return;
         };
+        // The user may zap or stop while the server round trips below are in flight; their play
+        // owns the player then, and a stale failover must not replace it.
+        let generation = lock(&self.active).generation;
+        let superseded = || lock(&self.active).generation != generation;
         // Live HLS: a dead session (410) is fixed by minting a new one, once per play.
         let remint = {
             let mut a = lock(&self.active);
@@ -172,9 +213,10 @@ impl SinkContext {
         if let Some(channel) = remint {
             player.begin_resolving();
             match self.service.remint_hls(channel).await {
+                _ if superseded() => {}
                 Ok(plan) => {
                     tracing::info!("live HLS session re-minted after a failure");
-                    if let Err(e) = player.play(plan_request(&plan, PlayMode::Live, true)) {
+                    if let Err(e) = player.play(live_request(&player, &plan, true)) {
                         self.publish_failure(
                             &player,
                             AppError::new(ErrorCode::Media, e.to_string()),
@@ -208,7 +250,24 @@ impl SinkContext {
         }
         player.begin_resolving();
         match self.service.failover_next(channel, attempt).await {
-            Ok(step) => {
+            _ if superseded() => {}
+            Ok(mut step) => {
+                match prepare_playback_proxy(
+                    &self.active,
+                    &self.app,
+                    &mut step.plan,
+                    false,
+                    generation,
+                )
+                .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => return,
+                    Err(error) => {
+                        self.publish_failure(&player, error);
+                        return;
+                    }
+                }
                 {
                     let mut a = lock(&self.active);
                     a.source_index = u32::try_from(step.source_index).unwrap_or(0);
@@ -224,7 +283,7 @@ impl SinkContext {
                         ""
                     }
                 );
-                if let Err(e) = player.play(plan_request(&step.plan, PlayMode::Live, true)) {
+                if let Err(e) = player.play(live_request(&player, &step.plan, true)) {
                     self.publish_failure(&player, AppError::new(ErrorCode::Media, e.to_string()));
                 }
             }
@@ -320,6 +379,9 @@ impl SinkContext {
                         "transfer": s.transfer,
                         "toneMapped": s.tone_mapped,
                         "primaries": s.primaries,
+                        "rtxUpscale": s.rtx_upscale,
+                        "rtxHdrRequested": s.rtx_hdr_requested,
+                        "rtxHdrActive": s.rtx_hdr_active,
                         "bitDepth": s.bit_depth,
                         "audioChannels": s.audio_channels,
                         "audioSampleRate": s.audio_sample_rate,
@@ -345,8 +407,10 @@ impl SinkContext {
 
 impl Playback {
     pub fn new(service: Arc<Service>, player: Arc<Player>, ctx: &SinkContext) -> Arc<Self> {
-        Arc::new(Self {
+        Arc::new_cyclic(|me| Self {
+            me: me.clone(),
             service,
+            app: ctx.app.clone(),
             player,
             active: ctx.active.clone(),
             multiview: OnceLock::new(),
@@ -417,7 +481,7 @@ impl Playback {
         mode: PlayMode,
         programme: Option<ProgrammeDto>,
         last: LastPlay,
-    ) {
+    ) -> u64 {
         self.stop_previous_catchup();
         if mode != PlayMode::Live {
             self.stop_live_hls_bg();
@@ -436,14 +500,20 @@ impl Playback {
             mode: Some(mode),
             programme,
             title: None,
+            media_id: None,
             resume_at: None,
             failure: None,
             failover_active: false,
             transitioned_at: now_ms(),
+            archive_days: 0,
+            timeshift: false,
+            catchup_start_utc: None,
         };
         a.last = Some(last);
+        let generation = a.generation;
         drop(a);
         self.player.begin_resolving();
+        generation
     }
 
     fn fail(&self, e: &AppError) {
@@ -451,35 +521,62 @@ impl Playback {
         self.player.mark_failed(e.message.clone());
     }
 
+    async fn prepare_current_proxy(
+        &self,
+        plan: &mut PlayPlan,
+        recording: bool,
+        generation: u64,
+    ) -> Result<bool, AppError> {
+        prepare_playback_proxy(&self.active, &self.app, plan, recording, generation)
+            .await
+            .inspect_err(|error| self.fail(error))
+    }
+
     pub async fn play_channel(&self, channel_id: i64) -> Result<(), AppError> {
-        self.begin(
+        let generation = self.begin(
             Some(channel_id),
             PlayMode::Live,
             None,
             LastPlay::Channel(channel_id),
         );
-        let plan = match self.service.play_channel(channel_id).await {
+        let mut plan = match self.service.play_channel(channel_id).await {
             Ok(p) => p,
             Err(e) => {
                 self.fail(&e);
                 return Err(e);
             }
         };
-        lock(&self.active).live_hls = plan.surface == downlink_core::source::Surface::Hls;
-        let source_id = self
+        let live_hls =
+            plan.surface == downlink_core::source::Surface::Hls && plan.headers.is_empty();
+        let row = self
             .service
             .store()
             .channel(channel_id)
             .await
             .ok()
-            .flatten()
-            .map(|c| c.source_id);
-        let failover = match source_id {
+            .flatten();
+        let failover = match row.as_ref().map(|c| c.source_id) {
             Some(s) => self.failover_capable(s).await,
             None => false,
         };
+        if !self
+            .prepare_current_proxy(&mut plan, false, generation)
+            .await?
+        {
+            return Ok(());
+        }
+        let req = live_request(&self.player, &plan, failover);
+        {
+            let mut a = lock(&self.active);
+            if a.generation != generation {
+                return Ok(());
+            }
+            a.live_hls = live_hls;
+            a.info.timeshift = req.profile == Profile::Timeshift;
+            a.info.archive_days = row.as_ref().map_or(0, |c| c.catchup_days.max(0));
+        }
         self.player
-            .play(self.to_request(&plan, PlayMode::Live, failover))
+            .play(req)
             .map_err(player_err)
             .inspect_err(|e| self.fail(e))?;
         // Zap path: nothing above awaits the programme lookup; fill it in after loadfile went out.
@@ -491,7 +588,7 @@ impl Playback {
             .and_then(|v| v.into_iter().next())
             .and_then(|nn| nn.now);
         lock(&self.active).info.programme = programme;
-        if let Ok((i, c)) = self.service.source_position(channel_id).await {
+        if let Ok((i, c)) = self.service.live_source_position(channel_id).await {
             let mut a = lock(&self.active);
             a.source_index = u32::try_from(i).unwrap_or(0);
             a.source_count = u32::try_from(c).unwrap_or(0);
@@ -504,22 +601,34 @@ impl Playback {
         play: CatchupPlay,
         programme: Option<ProgrammeDto>,
         last: LastPlay,
-        resume: bool,
+        start_secs: Option<f64>,
     ) -> Result<(), AppError> {
-        let start_secs = if resume {
-            self.catchup_resume_secs(&play).await
-        } else {
-            None
-        };
-        self.begin(Some(play.channel_id), PlayMode::Catchup, programme, last);
-        let failover = self.failover_capable(play.source_id).await;
-        let mut req = self.to_request(&play.plan, PlayMode::Catchup, failover);
-        req.start_secs = start_secs;
-        let generation = {
+        let archive_days = self
+            .service
+            .store()
+            .channel(play.channel_id)
+            .await
+            .ok()
+            .flatten()
+            .map_or(0, |c| c.catchup_days.max(0));
+        let generation = self.begin(Some(play.channel_id), PlayMode::Catchup, programme, last);
+        {
             let mut a = lock(&self.active);
-            a.catchup = Some(play.clone());
-            a.generation
-        };
+            a.info.archive_days = archive_days;
+            a.info.catchup_start_utc = Some(play.start_utc);
+        }
+        let failover = self.failover_capable(play.source_id).await;
+        let mut plan = play.plan.clone();
+        let ready = self
+            .prepare_current_proxy(&mut plan, false, generation)
+            .await;
+        if !matches!(ready, Ok(true)) {
+            let _ = self.service.stop_catchup(&play).await;
+            return ready.map(|_| ());
+        }
+        let mut req = self.to_request(&plan, PlayMode::Catchup, failover);
+        req.start_secs = start_secs;
+        lock(&self.active).catchup = Some(play.clone());
         if let Err(e) = self.player.play(req) {
             let e = player_err(e);
             self.fail(&e);
@@ -531,13 +640,94 @@ impl Playback {
         Ok(())
     }
 
+    /// Archive playback of the programme airing at `utc`, starting at that moment. Times come from
+    /// the programme row (rule 12); no guide entry means no archive request.
+    async fn play_archive_at(&self, channel_id: i64, utc: i64) -> Result<(), AppError> {
+        let progs = self
+            .service
+            .get_programmes(channel_id, utc, utc + 1)
+            .await?;
+        let p = progs
+            .into_iter()
+            .find(|p| p.start_utc <= utc && utc < p.end_utc)
+            .ok_or_else(|| AppError::stream("There is no guide entry for that time."))?;
+        let play = self.service.play_catchup(&p.id).await?;
+        let offset = (utc - play.start_utc).max(0) as f64;
+        let id = p.id.clone();
+        self.start_catchup(play, Some(p), LastPlay::Catchup(id), Some(offset))
+            .await
+    }
+
+    /// Move to a wall-clock moment on the channel timeline: inside the live buffer, inside the
+    /// current archive file, into another archive programme, or back to live.
+    pub async fn seek_to(&self, utc: f64) -> Result<(), AppError> {
+        if !utc.is_finite() {
+            return Err(AppError::local("That time is not valid."));
+        }
+        let snap = self.player.snapshot();
+        let (info, catchup_end) = {
+            let a = lock(&self.active);
+            (a.info.clone(), a.catchup.as_ref().map(|c| c.end_utc))
+        };
+        let Some(tl) = timeline(&snap, &info, now_utc()) else {
+            return Err(AppError::local("Nothing seekable is playing."));
+        };
+        match seek_route(&snap, &info, &tl, catchup_end, utc) {
+            SeekRoute::Media(secs) => self.command(PlayerCommand::SeekAbsolute {
+                secs: secs.max(0.0),
+            }),
+            SeekRoute::Live => self.go_live().await,
+            SeekRoute::Archive(at) => {
+                let ch = info
+                    .channel_id
+                    .ok_or_else(|| AppError::local("Nothing is playing."))?;
+                self.play_archive_at(ch, at).await
+            }
+        }
+    }
+
+    /// Relative seek on the channel timeline (live buffer and archive alike).
+    pub async fn seek_by(&self, secs: f64) -> Result<(), AppError> {
+        let snap = self.player.snapshot();
+        let info = lock(&self.active).info.clone();
+        match timeline(&snap, &info, now_utc()) {
+            Some(tl) => self.seek_to(tl.playhead_utc + secs).await,
+            None => self.command(PlayerCommand::SeekRelative { secs }),
+        }
+    }
+
+    /// The archive file ended: keep going with the next programme, or return to live once the
+    /// archive has caught up with now.
+    async fn roll_over(&self, play: &CatchupPlay) {
+        let now = now_utc() as i64;
+        let next = if play.end_utc >= now - 5 {
+            None
+        } else {
+            self.service
+                .get_programmes(play.channel_id, play.end_utc, play.end_utc + 1)
+                .await
+                .ok()
+                .and_then(|v| v.into_iter().find(|p| p.start_utc >= play.end_utc))
+                .filter(|p| p.start_utc < now)
+        };
+        let r = match next {
+            Some(p) => self.play_archive_at(play.channel_id, p.start_utc).await,
+            None => self.go_live().await,
+        };
+        if let Err(e) = r {
+            tracing::warn!("archive roll-over failed: {}", e.message);
+        }
+    }
+
     /// Reports position to the server (throttled by `PositionReporter`; forced on pause/seek).
     fn spawn_reporter(&self, play: CatchupPlay, generation: u64) {
         let svc = self.service.clone();
         let player = self.player.clone();
         let active = self.active.clone();
+        let me = self.me.clone();
         tauri::async_runtime::spawn(async move {
             let mut reporter = PositionReporter::new(play.session.clone());
+            let mut started = false;
             let mut last_phase: Option<SessionState> = None;
             let mut last_pos: Option<f64> = None;
             let start = std::time::Instant::now();
@@ -547,11 +737,29 @@ impl Playback {
                     break;
                 }
                 let snap = player.snapshot();
+                // End of the archive file (a user stop or zap bumps the generation first).
+                if started && snap.state == Some(SessionState::Stopped) {
+                    if let Some(pb) = me.upgrade() {
+                        pb.roll_over(&play).await;
+                    }
+                    break;
+                }
                 let (Some(state), Some(pos)) = (snap.state, snap.position_secs) else {
                     continue;
                 };
                 if !matches!(state, SessionState::Playing | SessionState::Paused) {
                     continue;
+                }
+                started = true;
+                // Playing an airing programme from the archive and caught up with now: go live.
+                if state == SessionState::Playing && play.start_utc as f64 + pos >= now_utc() - 3.0
+                {
+                    if let Some(pb) = me.upgrade()
+                        && let Err(e) = pb.go_live().await
+                    {
+                        tracing::warn!("could not return to live: {}", e.message);
+                    }
+                    break;
                 }
                 let jumped = last_pos.is_some_and(|p| (pos - p).abs() > 5.0);
                 let force = last_phase.is_some_and(|p| p != state) || jumped;
@@ -585,11 +793,16 @@ impl Playback {
     pub async fn play_catchup(&self, programme_id: &str, resume: bool) -> Result<(), AppError> {
         let play = self.service.play_catchup(programme_id).await?;
         let programme = self.programme_dto(play.channel_id, play.start_utc).await;
+        let start_secs = if resume {
+            self.catchup_resume_secs(&play).await
+        } else {
+            None
+        };
         self.start_catchup(
             play,
             programme,
             LastPlay::Catchup(programme_id.to_owned()),
-            resume,
+            start_secs,
         )
         .await
     }
@@ -597,7 +810,7 @@ impl Playback {
     pub async fn restart_programme(&self, channel_id: i64) -> Result<(), AppError> {
         let play = self.service.restart_programme(channel_id).await?;
         let programme = self.programme_dto(play.channel_id, play.start_utc).await;
-        self.start_catchup(play, programme, LastPlay::Restart(channel_id), false)
+        self.start_catchup(play, programme, LastPlay::Restart(channel_id), None)
             .await
     }
 
@@ -606,7 +819,7 @@ impl Playback {
     }
 
     pub async fn play_vod(&self, kind: &str, id: i64, resume: bool) -> Result<(), AppError> {
-        self.begin(
+        let generation = self.begin(
             None,
             PlayMode::Vod,
             None,
@@ -631,11 +844,18 @@ impl Playback {
             }
         };
         let start = vp.resume_secs.map(|s| s as f64);
-        self.start_media(&vp.plan, PlayMode::Vod, vp.title, start, Media::Vod(vp.id))
+        let mut plan = vp.plan;
+        if !self
+            .prepare_current_proxy(&mut plan, false, generation)
+            .await?
+        {
+            return Ok(());
+        }
+        self.start_media(&plan, PlayMode::Vod, vp.title, start, Media::Vod(vp.id))
     }
 
     pub async fn play_recording(&self, id: i64) -> Result<(), AppError> {
-        self.begin(None, PlayMode::Recording, None, LastPlay::Recording(id));
+        let generation = self.begin(None, PlayMode::Recording, None, LastPlay::Recording(id));
         let rp = match self.service.play_recording(id).await {
             Ok(v) => v,
             Err(e) => {
@@ -644,12 +864,12 @@ impl Playback {
             }
         };
         let start = rp.resume_secs.map(|s| s as f64);
-        let mut plan = rp.plan.clone();
-        if plan.surface == downlink_core::source::Surface::Hls
-            && let Some((local, proxy)) = crate::hls_proxy::prepare(&plan).await
+        let mut plan = rp.plan;
+        if !self
+            .prepare_current_proxy(&mut plan, true, generation)
+            .await?
         {
-            plan.url = local;
-            lock(&self.active).hls = Some(proxy);
+            return Ok(());
         }
         self.start_media(
             &plan,
@@ -671,12 +891,18 @@ impl Playback {
         let generation = {
             let mut a = lock(&self.active);
             a.info.title = Some(title);
+            a.info.media_id = Some(match media {
+                Media::Vod(id) | Media::Recording(id) => id,
+            });
             a.info.resume_at = start_secs;
             a.media = Some(media);
             a.generation
         };
         let mut req = self.to_request(plan, mode, false);
         req.start_secs = start_secs;
+        // The UI asks "keep watching or start over" for a recording with a saved position; hold playback
+        // until it answers (it sends `Resume`). Keep the threshold equal to `resumeUseful` in the UI.
+        req.start_paused = mode == PlayMode::Recording && start_secs.is_some_and(|s| s > 2.0);
         self.player
             .play(req)
             .map_err(player_err)
@@ -774,24 +1000,37 @@ impl Playback {
 
     /// Navigate away / stop button: stop playback and any open session.
     pub async fn stop(&self) -> Result<(), AppError> {
+        // A stop that is slow (network round trips below) must never tear down a playback the
+        // user started after asking for it: bail out as soon as a newer play owns the player.
+        let start_generation = lock(&self.active).generation;
         // Save the final position of VOD / recordings before the player forgets it.
         let (media, snap) = (lock(&self.active).media, self.player.snapshot());
         if let (Some(m), Some(pos)) = (media, snap.position_secs) {
             self.report_media(m, pos, snap.duration_secs).await;
         }
-        {
+        let generation = {
             let mut a = lock(&self.active);
+            if a.generation != start_generation {
+                return Ok(());
+            }
             a.generation += 1;
             a.media = None;
             a.hls = None;
-        }
+            a.generation
+        };
         let r = self.player.stop().map_err(player_err);
-        self.service.stop_live_hls().await;
-        let prev = lock(&self.active).catchup.take();
-        if let Some(play) = prev
-            && let Err(e) = self.service.stop_catchup(&play).await
-        {
-            tracing::warn!("could not stop the catch-up session: {}", e.message);
+        let still_ours = || lock(&self.active).generation == generation;
+        // A play that started meanwhile released the previous sessions itself (`begin`, HLS mint).
+        if still_ours() {
+            self.service.stop_live_hls().await;
+        }
+        if still_ours() {
+            let prev = lock(&self.active).catchup.take();
+            if let Some(play) = prev
+                && let Err(e) = self.service.stop_catchup(&play).await
+            {
+                tracing::warn!("could not stop the catch-up session: {}", e.message);
+            }
         }
         r
     }

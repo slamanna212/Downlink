@@ -5,7 +5,7 @@
 pub mod ingest;
 pub mod matching;
 
-use std::io::BufReader;
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::Path;
 
 use chrono::{NaiveDate, TimeZone};
@@ -14,6 +14,16 @@ use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 
 use crate::source::flags;
+use crate::util::{BoundedReader, import_limit};
+
+const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_EVENT_BYTES: usize = 1024 * 1024;
+const MAX_FIELD_BYTES: usize = 64 * 1024;
+const MAX_CHANNELS: usize = 200_000;
+const MAX_NESTING: usize = 64;
+const MAX_XML_NAME_BYTES: usize = 1024;
+const MAX_CHANNEL_METADATA: usize = 32 * 1024 * 1024;
+const MAX_PROGRAMMES: u64 = 2_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct XmltvChannel {
@@ -108,18 +118,76 @@ fn attr(e: &BytesStart<'_>, name: &str) -> Option<String> {
         })
 }
 
-type XmlSource = quick_xml::encoding::DecodingReader<BufReader<Box<dyn std::io::Read + Send>>>;
+type Decoder = quick_xml::encoding::DecodingReader<BufReader<BoundedReader<Box<dyn Read + Send>>>>;
 
-fn open(path: &Path) -> std::io::Result<Reader<XmlSource>> {
-    let r = crate::util::open_decompressed(path)?;
-    // Auto-detects BOM / declared encoding (ISO-8859-1 guides are common) and transcodes to UTF-8.
-    let mut reader = Reader::from_reader(quick_xml::encoding::DecodingReader::new(
-        BufReader::with_capacity(64 * 1024, r),
-    ));
+struct XmlInput {
+    decoder: Decoder,
+    event_left: usize,
+    depth: usize,
+}
+
+impl Read for XmlInput {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.fill_buf()?.read(buf)?;
+        self.consume(n);
+        Ok(n)
+    }
+}
+
+impl BufRead for XmlInput {
+    fn fill_buf(&mut self) -> io::Result<&[u8]> {
+        let bytes = self.decoder.fill_buf()?;
+        if self.event_left == 0 && !bytes.is_empty() {
+            return Err(import_limit());
+        }
+        Ok(&bytes[..bytes.len().min(self.event_left)])
+    }
+
+    fn consume(&mut self, n: usize) {
+        self.decoder.consume(n);
+        self.event_left -= n;
+    }
+}
+
+fn read_event<'a>(
+    reader: &mut Reader<XmlInput>,
+    buf: &'a mut Vec<u8>,
+) -> quick_xml::Result<Event<'a>> {
+    let start = reader.buffer_position();
+    reader.get_mut().event_left = MAX_EVENT_BYTES;
+    let event = reader.read_event_into(buf)?;
+    let end = reader.buffer_position();
+    let input = reader.get_mut();
+    match &event {
+        Event::Start(tag) => {
+            if input.depth == MAX_NESTING || tag.name().as_ref().len() > MAX_XML_NAME_BYTES {
+                return Err(import_limit().into());
+            }
+            input.depth += 1;
+        }
+        Event::End(_) => input.depth = input.depth.saturating_sub(1),
+        // DecodingReader's encoding can only change while its initial prefix is available.
+        Event::Decl(d) if start == 0 && end <= 60 => {
+            if let Some(enc) = d.encoder() {
+                input.decoder.set_encoding(enc);
+            }
+        }
+        _ => {}
+    }
+    Ok(event)
+}
+
+fn open(path: &Path) -> io::Result<Reader<XmlInput>> {
+    let r = BoundedReader::new(crate::util::open_decompressed(path)?, MAX_EXPANDED_BYTES);
+    // Auto-detect BOM and transcode declared encodings, including ISO-8859-1 guides, to UTF-8.
+    let decoder = quick_xml::encoding::DecodingReader::new(BufReader::with_capacity(64 * 1024, r));
+    let mut reader = Reader::from_reader(XmlInput {
+        decoder,
+        event_left: MAX_EVENT_BYTES,
+        depth: 0,
+    });
     let cfg = reader.config_mut();
-    cfg.check_end_names = false;
     cfg.allow_dangling_amp = true;
-    cfg.allow_unmatched_ends = true;
     Ok(reader)
 }
 
@@ -145,14 +213,15 @@ pub fn parse_channels(path: &Path) -> std::io::Result<Vec<XmltvChannel>> {
     let mut out: Vec<XmltvChannel> = Vec::new();
     let mut cur: Option<XmltvChannel> = None;
     let mut in_name = false;
+    let mut metadata_bytes = 0;
     let mut text = String::new();
-    while let Ok(ev) = reader.read_event_into(&mut buf) {
+    loop {
+        let ev = match read_event(&mut reader, &mut buf) {
+            Ok(ev) => ev,
+            Err(quick_xml::Error::Io(e)) => return Err(std::io::Error::new(e.kind(), e)),
+            Err(_) => break,
+        };
         match ev {
-            Event::Decl(d) => {
-                if let Some(enc) = d.encoder() {
-                    reader.get_mut().set_encoding(enc);
-                }
-            }
             Event::Start(e) => match e.local_name().as_ref() {
                 "channel" => {
                     cur = attr(&e, "id")
@@ -161,6 +230,12 @@ pub fn parse_channels(path: &Path) -> std::io::Result<Vec<XmltvChannel>> {
                             id,
                             display_names: vec![],
                         });
+                    if let Some(channel) = &cur {
+                        if channel.id.len() > 1024 {
+                            return Err(import_limit());
+                        }
+                        metadata_bytes += 32 + channel.id.len();
+                    }
                 }
                 "display-name" if cur.is_some() => {
                     in_name = true;
@@ -176,14 +251,23 @@ pub fn parse_channels(path: &Path) -> std::io::Result<Vec<XmltvChannel>> {
                     in_name = false;
                     let n = text.trim();
                     if let (Some(c), false) = (cur.as_mut(), n.is_empty()) {
+                        metadata_bytes += 32 + n.len();
                         c.display_names.push(n.to_owned());
                     }
                 }
-                "channel" => out.extend(cur.take()),
+                "channel" => {
+                    if cur.is_some() && out.len() >= MAX_CHANNELS {
+                        return Err(import_limit());
+                    }
+                    out.extend(cur.take());
+                }
                 _ => {}
             },
             Event::Eof => break,
             _ => {}
+        }
+        if text.len() > MAX_FIELD_BYTES || metadata_bytes > MAX_CHANNEL_METADATA {
+            return Err(import_limit());
         }
         buf.clear();
     }
@@ -206,6 +290,17 @@ pub fn parse_programmes(
     default_tz: Tz,
     mut on_programme: impl FnMut(XmltvProgramme),
 ) -> std::io::Result<XmltvStats> {
+    try_parse_programmes(path, default_tz, |programme| {
+        on_programme(programme);
+        Ok(())
+    })
+}
+
+fn try_parse_programmes(
+    path: &Path,
+    default_tz: Tz,
+    mut on_programme: impl FnMut(XmltvProgramme) -> io::Result<()>,
+) -> io::Result<XmltvStats> {
     let mut reader = open(path)?;
     let mut buf = Vec::new();
     let mut st = XmltvStats::default();
@@ -215,24 +310,25 @@ pub fn parse_programmes(
     let mut text = String::new();
     let mut got_title = false;
     let mut ended = false;
+    let mut programmes = 0;
     loop {
-        let ev = match reader.read_event_into(&mut buf) {
+        let ev = match read_event(&mut reader, &mut buf) {
             Ok(e) => e,
+            Err(quick_xml::Error::Io(e)) => return Err(std::io::Error::new(e.kind(), e)),
             Err(_) => {
                 st.truncated = true;
                 break;
             }
         };
         match ev {
-            Event::Decl(ref d) => {
-                if let Some(enc) = d.encoder() {
-                    reader.get_mut().set_encoding(enc);
-                }
-            }
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let is_empty = matches!(ev, Event::Empty(_));
                 match e.local_name().as_ref() {
                     "programme" => {
+                        programmes += 1;
+                        if programmes > MAX_PROGRAMMES {
+                            return Err(import_limit());
+                        }
                         bad = false;
                         got_title = false;
                         let chan = attr(e, "channel").unwrap_or_default();
@@ -335,20 +431,23 @@ pub fn parse_programmes(
                             st.dropped += 1;
                         } else {
                             st.programmes += 1;
-                            on_programme(p);
+                            on_programme(p)?;
                         }
                     }
                 }
-                "tv" => ended = true,
+                "tv" if reader.get_ref().depth == 0 => ended = true,
                 _ => {}
             },
             Event::Eof => {
-                if cur.is_some() || !ended {
+                if cur.is_some() || !ended || reader.get_ref().depth != 0 {
                     st.truncated = true;
                 }
                 break;
             }
             _ => {}
+        }
+        if text.len() > MAX_FIELD_BYTES {
+            return Err(import_limit());
         }
         buf.clear();
     }
@@ -364,7 +463,7 @@ fn parse_xmltv_ns(s: &str) -> (Option<i64>, Option<i64>) {
     let num = |p: Option<&str>| {
         p.and_then(|x| x.split('/').next())
             .and_then(|x| x.trim().parse::<i64>().ok())
-            .map(|n| n + 1)
+            .and_then(|n| n.checked_add(1))
     };
     (num(it.next()), num(it.next()))
 }

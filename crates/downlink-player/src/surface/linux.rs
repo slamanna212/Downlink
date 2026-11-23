@@ -99,6 +99,50 @@ type CreateSlot = Rc<RefCell<Option<CreateFn>>>;
 struct GtkState {
     overlay: gtk::Overlay,
     video: Video,
+    /// The newest bounds the UI asked for. Re-applied whenever the overlay is re-allocated: the
+    /// webview-relative rect does not change when the window goes fullscreen, but the overlay's offset in
+    /// the toplevel (CSD shadow) and the toplevel's scale do, and those are read at apply time.
+    bounds: std::cell::Cell<Option<SurfaceBounds>>,
+}
+
+/// Place the slot's surface for `b` using the overlay/toplevel geometry as it is right now.
+fn apply_bounds(st: &GtkState, b: SurfaceBounds) {
+    let scale = if b.scale > 0.0 { b.scale } else { 1.0 };
+    let l = |v: f64| (v / scale).round() as i32;
+    let (x, y) = (l(f64::from(b.x)).max(0), l(f64::from(b.y)).max(0));
+    let (w, h) = (l(f64::from(b.w)).max(1), l(f64::from(b.h)).max(1));
+    match &st.video {
+        Video::GlArea { glarea, .. } => {
+            glarea.set_margin_start(x);
+            glarea.set_margin_top(y);
+            glarea.set_size_request(w, h);
+            glarea.queue_render();
+        }
+        Video::Hdr { surface, toplevel } => {
+            // Bounds are relative to the webview, which fills the overlay; the subsurface is
+            // positioned in the window surface's coordinates (CSD shadow included).
+            let (ox, oy) = st
+                .overlay
+                .translate_coordinates(toplevel, 0, 0)
+                .unwrap_or((0, 0));
+            surface.set_geometry(ox + x, oy + y, w, h, toplevel.scale_factor());
+            // The position is applied on the window's next commit.
+            toplevel.queue_draw();
+        }
+    }
+}
+
+/// Re-apply every slot's last bounds (overlay re-allocated, e.g. fullscreen finished).
+fn reapply_all() {
+    STATE.with(|s| {
+        if let Ok(map) = s.try_borrow() {
+            for st in map.values() {
+                if let Some(b) = st.bounds.get() {
+                    apply_bounds(st, b);
+                }
+            }
+        }
+    });
 }
 
 /// How this slot shows video.
@@ -240,6 +284,7 @@ impl VideoSurface for LinuxSurface {
             let overlay = gtk::Overlay::new();
             let base = gtk::Box::new(gtk::Orientation::Vertical, 0);
             overlay.add(&base);
+            overlay.connect_size_allocate(|_, _| reapply_all());
             (overlay, Some(webview))
         } else {
             let overlay = existing.ok_or_else(|| {
@@ -249,6 +294,11 @@ impl VideoSurface for LinuxSurface {
         };
 
         let (wl, x11, wayland) = display_pointers();
+        tracing::info!(
+            wayland,
+            hdr_auto = super::hdr_output_auto(),
+            "video surface: choosing path"
+        );
         if wayland && !wl.is_null() && super::hdr_output_auto() {
             let toplevel = vbox.toplevel();
             if let Some(parent) = toplevel.as_ref().and_then(toplevel_wl_surface) {
@@ -258,6 +308,9 @@ impl VideoSurface for LinuxSurface {
                     HdrSurface::new(wl, parent, self.engine.clone(), self.frames.clone())
                 };
                 if let (Some(surface), Some(toplevel)) = (hdr, toplevel) {
+                    if self.slot == 0 {
+                        toplevel.connect_scale_factor_notify(|_| reapply_all());
+                    }
                     if let Some(webview) = webview {
                         vbox.remove(&webview);
                         overlay.add_overlay(&webview);
@@ -274,6 +327,7 @@ impl VideoSurface for LinuxSurface {
                             GtkState {
                                 overlay,
                                 video: Video::Hdr { surface, toplevel },
+                                bounds: std::cell::Cell::new(None),
                             },
                         );
                     });
@@ -282,6 +336,7 @@ impl VideoSurface for LinuxSurface {
             }
         }
 
+        tracing::info!("video surface: GtkGLArea (SDR, tone-mapped)");
         let glarea = gtk::GLArea::new();
         glarea.set_halign(gtk::Align::Start);
         glarea.set_valign(gtk::Align::Start);
@@ -440,6 +495,7 @@ impl VideoSurface for LinuxSurface {
                         engine_slot,
                         create: create_cell,
                     },
+                    bounds: std::cell::Cell::new(None),
                 },
             );
         });
@@ -470,29 +526,8 @@ impl VideoSurface for LinuxSurface {
 
     fn set_bounds(&self, b: SurfaceBounds) {
         self.with_state(move |st| {
-            let scale = if b.scale > 0.0 { b.scale } else { 1.0 };
-            let l = |v: f64| (v / scale).round() as i32;
-            let (x, y) = (l(f64::from(b.x)).max(0), l(f64::from(b.y)).max(0));
-            let (w, h) = (l(f64::from(b.w)).max(1), l(f64::from(b.h)).max(1));
-            match &st.video {
-                Video::GlArea { glarea, .. } => {
-                    glarea.set_margin_start(x);
-                    glarea.set_margin_top(y);
-                    glarea.set_size_request(w, h);
-                    glarea.queue_render();
-                }
-                Video::Hdr { surface, toplevel } => {
-                    // Bounds are relative to the webview, which fills the overlay; the subsurface is
-                    // positioned in the window surface's coordinates (CSD shadow included).
-                    let (ox, oy) = st
-                        .overlay
-                        .translate_coordinates(toplevel, 0, 0)
-                        .unwrap_or((0, 0));
-                    surface.set_geometry(ox + x, oy + y, w, h, toplevel.scale_factor());
-                    // The position is applied on the window's next commit.
-                    toplevel.queue_draw();
-                }
-            }
+            st.bounds.set(Some(b));
+            apply_bounds(st, b);
         });
     }
 

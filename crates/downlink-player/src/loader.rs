@@ -43,12 +43,36 @@ pub fn library_file_names() -> &'static [&'static str] {
     }
 }
 
+/// Directories (in order) where a packaged install may keep the shipped engine. Pure path logic:
+/// `resource_dir` is Tauri's resource dir (`/usr/lib/<productName>` for a deb, which is NOT where
+/// `bundle.linux.deb.files` puts the engine), `exe` the running executable.
+pub fn bundled_search_dirs(resource_dir: Option<&Path>, exe: Option<&Path>) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = Vec::new();
+    if let Some(r) = resource_dir {
+        v.push(r.join("mpv"));
+        v.push(r.to_path_buf());
+    }
+    if let Some(dir) = exe.and_then(Path::parent) {
+        v.push(dir.join("mpv"));
+        v.push(dir.join("resources").join("mpv"));
+        // deb/rpm: /usr/bin/<exe> -> /usr/lib/downlink/mpv
+        v.push(dir.join("../lib/downlink/mpv"));
+        // AppImage: <appdir>/usr/bin/<exe> -> <appdir>/usr/lib
+        v.push(dir.join("../lib"));
+        // macOS bundle
+        v.push(dir.join("../Frameworks"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    v.retain(|p| seen.insert(p.clone()));
+    v
+}
+
 /// Load libmpv following the PLAN §4.10 order.
 ///
-/// `bundled_dir` is the app-relative directory holding the shipped engine (`None` in dev builds
-/// that have not staged one).
-pub fn load(bundled_dir: Option<&Path>) -> Result<LoadedMpv, PlayerError> {
-    load_with(bundled_dir, false)
+/// `bundled_dirs` are the candidate directories that may hold the shipped engine (see
+/// [`bundled_search_dirs`]); empty in dev builds that have not staged one.
+pub fn load(bundled_dirs: &[PathBuf]) -> Result<LoadedMpv, PlayerError> {
+    load_with(bundled_dirs, false)
 }
 
 /// Env var that makes [`load_from_env`] refuse everything but the bundled engine (CI smoke test).
@@ -56,8 +80,8 @@ pub const ENV_REQUIRE_BUNDLED: &str = "DOWNLINK_REQUIRE_BUNDLED";
 
 /// [`load`], with the escape hatch and the system fallback off in release builds (or when
 /// `DOWNLINK_REQUIRE_BUNDLED=1`).
-pub fn load_from_env(bundled_dir: Option<&Path>) -> Result<LoadedMpv, PlayerError> {
-    load_with(bundled_dir, strict_by_default())
+pub fn load_from_env(bundled_dirs: &[PathBuf]) -> Result<LoadedMpv, PlayerError> {
+    load_with(bundled_dirs, strict_by_default())
 }
 
 /// Release builds never fall back to the env override or a system libmpv (CLAUDE.md rule 14);
@@ -68,12 +92,12 @@ pub fn strict_by_default() -> bool {
 
 /// `require_bundled`: only the bundled directory is tried; no env override, no system library.
 pub fn load_with(
-    bundled_dir: Option<&Path>,
+    bundled_dirs: &[PathBuf],
     require_bundled: bool,
 ) -> Result<LoadedMpv, PlayerError> {
     let mut attempts: Vec<String> = Vec::new();
 
-    if let Some(dir) = bundled_dir {
+    for dir in bundled_dirs {
         for name in library_file_names() {
             let path = dir.join(name);
             if path.is_file() {
@@ -83,6 +107,18 @@ pub fn load_with(
                 }
             }
         }
+    }
+    if bundled_dirs.is_empty() {
+        attempts.push("no bundled directory to search".to_owned());
+    } else if attempts.is_empty() {
+        let list: Vec<String> = bundled_dirs
+            .iter()
+            .map(|d| d.display().to_string())
+            .collect();
+        attempts.push(format!(
+            "no libmpv in any searched directory: {}",
+            list.join(", ")
+        ));
     }
 
     if require_bundled {
@@ -150,7 +186,7 @@ mod tests {
     #[test]
     fn strict_mode_never_falls_back() {
         // No bundled dir: strict mode must fail without trying the env override or the system.
-        let r = load_with(None, true);
+        let r = load_with(&[], true);
         assert!(matches!(r, Err(PlayerError::Load(m)) if m.contains("bundled engine required")));
     }
 
@@ -165,5 +201,27 @@ mod tests {
     #[test]
     fn file_names_are_not_empty() {
         assert!(!library_file_names().is_empty());
+    }
+
+    #[test]
+    fn deb_install_is_searched() {
+        let dirs = bundled_search_dirs(
+            Some(Path::new("/usr/lib/Downlink")),
+            Some(Path::new("/usr/bin/downlink")),
+        );
+        assert!(dirs.contains(&PathBuf::from("/usr/bin/../lib/downlink/mpv")));
+        assert_eq!(dirs[0], PathBuf::from("/usr/lib/Downlink/mpv"));
+    }
+
+    #[test]
+    fn appimage_install_is_searched() {
+        let dirs = bundled_search_dirs(None, Some(Path::new("/tmp/.mount_x/usr/bin/downlink")));
+        assert!(dirs.contains(&PathBuf::from("/tmp/.mount_x/usr/bin/../lib")));
+    }
+
+    #[test]
+    fn missing_dirs_are_listed_in_the_error() {
+        let r = load_with(&[PathBuf::from("/nonexistent/mpv")], true);
+        assert!(matches!(r, Err(PlayerError::Load(m)) if m.contains("/nonexistent/mpv")));
     }
 }

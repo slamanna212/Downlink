@@ -7,7 +7,7 @@ import { StateRow, pseudoStates, type DemoState } from '../../components/StateRo
 
 const NOW = 1_700_000_000;
 const base: Recording = {
-  id: 1, title: 'Evening Bulletin', channelId: 100, channelName: 'Harbor News 24', startUtc: NOW + 3600, endUtc: NOW + 7200,
+  id: 1, title: 'Evening Bulletin', subtitle: 'Low Tide', description: null, season: 2, episode: 5, channelId: 100, channelName: 'Harbor News 24', startUtc: NOW + 3600, endUtc: NOW + 7200,
   status: 'scheduled', ruleId: 1, ruleLabel: 'Series', sizeBytes: null, error: null,
 };
 const demo = (s: DemoState) => ({ 'data-demo-state': s, ...(s === 'focus' ? { 'data-focused': 'true' } : {}) });

@@ -18,9 +18,9 @@ async function playFirstChannel(page: Page) {
 test('player: audio, subtitle and stream menus switch tracks and streams', async ({ page }) => {
   await playFirstChannel(page);
   await page.keyboard.press('a');
-  await page.getByRole('menuitem', { name: /DEU/ }).click();
+  await page.getByRole('menuitem', { name: /German/ }).click();
   await page.keyboard.press('a');
-  await expect(page.getByRole('menuitem', { name: /DEU/ })).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByRole('menuitem', { name: /German/ })).toHaveAttribute('aria-current', 'true');
   await page.keyboard.press('Escape');
   await expect(page.getByRole('menu')).toHaveCount(0);
   await page.keyboard.press('t');
@@ -56,7 +56,10 @@ test('multiview: add a tile from the picker without any play while browsing, lis
   expect(await plays()).toBe(before); // browsing the picker is SQLite only (rule 4)
   await page.getByRole('option', { name: /Cobalt Sports/ }).first().click();
   await expect(page.getByRole('group', { name: /Slot 2: Cobalt Sports/ })).toBeVisible();
-  await expect(page.getByText('2 of 4 streams')).toBeVisible();
+  const picker = page.getByRole('dialog', { name: /Add channel/ });
+  await expect(picker.getByText(/2 of 4 in use/)).toBeVisible();
+  await page.getByRole('button', { name: /Add channel/ }).click();
+  await expect(picker).toBeHidden();
   await expect(tiles).toHaveCount(2); // reflowed side by side on its own
   await expect(page.getByRole('radiogroup', { name: 'Layout (L)' })).toHaveCount(0); // two tiles have one layout
   await page.keyboard.press('2');

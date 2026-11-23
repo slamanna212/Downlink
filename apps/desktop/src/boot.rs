@@ -110,9 +110,10 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
             }
         });
     }
-    // Crash recovery (rule 6) and the reachability probe.
+    // Crash recovery (rule 6), the reachability probe, then background refresh.
     {
         let s = service.clone();
+        let h_refresh = handle.clone();
         tauri::async_runtime::spawn(async move {
             match s.startup_cleanup().await {
                 Ok(r) if r.stopped + r.failed > 0 => {
@@ -128,6 +129,25 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
             if let Err(e) = s.probe_sources().await {
                 tracing::warn!("source probe failed: {}", e.message);
             }
+            // Background refresh: a cheap DB check every few minutes; a source is only synced
+            // once its data is older than the `autoRefreshHours` setting (or it was offline and
+            // may be back). `refreshDuringPlayback` off defers it while something plays.
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(5 * 60));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            tick.tick().await; // the first tick is immediate; launch already refreshed
+            loop {
+                tick.tick().await;
+                if let Err(e) = s.auto_refresh(is_playing(&h_refresh)).await {
+                    tracing::warn!("auto refresh failed: {}", e.message);
+                }
+                // Between full syncs: the guide's visible hours, once they are an hour old.
+                if let Err(e) = s.refresh_visible_guides().await {
+                    tracing::warn!("guide refresh failed: {}", e.message);
+                }
+                if let Err(e) = s.housekeeping().await {
+                    tracing::warn!("housekeeping failed: {}", e.message);
+                }
+            }
         });
     }
 
@@ -139,13 +159,23 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
     let mut error = None;
     let h2 = handle.clone();
     let loaded = tokio::task::spawn_blocking(move || {
-        downlink_player::load_from_env(selftest::bundled_mpv_dir(&h2).as_deref())
+        downlink_player::load_from_env(&selftest::bundled_mpv_dirs(Some(&h2)))
     })
     .await;
     phase("libmpv loaded");
     match loaded {
         Ok(Ok(loaded)) => {
             tracing::info!(source = ?loaded.source, api = ?loaded.client_api_version, "libmpv loaded");
+            // Our own timeshift cache dir only: emptied on every start (mpv unlinks its cache
+            // files, but a crash can leave one behind).
+            if let Ok(dir) = handle.path().app_cache_dir() {
+                let dir = dir.join("timeshift");
+                let _ = std::fs::remove_dir_all(&dir);
+                match std::fs::create_dir_all(&dir) {
+                    Ok(()) => dto::set_timeshift_dir(dir.to_string_lossy().into_owned()),
+                    Err(e) => tracing::warn!("timeshift cache dir unavailable: {e}"),
+                }
+            }
             let prefs = dto::preferences_from_settings(&settings);
             let sink = sink_ctx.sink();
             let loaded_for_tiles = loaded.clone();
@@ -310,4 +340,18 @@ fn media_session(app: &AppHandle, sink_ctx: &SinkContext) {
         }
         Err(e) => tracing::warn!("media controls unavailable: {e}"),
     }
+}
+
+/// Whether the main player is showing something (multiview tiles only exist alongside it).
+fn is_playing(handle: &AppHandle) -> bool {
+    use downlink_player::SessionState::*;
+    handle
+        .try_state::<crate::state::AppState>()
+        .and_then(|st| st.try_playback())
+        .is_some_and(|pb| {
+            matches!(
+                pb.snapshot().state,
+                Some(Resolving | Connecting | Buffering | Playing)
+            )
+        })
 }

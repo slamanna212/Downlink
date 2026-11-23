@@ -2,12 +2,14 @@ import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, use
 import { useLocation, useNavigate } from 'react-router';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useIdle } from '@mantine/hooks';
-import { Popover, SegmentedControl, Switch, TextInput, VisuallyHidden } from '@mantine/core';
+import { Checkbox, Popover, SegmentedControl, Switch, TextInput, VisuallyHidden } from '@mantine/core';
 import {
   IconArrowsMaximize,
   IconGauge,
   IconLayoutGrid,
   IconLayoutSidebarRight,
+  IconMaximize,
+  IconMinimize,
   IconPlus,
   IconReplace,
   IconSquareRoundedArrowUp,
@@ -28,8 +30,10 @@ import { progress } from '../../lib/time';
 import { useNowEpoch } from '../../lib/useNow';
 import { useVideoBounds } from '../../lib/useVideoBounds';
 import { usePlayerStore } from '../../store/player';
+import { useUiStore } from '../../store/ui';
 import { dl } from '../../theme';
 import { playChannel } from '../player/actions';
+import { holdFullscreen, isFullscreenKey, releaseFullscreen, setFullscreen, toggleFullscreen } from '../player/fullscreen';
 import { holdSession, releaseSession } from '../player/session';
 import { layoutFor, nextStyle, stylesFor, type GridArea, type LayoutStyle } from './layout';
 import classes from './Multiview.module.css';
@@ -90,11 +94,26 @@ function useCanvasPath(rootRef: React.RefObject<HTMLDivElement | null>, layoutKe
 
 type PickerTab = 'favourites' | 'recent' | 'all';
 
-/** Channel picker for a slot: search plus Favourites / Recent / All; on-screen channels are disabled. */
-function ChannelPicker({ onScreen, budgetText, onPick }: {
+/** Add-channel mode: a checkbox per row; the picker stays open while channels go in and out. */
+interface PickerMulti {
+  /** On screen or on the way. */
+  checked: Set<number>;
+  /** Checked but not removable here (the main player). */
+  locked: Set<number>;
+  /** No stream left for another channel. */
+  full: boolean;
+  onToggle: (c: Channel, on: boolean) => void;
+}
+
+/**
+ * Channel picker: search plus Favourites / Recent / All. Single mode (replace a tile) picks one
+ * channel and on-screen channels are disabled; multi mode (add channels) toggles checkboxes.
+ */
+function ChannelPicker({ onScreen, budgetText, onPick, multi }: {
   onScreen: Map<number, number>;
   budgetText: string;
-  onPick: (c: Channel) => void;
+  onPick?: (c: Channel) => void;
+  multi?: PickerMulti;
 }) {
   const [query, setQuery] = useState('');
   const deferred = useDeferredValue(query.trim());
@@ -131,27 +150,33 @@ function ChannelPicker({ onScreen, budgetText, onPick }: {
           ]}
         />
       )}
-      <div className={classes.pickerList} role="listbox" aria-label={t('multiview.pickChannel')}>
+      <div className={classes.pickerList} role="listbox" aria-label={t('multiview.pickChannel')} aria-multiselectable={multi ? true : undefined}>
         {list.length === 0 && <div className={classes.pickerEmpty}>{t(page?.isFetching ? 'button.loading' : 'multiview.noChannels')}</div>}
         {list.map((c) => {
           const slot = onScreen.get(c.id);
+          const checked = multi?.checked.has(c.id) ?? false;
+          const disabled = multi ? multi.locked.has(c.id) || (!checked && multi.full) : slot != null;
           return (
             <button
               key={c.id}
               type="button"
               role="option"
-              aria-selected={false}
+              aria-selected={checked}
               className={classes.pickerRow}
-              disabled={slot != null}
-              onClick={() => onPick(c)}
+              disabled={disabled}
+              onClick={() => (multi ? multi.onToggle(c, !checked) : onPick?.(c))}
             >
-              <ChannelLogo channelId={c.id} name={c.name} src={c.logo} density="compact" />
+              <ChannelLogo channelId={c.id} name={c.name} src={c.logo} density="compact" bare />
               <span className={classes.pickerNumber}>{c.number ?? ''}</span>
               <span className={classes.pickerText}>
                 <span className={classes.pickerName}>{c.name}</span>
                 {onNow.get(c.id) && <span className={classes.pickerNow}>{onNow.get(c.id)}</span>}
               </span>
-              {slot != null && <span className={classes.pickerHint}>{t('multiview.alreadyIn', { n: slot + 1 })}</span>}
+              {multi ? (
+                <Checkbox.Indicator checked={checked} disabled={disabled} size="sm" aria-hidden />
+              ) : (
+                slot != null && <span className={classes.pickerHint}>{t('multiview.alreadyIn', { n: slot + 1 })}</span>
+              )}
             </button>
           );
         })}
@@ -178,6 +203,10 @@ interface TileProps {
   pickerOpen: boolean;
   picker: React.ReactNode;
   onPickerChange: (open: boolean) => void;
+  /** The add-channel picker, offered by an empty slot. */
+  addOpen: boolean;
+  addPicker: React.ReactNode;
+  onAddChange: (open: boolean) => void;
   onFocus: () => void;
   onListen: () => void;
   onMakeMain: () => void;
@@ -199,7 +228,7 @@ function Tile(p: TileProps) {
       ref={ref}
       className={classes.tile}
       style={p.area}
-      data-focused={p.focused || undefined}
+      data-active={p.focused || undefined}
       data-audible={(p.audible && !!p.tile) || undefined}
       data-empty={!p.tile || undefined}
       data-failed={failed || undefined}
@@ -211,15 +240,15 @@ function Tile(p: TileProps) {
     >
       {!inTauri() && p.tile && !failed && <div className={classes.devVideo} aria-hidden>tile {p.position + 1}</div>}
       {!p.tile ? (
-        <Popover opened={p.pickerOpen} onChange={p.onPickerChange} width={360} position="bottom" trapFocus withinPortal shadow="lg">
+        <Popover opened={p.addOpen} onChange={p.onAddChange} width={360} position="bottom" trapFocus withinPortal shadow="lg">
           <div className={classes.empty}>
             <Popover.Target>
-              <DLButton variant="default" icon={IconPlus} onClick={() => p.onPickerChange(!p.pickerOpen)}>
+              <DLButton variant="default" icon={IconPlus} onClick={() => p.onAddChange(!p.addOpen)}>
                 {t('multiview.addChannel')}
               </DLButton>
             </Popover.Target>
           </div>
-          <Popover.Dropdown>{p.picker}</Popover.Dropdown>
+          <Popover.Dropdown>{p.addPicker}</Popover.Dropdown>
         </Popover>
       ) : failed && p.tile.failure === 'limit' ? (
         <div className={classes.limit} role="alert">
@@ -244,7 +273,7 @@ function Tile(p: TileProps) {
         <>
           {p.channel && (
             <div className={`${classes.label} ${classes.glass}`}>
-              <ChannelLogo channelId={p.channel.id} name={p.channel.name} src={p.channel.logo} density="compact" />
+              <ChannelLogo channelId={p.channel.id} name={p.channel.name} src={p.channel.logo} density="compact" bare />
               <span className={classes.labelNumber}>{p.channel.number ?? ''}</span>
               <span className={classes.labelName}>{p.channel.name}</span>
             </div>
@@ -288,6 +317,7 @@ export function MultiviewPage() {
   const location = useLocation();
   const player = usePlayerStore((s) => s.player);
   const mv = useMultiviewState();
+  const fullscreen = useUiStore((s) => s.fullscreen);
   const now = useNowEpoch(15_000);
 
   // Slot 0 mirrors the main player: its channel when playing live.
@@ -320,11 +350,14 @@ export function MultiviewPage() {
   const chromeHidden = idle && !toolbarHover && !addOpen && pickerSlot == null;
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  // Keep the session (main player) alive while here; every tile stops when leaving (rule 6).
+  // Keep the session (main player) alive while here; every tile stops when leaving (rule 6). Window
+  // fullscreen carries over to and from the player (see ../player/fullscreen).
   useEffect(() => {
     holdSession();
+    holdFullscreen();
     return () => {
       releaseSession();
+      releaseFullscreen();
       void invoke('multiview_exit', {}).catch(() => undefined);
     };
   }, []);
@@ -341,20 +374,29 @@ export function MultiviewPage() {
 
   const inUse = tiles.size;
   const budget = Math.min(mv.maxTiles, mv.streamLimit ?? mv.maxTiles);
-  const budgetText = t('multiview.budget', { used: inUse, total: budget });
   const onScreen = useMemo(() => new Map(order.map((slot, i) => [tiles.get(slot)?.channelId ?? -1, i])), [order, tiles]);
-  const freeSlot = Array.from({ length: mv.maxTiles }, (_, i) => i).find((s) => !tiles.has(s)) ?? null;
+  // Channels checked in the add picker whose tile has not landed yet (channel id -> slot), so quick
+  // clicks each get their own slot.
+  const [pending, setPending] = useState<Map<number, number>>(() => new Map());
+  const [pendingFor, setPendingFor] = useState(tiles);
+  if (pendingFor !== tiles) {
+    // A tile landed (or the state moved on): drop the channels that are now on screen.
+    setPendingFor(tiles);
+    const left = [...pending].filter(([id, slot]) => tiles.get(slot)?.channelId !== id);
+    if (left.length !== pending.size) setPending(new Map(left));
+  }
+  const reserved = new Set([...tiles.keys(), ...pending.values()]);
+  const freeSlot = Array.from({ length: mv.maxTiles }, (_, i) => i).find((s) => !reserved.has(s)) ?? null;
 
   const assignTile = useCallback(
     async (slot: number, channelId: number) => {
-      if (slot === 0) {
-        await playChannel(channelId);
-        return;
-      }
+      if (slot === 0) return (await playChannel(channelId)) == null;
       try {
         await invoke('multiview_set_tile', { slot, channelId });
+        return true;
       } catch (e) {
         notifyError(toAppError(e));
+        return false;
       }
     },
     [],
@@ -362,7 +404,6 @@ export function MultiviewPage() {
   const setTile = useCallback(
     (slot: number, channelId: number) => {
       setPickerSlot(null);
-      setAddOpen(false);
       return assignTile(slot, channelId);
     },
     [assignTile],
@@ -386,6 +427,29 @@ export function MultiviewPage() {
   );
   const makeMain = useCallback((slot: number) => void invoke('multiview_make_main', { slot }).catch(notifyError), []);
   const remove = useCallback((slot: number) => void invoke('multiview_remove_tile', { slot }), []);
+  const multi: PickerMulti = {
+    checked: new Set([...onScreen.keys(), ...pending.keys()]),
+    locked: new Set(mainChannel != null ? [mainChannel] : []),
+    full: freeSlot == null || reserved.size >= budget,
+    onToggle: (c, on) => {
+      if (!on) {
+        const slot = order.find((s) => tiles.get(s)?.channelId === c.id);
+        if (slot != null && slot !== 0) remove(slot);
+        return;
+      }
+      if (freeSlot == null) return;
+      const slot = freeSlot;
+      setPending((m) => new Map(m).set(c.id, slot));
+      void (async () => {
+        if (!(await assignTile(slot, c.id))) setPending((m) => {
+          const next = new Map(m);
+          next.delete(c.id);
+          return next;
+        });
+      })();
+    },
+  };
+
   const exit = useCallback(() => void navigate(mainChannel != null ? '/player' : '/channels', { replace: true }), [navigate, mainChannel]);
   const fullScreen = useCallback(
     async (slot: number) => {
@@ -397,6 +461,11 @@ export function MultiviewPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isFullscreenKey(e)) {
+        e.preventDefault();
+        toggleFullscreen();
+        return;
+      }
       if (e.ctrlKey || e.metaKey || e.altKey || pickerSlot != null || addOpen) return;
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return;
@@ -407,23 +476,23 @@ export function MultiviewPage() {
       else if (e.key === 'Enter' && focused !== 0) makeMain(focused);
       else if (e.key === 'f' || e.key === 'F') void fullScreen(focused);
       else if ((e.key === 'Delete' || e.key === 'Backspace') && focused !== 0) remove(focused);
-      else if ((e.key === 'n' || e.key === 'N') && freeSlot != null) setAddOpen(true);
+      else if (e.key === 'n' || e.key === 'N') setAddOpen(true);
       else if (e.key === 'l' || e.key === 'L') setStyle(nextStyle(effectiveStyle, styles));
-      else if (e.key === 'Escape') exit();
-      else return;
+      else if (e.key === 'Escape') {
+        if (fullscreen) setFullscreen(false);
+        else exit();
+      } else return;
       e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [order, focused, pickerSlot, addOpen, freeSlot, focus, listen_, makeMain, fullScreen, remove, exit, effectiveStyle, styles]);
+  }, [order, focused, pickerSlot, addOpen, freeSlot, focus, listen_, makeMain, fullScreen, remove, exit, effectiveStyle, styles, fullscreen]);
 
+  const pickerBudget = t('multiview.pickerBudget', { used: inUse, total: budget });
   const picker = (slot: number) => (
-    <ChannelPicker
-      onScreen={onScreen}
-      budgetText={t('multiview.pickerBudget', { used: inUse, total: budget })}
-      onPick={(c) => void setTile(slot, c.id)}
-    />
+    <ChannelPicker onScreen={onScreen} budgetText={pickerBudget} onPick={(c) => void setTile(slot, c.id)} />
   );
+  const addPicker = <ChannelPicker onScreen={onScreen} budgetText={pickerBudget} multi={multi} />;
 
   const layoutKey = [effectiveStyle, ...shown.map((slot) => {
     const x = tiles.get(slot);
@@ -453,6 +522,9 @@ export function MultiviewPage() {
               pickerOpen={pickerSlot === slot}
               picker={picker(slot)}
               onPickerChange={(open) => setPickerSlot(open ? slot : null)}
+              addOpen={addOpen && order.length === 0}
+              addPicker={addPicker}
+              onAddChange={setAddOpen}
               onFocus={() => focus(slot)}
               onListen={() => listen_(slot)}
               onMakeMain={() => makeMain(slot)}
@@ -469,11 +541,11 @@ export function MultiviewPage() {
         {order.length > 0 && (
           <Popover opened={addOpen} onChange={setAddOpen} width={360} position="top" trapFocus withinPortal shadow="lg">
             <Popover.Target>
-              <DLButton variant="default" size="sm" icon={IconPlus} keyHint="N" disabled={freeSlot == null} onClick={() => setAddOpen((o) => !o)}>
+              <DLButton variant="default" size="sm" icon={IconPlus} keyHint="N" onClick={() => setAddOpen((o) => !o)}>
                 {t('multiview.addChannel')}
               </DLButton>
             </Popover.Target>
-            <Popover.Dropdown>{freeSlot != null && picker(freeSlot)}</Popover.Dropdown>
+            <Popover.Dropdown>{addPicker}</Popover.Dropdown>
           </Popover>
         )}
         {styles.length > 1 && (
@@ -494,14 +566,13 @@ export function MultiviewPage() {
           />
         )}
         <Switch size="sm" checked={audioFollows} onChange={(e) => setAudioFollows(e.currentTarget.checked)} label={t('multiview.audioFollows')} />
-        <span className={classes.budget} aria-label={budgetText}>
-          <span className={classes.pips} aria-hidden>
-            {Array.from({ length: budget }, (_, i) => (
-              <span key={i} className={classes.pip} data-on={i < inUse || undefined} />
-            ))}
-          </span>
-          {budgetText}
-        </span>
+        <DLIconButton
+          label={fullscreen ? t('player.exitFullscreen') : t('player.fullscreen')}
+          icon={fullscreen ? IconMinimize : IconMaximize}
+          variant="subtle"
+          size="sm"
+          onClick={toggleFullscreen}
+        />
         <DLButton variant="default" size="sm" keyHint="Esc" onClick={exit}>
           {t('multiview.exit')}
         </DLButton>

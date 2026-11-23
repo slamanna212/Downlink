@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createBoundsReporter, toPhysicalBounds } from './videoBounds';
+import { SETTLE_DELAYS_MS, createBoundsReporter, nextBoundsSeq, toPhysicalBounds } from './videoBounds';
 
 function harness() {
   let rect = { left: 68, top: 0, width: 1372, height: 900 };
@@ -58,5 +58,41 @@ describe('createBoundsReporter', () => {
     h.set({ width: 0 });
     h.r.schedule(); h.runFrame();
     expect(h.send).not.toHaveBeenCalled();
+  });
+});
+
+describe('settle and ordering', () => {
+  it('re-measures on trailing timers and sends only what changed', () => {
+    const timers: Array<{ cb: () => void; ms: number }> = [];
+    const frames: Array<() => void> = [];
+    let rect = { left: 0, top: 0, width: 800, height: 600 };
+    const send = vi.fn();
+    const r = createBoundsReporter({
+      measure: () => toPhysicalBounds(rect, 1),
+      send,
+      raf: (cb) => frames.push(cb),
+      caf: () => undefined,
+      setTimer: (cb, ms) => timers.push({ cb, ms }),
+      clearTimer: () => undefined,
+    });
+    r.settle();
+    frames.splice(0).forEach((f) => f());
+    expect(send).toHaveBeenCalledTimes(1);
+    rect = { left: 0, top: 0, width: 1920, height: 1080 }; // final size landed after the first measure
+    expect(timers.map((t) => t.ms)).toEqual(SETTLE_DELAYS_MS);
+    timers[0]?.cb();
+    frames.splice(0).forEach((f) => f());
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenLastCalledWith({ x: 0, y: 0, w: 1920, h: 1080, scale: 1 });
+    timers[1]?.cb();
+    frames.splice(0).forEach((f) => f());
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+  it('nextBoundsSeq strictly increases even with a stalled clock', () => {
+    const a = nextBoundsSeq(() => 1000);
+    const b = nextBoundsSeq(() => 1000);
+    const c = nextBoundsSeq(() => 999);
+    expect(b).toBeGreaterThan(a);
+    expect(c).toBeGreaterThan(b);
   });
 });

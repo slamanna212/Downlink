@@ -5,6 +5,18 @@ use super::CmdResult;
 use crate::dto::phase_name;
 use crate::state::AppState;
 
+fn transitions(pb: &crate::player_glue::Playback, limit: usize) -> Vec<Value> {
+    let history = pb.transitions();
+    history[history.len().saturating_sub(limit)..].iter()
+        .map(|t| json!({ "at": t.at_unix_ms, "from": phase_name(t.from), "to": phase_name(t.to), "note": t.note }))
+        .collect()
+}
+
+#[tauri::command]
+pub async fn get_recent_transitions(state: State<'_, AppState>) -> CmdResult<Vec<Value>> {
+    Ok(transitions(&*state.playback().await?, 3))
+}
+
 #[tauri::command]
 pub async fn get_diagnostics(state: State<'_, AppState>) -> CmdResult<Value> {
     let d = state.svc().await?.diagnostics().await?;
@@ -12,10 +24,7 @@ pub async fn get_diagnostics(state: State<'_, AppState>) -> CmdResult<Value> {
         Some(pb) => (
             serde_json::to_value(pb.snapshot_dto()).unwrap_or(Value::Null),
             pb.snapshot().hwdec_current,
-            pb.transitions()
-                .iter()
-                .map(|t| json!({ "at": t.at_unix_ms, "from": phase_name(t.from), "to": phase_name(t.to), "note": t.note }))
-                .collect::<Vec<_>>(),
+            transitions(&pb, usize::MAX),
         ),
         None => (Value::Null, None, Vec::new()),
     };
@@ -51,14 +60,12 @@ pub async fn export_diagnostics(app: AppHandle, state: State<'_, AppState>) -> C
         Some(pb) => (
             serde_json::to_value(pb.snapshot_dto()).unwrap_or(Value::Null),
             pb.snapshot().hwdec_current,
-            pb.transitions()
-                .iter()
-                .rev()
-                .take(50)
-                .rev()
-                .map(|t| json!({ "at": t.at_unix_ms, "from": phase_name(t.from), "to": phase_name(t.to), "note": t.note }))
-                .collect::<Vec<_>>(),
-            state.player().await.map(|p| p.diagnostics()).unwrap_or_default(),
+            transitions(&pb, usize::MAX),
+            state
+                .player()
+                .await
+                .map(|p| p.diagnostics())
+                .unwrap_or_default(),
         ),
         None => (Value::Null, None, Vec::new(), Vec::new()),
     };
@@ -89,36 +96,49 @@ pub async fn export_diagnostics(app: AppHandle, state: State<'_, AppState>) -> C
         ),
         ("logs/tail.txt".into(), d.log_tail.join("\n")),
     ];
-    if let Ok(dir) = app.path().app_log_dir()
-        && let Ok(rd) = std::fs::read_dir(&dir)
-    {
-        let mut files: Vec<_> = rd
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with("downlink.log"))
-            .collect();
-        files.sort_by_key(|e| e.file_name());
-        for f in files {
-            if let Ok(text) = std::fs::read_to_string(f.path()) {
-                entries.push((
-                    format!("logs/{}", f.file_name().to_string_lossy()),
-                    crate::bundle::tail(&text, crate::bundle::LOG_TAIL_BYTES).to_owned(),
-                ));
-            }
-        }
-    }
-    let zip = crate::bundle::build_zip(&entries)
-        .map_err(|e| AppError::local(format!("Could not build the bundle: {e}")))?;
+    let log_dir = app.path().app_log_dir().ok();
     let dir = app
         .path()
         .download_dir()
         .unwrap_or_else(|_| std::env::temp_dir());
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let path = dir.join(format!("downlink-diagnostics-{secs}.zip"));
-    std::fs::write(&path, zip)
+    tokio::task::spawn_blocking(move || save_bundle(&mut entries, log_dir.as_deref(), &dir))
+        .await
+        .map_err(|_| AppError::local("Diagnostics export was interrupted."))?
+}
+
+fn save_bundle(
+    entries: &mut Vec<(String, String)>,
+    log_dir: Option<&std::path::Path>,
+    dir: &std::path::Path,
+) -> CmdResult<String> {
+    use downlink_core::AppError;
+    if let Some(files) = log_dir.and_then(|p| std::fs::read_dir(p).ok()) {
+        let mut files: Vec<_> = files
+            .flatten()
+            .filter(|f| {
+                f.file_name().to_string_lossy().starts_with("downlink.log")
+                    && f.file_type().is_ok_and(|ty| ty.is_file())
+            })
+            .collect();
+        files.sort_by_key(|f| std::cmp::Reverse(f.file_name()));
+        for file in files.into_iter().take(8) {
+            if let Ok(text) = crate::bundle::log_tail(&file.path()) {
+                entries.push((format!("logs/{}", file.file_name().to_string_lossy()), text));
+            }
+        }
+    }
+    let zip = crate::bundle::build_zip(entries)
+        .map_err(|e| AppError::local(format!("Could not build the bundle: {e}")))?;
+    let mut out = tempfile::Builder::new()
+        .prefix("downlink-diagnostics-")
+        .suffix(".zip")
+        .tempfile_in(dir)
+        .map_err(|e| AppError::local(format!("Could not create the bundle: {e}")))?;
+    std::io::Write::write_all(out.as_file_mut(), &zip)
         .map_err(|e| AppError::local(format!("Could not save the bundle: {e}")))?;
+    let (_, path) = out
+        .keep()
+        .map_err(|e| AppError::local(format!("Could not keep the bundle: {e}")))?;
     Ok(path.display().to_string())
 }
 

@@ -29,6 +29,7 @@
 .hero[data-focusable]:focus-visible, .hero[data-focused] { box-shadow: var(--dl-focus-ring); }
 .heroMeta { display: flex; align-items: center; gap: var(--mantine-spacing-sm); font-size: var(--mantine-font-size-sm); color: var(--dl-text-2); }
 .heroTitle { margin: 0; font-size: 1.75rem; font-weight: 650; line-height: 1.2; }
+.heroEp { font-size: var(--mantine-font-size-lg); font-weight: 600; color: var(--dl-text-2); }
 .heroTimeline { display: flex; align-items: center; gap: var(--mantine-spacing-md); font-size: var(--mantine-font-size-sm); color: var(--dl-text-2); }
 .heroActions { display: flex; gap: var(--mantine-spacing-sm); margin-top: var(--mantine-spacing-xs); }
 
@@ -62,6 +63,7 @@
 .nowCard:focus-visible, .nowCard[data-focused] { box-shadow: var(--dl-focus-ring); }
 .nowHead { display: flex; align-items: center; gap: var(--mantine-spacing-sm); font-size: var(--mantine-font-size-sm); color: var(--dl-text-dim); }
 .nowTitle { font-size: var(--mantine-font-size-lg); font-weight: 600; }
+.nowEp { margin-top: calc(var(--mantine-spacing-xs) * -1); font-size: var(--mantine-font-size-sm); font-weight: 500; color: var(--dl-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nowFoot { display: flex; align-items: center; gap: var(--mantine-spacing-md); font-size: var(--mantine-font-size-xs); color: var(--dl-text-dim); }
 .nowTrack { position: relative; flex: 1; height: 2px; background: var(--dl-border); border-radius: var(--mantine-radius-xs); overflow: hidden; }
 

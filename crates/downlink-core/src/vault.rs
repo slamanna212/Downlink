@@ -4,40 +4,33 @@
 //! credentials, userinfo, `username`/`password`/`token` query parameters, credential headers) is
 //! replaced by a placeholder such as `{dl:user}` before it is written to SQLite. The extracted
 //! values live in a per-source [`Vault`], which the app persists in the OS keychain (one entry per
-//! source, deduplicated: identical values share one placeholder, a differing value gets a short
-//! hash suffix). Placeholders are resolved in Rust at play/fetch time only.
+//! source, deduplicated: identical values share one placeholder, a differing value gets a
+//! suffixed placeholder). Placeholders are resolved in Rust at play/fetch time only.
 
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard, OnceLock, PoisonError};
 
 use regex::{Captures, Regex};
 use sha2::{Digest, Sha256};
 
+use crate::auth::{SecretKind, SecretStore, SecretString, secret_ref};
 use crate::error::{AppError, Result};
 
 static USERINFO: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r"(?i)(://)([^/\s@?#:{}]+):([^/\s@?#{}]+)@").ok());
-static USERINFO_USER_ONLY: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r"(?i)(://)([^/\s@?#:{}]+)@").ok());
+    LazyLock::new(|| Regex::new(r"(?i)(://)([^/\s@?#]+)@").ok());
 static XTREAM_PATH: LazyLock<Option<Regex>> = LazyLock::new(|| {
-    Regex::new(r"(?i)(/(?:live|movie|series|timeshift)/)([^/\s?#]+)/([^/\s?#]+)(/|\b)").ok()
+    Regex::new(r#"(?i)(/(?:live|movie|series|timeshift)/)([^/\s?#"'<>]+)/([^/\s?#"'<>]+)"#).ok()
 });
-static QUERY: LazyLock<Option<Regex>> = LazyLock::new(|| {
-    Regex::new(r#"(?i)([?&;])(username|user|password|pass|pwd|token|api_key|apikey|access_token|auth|key|secret|sig|signature)=([^&\s"'#<>]*)"#).ok()
-});
+static HLS_TOKEN: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r#"(?i)(/proxy/hls/)([^/\s?#"'<>]+)"#).ok());
 static PLACEHOLDER: LazyLock<Option<Regex>> =
-    LazyLock::new(|| Regex::new(r"\{dl:([a-z]+(?::[0-9a-f]{8})?)\}").ok());
-
-const HEADERS: [&str; 5] = [
-    "x-api-key",
-    "authorization",
-    "proxy-authorization",
-    "cookie",
-    "x-auth-token",
-];
+    LazyLock::new(|| Regex::new(r"\{dl:([a-z]+(?::[0-9a-f]{8}(?::[0-9]+)?)?)\}").ok());
 
 fn is_placeholder(s: &str) -> bool {
-    s.starts_with("{dl:")
+    PLACEHOLDER
+        .as_ref()
+        .and_then(|re| re.find(s))
+        .is_some_and(|m| m.as_str() == s)
 }
 
 fn short_hash(v: &str) -> String {
@@ -50,15 +43,21 @@ fn short_hash(v: &str) -> String {
 
 /// The credential store for one source. Cheap to clone (shared).
 #[derive(Clone, Default)]
-pub struct Vault(Arc<Mutex<HashMap<String, String>>>);
+pub struct Vault {
+    entries: Arc<Mutex<HashMap<String, String>>>,
+    backend: Arc<OnceLock<VaultBackend>>,
+}
+
+struct VaultBackend {
+    secrets: Arc<dyn SecretStore>,
+    reference: String,
+    // Read and written with entries held, so a slower write cannot overwrite a newer snapshot.
+    persisted: std::sync::atomic::AtomicUsize,
+}
 
 impl std::fmt::Debug for Vault {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Vault({} entries)",
-            self.0.lock().map(|g| g.len()).unwrap_or(0)
-        )
+        write!(f, "Vault({} entries)", self.lock().len())
     }
 }
 
@@ -70,21 +69,82 @@ impl Vault {
     /// Placeholder for `value` under `base` (`user`, `pass`, `token`, `hdr`). The first distinct
     /// value gets `{dl:base}`; further distinct values get `{dl:base:<8 hex>}`.
     fn intern(&self, base: &str, value: &str) -> String {
-        let Ok(mut g) = self.0.lock() else {
-            return value.to_owned();
+        let mut entries = self.lock();
+        let key = if let Some(first) = entries.get(base) {
+            if first == value {
+                return format!("{{dl:{base}}}");
+            }
+            let hash_key = format!("{base}:{}", short_hash(value));
+            let mut key = hash_key.clone();
+            let mut attempt = 1;
+            while let Some(previous) = entries.get(&key) {
+                if previous == value {
+                    return format!("{{dl:{key}}}");
+                }
+                key = format!("{hash_key}:{attempt}");
+                attempt += 1;
+            }
+            key
+        } else {
+            base.to_owned()
         };
-        match g.get(base) {
-            None => {
-                g.insert(base.to_owned(), value.to_owned());
-                format!("{{dl:{base}}}")
-            }
-            Some(v) if v == value => format!("{{dl:{base}}}"),
-            Some(_) => {
-                let key = format!("{base}:{}", short_hash(value));
-                g.entry(key.clone()).or_insert_with(|| value.to_owned());
-                format!("{{dl:{key}}}")
-            }
+        entries.insert(key.clone(), value.to_owned());
+        format!("{{dl:{key}}}")
+    }
+
+    fn lock(&self) -> MutexGuard<'_, HashMap<String, String>> {
+        // A poisoned lock must never push raw credentials into a template. The map's
+        // individual entries remain valid and can still resolve earlier placeholders.
+        self.entries.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub(crate) fn attach(&self, secrets: Arc<dyn SecretStore>, uuid: &str) -> Result<()> {
+        let reference = secret_ref(uuid, SecretKind::Credentials);
+        let entries = secrets
+            .get(&reference)?
+            .map(|value| serde_json::from_str::<HashMap<String, String>>(value.expose()))
+            .transpose()?
+            .unwrap_or_default();
+        let persisted = entries.len().into();
+        self.load(entries);
+        let _ = self.backend.set(VaultBackend {
+            secrets,
+            reference,
+            persisted,
+        });
+        Ok(())
+    }
+
+    pub(crate) async fn persist(&self) -> Result<()> {
+        let Some(backend) = self.backend.get() else {
+            return Ok(());
+        };
+        use std::sync::atomic::Ordering::Relaxed;
+        if self.lock().len() == backend.persisted.load(Relaxed) {
+            return Ok(());
         }
+        let vault = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let Some(backend) = vault.backend.get() else {
+                return Ok(());
+            };
+            let entries = vault.lock();
+            if entries.len() != backend.persisted.load(Relaxed) {
+                let value = SecretString::new(serde_json::to_string(&*entries)?);
+                backend.secrets.set(&backend.reference, &value)?;
+                backend.persisted.store(entries.len(), Relaxed);
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|_| AppError::local("Saving credentials was interrupted."))?
+    }
+
+    fn credential(&self, base: &str, value: &str) -> String {
+        if value.is_empty() || is_placeholder(value) {
+            return value.to_owned();
+        }
+        self.intern(base, value)
     }
 
     /// Replace credentials in a URL (or URL-bearing string) with placeholders. Idempotent.
@@ -93,42 +153,49 @@ impl Vault {
         if let Some(re) = USERINFO.as_ref() {
             s = re
                 .replace_all(&s, |c: &Captures| {
-                    if is_placeholder(&c[2]) {
-                        return c[0].to_owned();
-                    }
-                    format!(
-                        "{}{}:{}@",
-                        &c[1],
-                        self.intern("user", &c[2]),
-                        self.intern("pass", &c[3])
-                    )
-                })
-                .into_owned();
-        }
-        if let Some(re) = USERINFO_USER_ONLY.as_ref() {
-            s = re
-                .replace_all(&s, |c: &Captures| {
-                    format!("{}{}@", &c[1], self.intern("user", &c[2]))
+                    // Colons inside placeholders are part of the username, not separators.
+                    let user_info = &c[2];
+                    let separator = PLACEHOLDER
+                        .as_ref()
+                        .and_then(|re| re.find(user_info))
+                        .filter(|p| p.start() == 0)
+                        .map_or(0, |p| p.end());
+                    let templated = match user_info[separator..].find(':') {
+                        Some(i) => {
+                            let (user, pass) = user_info.split_at(separator + i);
+                            format!(
+                                "{}:{}",
+                                self.credential("user", user),
+                                self.credential("pass", &pass[1..])
+                            )
+                        }
+                        None => self.credential("user", user_info),
+                    };
+                    format!("{}{templated}@", &c[1])
                 })
                 .into_owned();
         }
         if let Some(re) = XTREAM_PATH.as_ref() {
             s = re
                 .replace_all(&s, |c: &Captures| {
-                    if is_placeholder(&c[2]) || is_placeholder(&c[3]) {
-                        return c[0].to_owned();
-                    }
                     format!(
-                        "{}{}/{}{}",
+                        "{}{}/{}",
                         &c[1],
-                        self.intern("user", &c[2]),
-                        self.intern("pass", &c[3]),
-                        &c[4]
+                        self.credential("user", &c[2]),
+                        self.credential("pass", &c[3]),
                     )
                 })
                 .into_owned();
         }
-        if let Some(re) = QUERY.as_ref() {
+        if let Some(re) = HLS_TOKEN.as_ref() {
+            s = re
+                .replace_all(&s, |c: &Captures| {
+                    format!("{}{}", &c[1], self.credential("token", &c[2]))
+                })
+                .into_owned();
+        }
+        {
+            let re = &*crate::redact::QUERY_CRED;
             s = re
                 .replace_all(&s, |c: &Captures| {
                     let val = &c[3];
@@ -149,8 +216,8 @@ impl Vault {
 
     /// Template a header value when the header name is a credential header.
     pub fn template_header(&self, name: &str, value: &str) -> String {
-        if HEADERS.contains(&name.to_ascii_lowercase().as_str()) && !is_placeholder(value) {
-            self.intern("hdr", value)
+        if crate::redact::is_credential_header(name) {
+            self.credential("hdr", value)
         } else {
             self.template_url(value)
         }
@@ -162,10 +229,7 @@ impl Vault {
         let Some(re) = PLACEHOLDER.as_ref() else {
             return Ok(s.to_owned());
         };
-        let g = self
-            .0
-            .lock()
-            .map_err(|_| AppError::local("The credential store is unavailable."))?;
+        let g = self.lock();
         let mut missing = false;
         let out = re
             .replace_all(s, |c: &Captures| match g.get(&c[1]) {
@@ -185,17 +249,15 @@ impl Vault {
     }
 
     pub fn export(&self) -> HashMap<String, String> {
-        self.0.lock().map(|g| g.clone()).unwrap_or_default()
+        self.lock().clone()
     }
 
     pub fn load(&self, map: HashMap<String, String>) {
-        if let Ok(mut g) = self.0.lock() {
-            *g = map;
-        }
+        *self.lock() = map;
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.lock().map(|g| g.is_empty()).unwrap_or(true)
+        self.lock().is_empty()
     }
 
     /// Serialise for the keychain.
@@ -245,6 +307,38 @@ mod tests {
     }
 
     #[test]
+    fn templates_tokens_and_headers_covered_by_redaction() {
+        let v = Vault::new();
+        let url = "https://u:colon:password@iptv.test/proxy/hls/session-token/index.m3u8?x-plex-token=plex-token;refresh_token=refresh-secret";
+        let template = v.template_url(url);
+        for secret in [
+            "colon:password",
+            "session-token",
+            "=plex-token",
+            "refresh-secret",
+        ] {
+            assert!(!template.contains(secret));
+        }
+        assert_eq!(v.resolve(&template).unwrap(), url);
+        assert_eq!(v.template_url(&template), template);
+        for header in ["X-Plex-Token", "Set-Cookie"] {
+            let template = v.template_header(header, "header-secret");
+            assert_eq!(v.template_header(header, &template), template);
+            assert_eq!(v.resolve(&template).unwrap(), "header-secret");
+            assert_eq!(
+                crate::redact::redact_header_value(header, "header-secret"),
+                "***"
+            );
+        }
+        let mixed = v.template_url("https://iptv.test/live/{dl:user}/new-pass!/1.ts");
+        assert!(!mixed.contains("new-pass!"));
+        assert_eq!(
+            v.resolve(&mixed).unwrap(),
+            "https://iptv.test/live/u/new-pass!/1.ts"
+        );
+    }
+
+    #[test]
     fn differing_values_get_hash_keys_and_plain_urls_are_untouched() {
         let v = Vault::new();
         let a = v.template_url("http://h.test/a?token=aaaaaaaa");
@@ -289,6 +383,36 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.code, crate::ErrorCode::Auth);
         assert_eq!(v.resolve("no placeholders").unwrap(), "no placeholders");
+    }
+
+    #[test]
+    fn hash_collisions_preserve_both_values() {
+        let v = Vault::new();
+        let collision_key = format!("token:{}", short_hash("new-token"));
+        v.load(HashMap::from([
+            ("token".into(), "first".into()),
+            (collision_key.clone(), "older-colliding-token".into()),
+        ]));
+        let url = "https://iptv.test/?token=new-token";
+        let template = v.template_url(url);
+        assert_eq!(v.resolve(&template).unwrap(), url);
+        assert_eq!(v.template_url(url), template);
+        assert_eq!(
+            v.resolve(&format!("{{dl:{collision_key}}}")).unwrap(),
+            "older-colliding-token"
+        );
+    }
+
+    #[test]
+    fn a_poisoned_lock_still_templates_and_resolves() {
+        let v = Vault::new();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = v.lock();
+            panic!("poison test");
+        }));
+        let template = v.template_header("Authorization", "Bearer secret");
+        assert_eq!(template, "{dl:hdr}");
+        assert_eq!(v.resolve(&template).unwrap(), "Bearer secret");
     }
 
     #[test]

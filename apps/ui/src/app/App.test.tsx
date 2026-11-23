@@ -40,7 +40,7 @@ describe('app shell', () => {
     expect(await screen.findByTestId('update-card')).toBeInTheDocument();
     expect(screen.getByTestId('settings-update-dot')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Restart and update' })).toBeEnabled();
-    expect(screen.getByText(/Faster guide scrolling/)).toBeInTheDocument();
+    expect(await screen.findByText(/Faster guide scrolling/)).toBeInTheDocument();
     window.history.pushState({}, '', '/');
   });
 

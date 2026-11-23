@@ -1,0 +1,110 @@
+/* Channel timeline (DESIGN §6 player): fixed centre thumb, the track slides beneath it, programme gaps. */
+.root {
+  position: relative;
+  flex: 1;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  cursor: grab;
+  touch-action: none;
+  border-radius: var(--mantine-radius-sm);
+}
+.root[data-dragging] { cursor: grabbing; }
+.root[data-disabled] { cursor: default; }
+.root:focus-visible { box-shadow: var(--dl-focus-ring-video); }
+
+.track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  container-type: inline-size;
+}
+
+/* One programme. Inner edges are pulled in by half the gap; the bar's outer ends are not. */
+.segment {
+  --gap: 0.25rem;
+  --gs: calc(var(--gap) / 2);
+  --ge: calc(var(--gap) / 2);
+  position: absolute;
+  inset: 0 calc((1 - var(--seg-end)) * 100% + var(--ge)) 0 calc(var(--seg-start) * 100% + var(--gs));
+  overflow: hidden;
+  border-radius: var(--mantine-radius-xs);
+  background: rgb(255 255 255 / 0.06);
+  transition: transform 120ms var(--dl-ease);
+}
+.segment[data-first] { --gs: 0rem; }
+.segment[data-last] { --ge: 0rem; }
+.root:hover .segment[data-hovered] { transform: scaleY(1.75); }
+
+/* Spans the whole bar so every layer is placed in bar coordinates and clipped by its segment. */
+.layers {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 100cqw;
+  left: calc(-1 * (var(--seg-start) * 100cqw + var(--gs)));
+}
+.available,
+.played,
+.ahead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.available { background: rgb(255 255 255 / 0.18); }
+.ahead { background: rgb(255 255 255 / 0.32); }
+.played { background: var(--dl-accent); }
+
+.liveEdge {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 12px;
+  margin: -0.375rem 0 0 -0.0625rem;
+  border-radius: var(--mantine-radius-xs);
+  background: var(--dl-live);
+  pointer-events: none;
+}
+
+.thumb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -0.4375rem 0 0 -0.4375rem;
+  border-radius: 50%;
+  background: var(--dl-on-video);
+  box-shadow: 0 0 0 2px var(--dl-accent);
+  pointer-events: none;
+}
+.root[data-dragging] .thumb { transform: scale(0.9); }
+.root[data-disabled] .thumb { display: none; }
+
+.tip {
+  position: absolute;
+  bottom: 28px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.125rem var(--mantine-spacing-sm);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--dl-glass-solid);
+  border: 1px solid var(--dl-hairline);
+  font-size: var(--mantine-font-size-sm);
+  color: var(--dl-on-video);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.tipTitle {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--dl-text-dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .segment { transition: none; }
+}

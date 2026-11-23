@@ -8,6 +8,10 @@ const MOVIE_CATS = ['Action', 'Comedy', 'Drama', 'Family', 'Documentary', 'Sci-f
 const SERIES_CATS = ['Drama', 'Comedy', 'Crime', 'Reality', 'Kids'];
 const PLOT = 'A synthetic plot summary for the mock backend. Two people, one long night, and a decision that changes the rest of the season.';
 
+// `?mock=showcase` (marketing screenshots): posters point at `/showcase/...`, which the screenshot spec serves.
+const showcase = typeof location !== 'undefined' && new URLSearchParams(location.search).get('mock') === 'showcase';
+const art = (kind: 'poster' | 'backdrop', i: number): string | null => (showcase ? `/showcase/${kind}/${i % 24}` : null);
+
 const title = (i: number) => `${WORDS_A[i % WORDS_A.length]} ${WORDS_B[(i * 7 + Math.floor(i / 16)) % WORDS_B.length]}${i >= 256 ? ` ${Math.floor(i / 256) + 1}` : ''}`;
 
 let movies: Movie[] | null = null;
@@ -23,7 +27,7 @@ export function vodCategories(kind: 'movie' | 'series'): VodCategory[] {
 function allMovies(): Movie[] {
   movies ??= Array.from({ length: 2400 }, (_, i): Movie => ({
     id: i + 1, title: title(i), year: 1980 + ((i * 11) % 45), rating: i % 9 === 0 ? null : 4 + ((i * 7) % 55) / 10,
-    durationSecs: (80 + ((i * 13) % 70)) * 60, poster: null, backdrop: null, plot: PLOT,
+    durationSecs: (80 + ((i * 13) % 70)) * 60, poster: art('poster', i), backdrop: art('backdrop', i), plot: PLOT,
     genres: [GENRES[i % GENRES.length]!, GENRES[(i + 3) % GENRES.length]!], categoryId: (i % MOVIE_CATS.length) + 1,
     resumeSecs: i % 6 === 0 ? 1800 + i : null, watched: i % 10 === 3,
   }));
@@ -32,7 +36,7 @@ function allMovies(): Movie[] {
 
 function allSeries(): Series[] {
   seriesList ??= Array.from({ length: 320 }, (_, i): Series => ({
-    id: i + 1, title: title(i + 5), year: 1995 + ((i * 3) % 30), rating: 5 + ((i * 3) % 45) / 10, poster: null, backdrop: null,
+    id: i + 1, title: title(i + 5), year: 1995 + ((i * 3) % 30), rating: 5 + ((i * 3) % 45) / 10, poster: art('poster', i + 7), backdrop: art('backdrop', i + 7),
     plot: PLOT, genres: [GENRES[i % GENRES.length]!], categoryId: (i % SERIES_CATS.length) + 1, seasonCount: 1 + (i % 4),
   }));
   return seriesList;
@@ -96,7 +100,9 @@ let nextRec = 100;
 function seed(now: number): void {
   if (recs) return;
   const mk = (i: number, status: Recording['status'], off: number, dur: number, extra: Partial<Recording> = {}): Recording => ({
-    id: i, title: title(i * 3), channelId: 100 + (i % 6), channelName: ['Harbor News 24', 'Meridian One', 'Cobalt Sports', 'Lantern Cinema', 'Orchard Kids', 'Northwind Docs'][i % 6]!,
+    id: i, title: title(i * 3), subtitle: i % 2 ? ['Low Tide', 'Second Light', 'Paper Boats', 'Signal and Noise', 'The Lantern Keeper'][i % 5]! : null,
+    description: 'Synthetic recording description from the guide.', season: i % 2 ? 1 + (i % 3) : null, episode: i % 2 ? i : null,
+    channelId: 100 + (i % 6), channelName: ['Harbor News 24', 'Meridian One', 'Cobalt Sports', 'Lantern Cinema', 'Orchard Kids', 'Northwind Docs'][i % 6]!,
     startUtc: now + off, endUtc: now + off + dur, status, ruleId: null, ruleLabel: null, sizeBytes: status === 'completed' ? 800_000_000 + i * 90_000_000 : null, error: null, ...extra,
   });
   recs = [

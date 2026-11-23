@@ -254,3 +254,26 @@ async fn prune_uses_max_catchup_days() {
     assert_eq!(prune(&store, now).await.unwrap(), 1);
     let _ = sid;
 }
+
+#[tokio::test]
+async fn prune_keeps_the_visible_past_without_catchup() {
+    let (store, _sid, c) = seeded().await;
+    sqlx::query("UPDATE channel SET catchup_days = 0")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let now = 10 * 86_400;
+    store
+        .upsert_programmes(&[
+            p(c, now - 4 * 3600, now - 3 * 3600, "gone"),
+            p(c, now - 2 * 3600, now - 3600, "just ended"),
+            p(c, now - 600, now + 600, "airing"),
+        ])
+        .await
+        .unwrap();
+    assert_eq!(
+        prune(&store, now).await.unwrap(),
+        1,
+        "only the one older than 2 h"
+    );
+}

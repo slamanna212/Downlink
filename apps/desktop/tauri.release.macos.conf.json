@@ -3,7 +3,8 @@
     "macOS": {
       "minimumSystemVersion": "13.0",
       "entitlements": "entitlements.plist",
-      "files": { "Frameworks": "../../tools/mpv/out/macos/Frameworks" }
-    }
+      "files": { "Frameworks/libmpv.2.dylib": "../../tools/mpv/out/macos/Frameworks/libmpv.2.dylib" }
+    },
+    "resources": { "../../tools/mpv/out/macos/licenses/": "mpv-licenses/" }
   }
 }

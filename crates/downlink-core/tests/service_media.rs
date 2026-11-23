@@ -127,7 +127,7 @@ async fn caps_advertise_vod_and_dvr_when_the_account_can_use_them() {
 /// A category the server counts as empty is not offered (61 of 64 on the reference server).
 #[tokio::test]
 async fn empty_vod_categories_are_hidden() {
-    let (s, svc, _id, _d) = dispatcharr().await;
+    let (s, svc, id, _d) = dispatcharr().await;
     Mock::given(method("GET"))
         .and(path("/api/vod/movies/"))
         .and(query_param("category", "Comedy"))
@@ -138,6 +138,8 @@ async fn empty_vod_categories_are_hidden() {
         .with_priority(1)
         .mount(&s)
         .await;
+    // The cache is recomputed by the catalog sync only.
+    svc.sync_source(id).await.unwrap();
     let cats = svc.list_vod_categories(VodKindArg::Movie).await.unwrap();
     assert_eq!(
         cats.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
@@ -146,14 +148,18 @@ async fn empty_vod_categories_are_hidden() {
 }
 
 #[tokio::test]
-async fn vod_categories_load_before_counts_and_reuse_names_for_pages() {
+async fn vod_categories_come_from_the_sync_cache_not_the_provider() {
     let (server, svc, _, _dir) = dispatcharr().await;
     let before = server.received_requests().await.unwrap().len();
     let categories = svc.vod_categories(VodKindArg::Movie, false).await.unwrap();
-    assert!(categories.iter().all(|c| c.count_pending));
-    let after_names = server.received_requests().await.unwrap();
-    assert_eq!(after_names[before..].len(), 1);
-    assert_eq!(after_names[before].url.path(), "/api/vod/categories/");
+    let again = svc.list_vod_categories(VodKindArg::Movie).await.unwrap();
+    assert_eq!(categories.len(), again.len());
+    assert!(categories.iter().all(|c| c.count > 0 && !c.count_pending));
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        before,
+        "listing categories must not touch the provider"
+    );
 
     let movies = svc
         .movie_page(
@@ -173,17 +179,6 @@ async fn vod_categories_load_before_counts_and_reuse_names_for_pages() {
             .unwrap()
             .backdrop
             .is_some()
-    );
-    let counts = svc.list_vod_categories(VodKindArg::Movie).await.unwrap();
-    assert!(counts.iter().all(|c| c.count > 0 && !c.count_pending));
-
-    let after = server.received_requests().await.unwrap();
-    assert_eq!(
-        after[before..]
-            .iter()
-            .filter(|r| r.url.path() == "/api/vod/categories/")
-            .count(),
-        1
     );
 }
 
@@ -1142,7 +1137,7 @@ async fn recording_rows_link_to_their_rules_and_play_via_the_captured_urls() {
     let s = bare_server().await;
     get(&s, "/api/vod/movies/", json!({"count": 0, "results": []})).await;
     get(&s, "/api/vod/series/", json!({"count": 0, "results": []})).await;
-    get(&s, "/api/channels/recordings/", tfx("recordings_list.json")).await;
+    get(&s, "/api/channels/recordings/", recordings_as_of_now()).await;
     get(
         &s,
         "/api/channels/recurring-rules/",
@@ -1190,6 +1185,35 @@ async fn recording_rows_link_to_their_rules_and_play_via_the_captured_urls() {
     let play = svc.play_recording(stopped.id).await.unwrap();
     assert!(play.plan.url.ends_with("/api/channels/recordings/29/file/"));
     assert_eq!(play.plan.headers[0].0, "X-API-Key");
+}
+
+/// `recordings_list.json` with every time moved so the moment it was captured is now: its finished
+/// recordings stay finished and its scheduled ones stay upcoming whatever today's date is.
+fn recordings_as_of_now() -> Value {
+    // After the fixture's last finished recording, before its first scheduled one.
+    const CAPTURED_AT: &str = "2026-11-20T06:00:00Z";
+    fn shift(v: &mut Value, by: chrono::TimeDelta) {
+        match v {
+            Value::Object(m) => {
+                for (k, x) in m.iter_mut() {
+                    if let (true, Value::String(t)) = (k.ends_with("_time"), &*x)
+                        && let Ok(d) = chrono::DateTime::parse_from_rfc3339(t)
+                    {
+                        *x = Value::String((d + by).to_rfc3339());
+                    } else {
+                        shift(x, by);
+                    }
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(|x| shift(x, by)),
+            _ => {}
+        }
+    }
+    let captured = chrono::DateTime::parse_from_rfc3339(CAPTURED_AT).unwrap();
+    let by = chrono::TimeDelta::seconds(downlink_core::sync::now_utc() - captured.timestamp());
+    let mut v = tfx("recordings_list.json");
+    shift(&mut v, by);
+    v
 }
 
 /// PLAN M4: "resume lands within 2 s of the saved position" for movies, episodes and recordings.

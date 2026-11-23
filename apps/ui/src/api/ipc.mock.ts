@@ -8,6 +8,7 @@ import {
   type AppError,
   type AppSettings,
   type Channel,
+  type PlexStatus,
   type UpdateStatus,
   type Group,
   type NowNext,
@@ -17,6 +18,7 @@ import {
   type Transition,
   type MultiviewState,
   type MultiviewTile,
+  type MediaDetails,
 } from './types';
 
 const NAMES = [
@@ -29,6 +31,37 @@ const QUALITIES: Channel['quality'][] = ['HD', 'FHD', '4K', 'SD'];
 const TITLES = ['The Long Field', 'Evening Bulletin', 'Deep Water', 'Paper Planets', 'Robot Garden', 'A Quiet Harbour', 'Inside the Cell', 'Forecast', 'Late Mix', 'Fieldwork S2 E4'];
 
 const nowSec = () => Math.floor(Date.now() / 1000);
+
+/** Synthetic details: the "source" fields always, the TMDB-only extras when a key is set. */
+export function mockDetails(base: Partial<MediaDetails> & Pick<MediaDetails, 'kind' | 'title'>, tmdb: boolean): MediaDetails {
+  const episodic = base.season != null && base.episode != null;
+  return {
+    episodeTitle: null, season: null, episode: null, description: null, overview: null, tagline: null,
+    genres: ['Drama', 'Mystery'], year: 2024, airDate: episodic ? '2024-03-02' : null, runtimeMins: 60,
+    certification: 'TV-14', score: tmdb ? 8.1 : null, country: 'GB', language: 'en', network: tmdb ? 'Synthetic One' : null,
+    status: tmdb && episodic ? 'Returning Series' : null, seasonCount: tmdb && episodic ? 4 : null,
+    cast: [
+      { name: 'Ann Example', role: 'Detective Vale', photo: null, guest: false },
+      { name: 'Bo Sample', role: 'The Keeper', photo: null, guest: true },
+      { name: 'Cy Placeholder', role: 'Harbourmaster', photo: null, guest: false },
+      { name: 'Di Demo', role: 'Dr Moss', photo: null, guest: false },
+      { name: 'Ed Mockley', role: null, photo: null, guest: false },
+    ],
+    crew: [
+      { job: 'creator', names: ['Fay Fiction'] },
+      { job: 'director', names: ['Rae Director'] },
+      { job: 'writer', names: ['Wes Writer', 'Gil Draft'] },
+    ],
+    poster: null, backdrop: null, still: null, logo: null,
+    videoQuality: 'HDTV', aspectRatio: '16:9', audio: 'stereo',
+    isNew: false, isLive: false, isPremiere: false, isFinale: false, isRepeat: !base.isNew && !base.isPremiere, advisories: ['Violence'],
+    trailerUrl: tmdb ? 'https://www.youtube.com/watch?v=trailerKey1' : null,
+    tmdbUrl: tmdb ? 'https://www.themoviedb.org/tv/4242' : null, fromTmdb: tmdb,
+    ...(tmdb && episodic ? { overview: 'A small coastal team untangles the oldest secrets of a town that would rather forget them.', episodeTitle: base.episodeTitle ?? 'The Lantern Keeper' } : {}),
+    ...(tmdb ? { tagline: 'Every light has a keeper.' } : {}),
+    ...Object.fromEntries(Object.entries(base).filter(([, v]) => v != null)),
+  } as MediaDetails;
+}
 
 export function mockSources(empty: boolean, status: Source['status'] = 'connected'): Source[] {
   if (empty) return [];
@@ -76,6 +109,8 @@ const GUIDE_ANCHOR_DAYS = 5;
 const scheduleCache = new Map<number, Programme[]>();
 
 /** Full synthetic schedule for a channel (anchor .. anchor+14d), built once per channel. */
+const EP_TITLES = ['The Lantern Keeper', 'Low Tide', 'A Map of Small Things', 'Signal and Noise', 'The Long Way Round', 'Paper Boats', 'Second Light', 'What the River Kept'];
+
 function fullSchedule(channelId: number): Programme[] {
   const hit = scheduleCache.get(channelId);
   if (hit) return hit;
@@ -88,8 +123,11 @@ function fullSchedule(channelId: number): Programme[] {
       const dur = (DURS[(channelId * 7 + i * 3) % DURS.length] ?? 60) * 60;
       out.push({
         id: `${channelId}:${t}`, channelId, startUtc: t, endUtc: t + dur, title: TITLES[(channelId + i) % TITLES.length] ?? 'Programme',
-        subtitle: null, description: 'Synthetic programme description. Headlines, features and a closing segment, generated for the mock backend.',
-        season: null, episode: null, isNew: i % 7 === 0, isLive: false, isPremiere: false, isFinale: false, isScheduled: false,
+        // Every other slot is an episode of a series, so S/E, episode titles and flags show up in the UI.
+        subtitle: i % 2 === 0 ? EP_TITLES[(channelId + i) % EP_TITLES.length] ?? null : null,
+        description: 'Synthetic programme description. Headlines, features and a closing segment, generated for the mock backend.',
+        season: i % 2 === 0 ? 1 + ((channelId + i) % 4) : null, episode: i % 2 === 0 ? 1 + (i % 12) : null,
+        isNew: i % 7 === 0, isLive: channelId % 6 === 2 && i % 2 === 1, isPremiere: i % 23 === 0, isFinale: i % 29 === 0, isScheduled: false,
       });
       t += dur;
     }
@@ -125,10 +163,10 @@ export function mockNowNext(channelId: number, now = nowSec(), scheduled?: Reado
 /** Synthetic tracks: two audio languages and subtitles including a teletext page. */
 export function mockTracks(): PlayerState['tracks'] {
   return [
-    { id: 1, kind: 'audio', lang: 'eng', title: 'Main', codec: 'ac3', selected: true },
-    { id: 2, kind: 'audio', lang: 'deu', title: null, codec: 'mp2', selected: false },
-    { id: 1, kind: 'sub', lang: 'eng', title: 'Teletext 888', codec: 'dvb_teletext', selected: false },
-    { id: 2, kind: 'sub', lang: 'fra', title: null, codec: 'dvb_subtitle', selected: false },
+    { id: 1, kind: 'audio', lang: 'eng', title: 'Main', codec: 'ac3', channels: '5.1', default: true, selected: true },
+    { id: 2, kind: 'audio', lang: 'deu', title: null, codec: 'mp2', channels: 'stereo', default: false, selected: false },
+    { id: 1, kind: 'sub', lang: 'eng', title: 'Teletext 888', codec: 'dvb_teletext', channels: null, default: false, selected: false },
+    { id: 2, kind: 'sub', lang: 'fra', title: null, codec: 'dvb_subtitle', channels: null, default: false, selected: false },
   ];
 }
 
@@ -136,7 +174,7 @@ export function idleState(): PlayerState {
   return {
     state: 'Idle', mode: null, channelId: null, position: null, duration: null, buffered: null, seekable: false,
     volume: 100, muted: false, hwdecCurrent: null, videoCodec: null, width: null, height: null, waitingOn: null, reconnecting: false,
-    error: null, transitionedAt: Date.now(), programme: null, title: null, resumeAt: null, tracks: [],
+    error: null, transitionedAt: Date.now(), programme: null, title: null, mediaId: null, resumeAt: null, tracks: [], timeline: null,
   };
 }
 
@@ -149,7 +187,9 @@ export function createMockBackend(): Backend {
   // `?mock=newerdb` / `?mock=cert`: catalogue calls fail with the blocking messages until the user resolves them.
   let blockedBy: 'newerdb' | 'cert' | null = mode === 'newerdb' || mode === 'cert' ? mode : null;
   const blockedError = (): AppError =>
-    blockedBy === 'newerdb' ? appError('local', 'This library was created by a newer version of Downlink.') : appError('server', 'The server’s certificate changed.');
+    blockedBy === 'newerdb'
+      ? appError('local', 'This library was created by a newer version of Downlink.')
+      : { ...appError('auth', 'The server’s certificate changed.'), sourceId: sources[0]?.id };
   const reconnectFlag = typeof location !== 'undefined' && new URLSearchParams(location.search).has('reconnect');
   const failReason = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('reason') : null;
   const failError = (): AppError =>
@@ -161,11 +201,23 @@ export function createMockBackend(): Backend {
   const channels = mode === 'empty' ? [] : mockChannels(mode === 'big' ? 5000 : 240);
   const scheduled = new Set<string>();
   let tick: ReturnType<typeof setInterval> | null = null;
+  // Live timeshift mock: seconds behind the edge and when the buffer started.
+  let behind = 0;
+  let liveSince = 0;
+  const liveTimeline = (): PlayerState['timeline'] => {
+    const now = nowSec();
+    const bufferStartUtc = Math.max(liveSince, now - 3600);
+    return { playheadUtc: now - behind, liveEdgeUtc: now, bufferStartUtc, archiveStartUtc: null, behindLiveSecs: behind, source: behind > 5 ? 'buffer' : 'live' };
+  };
   const groups = mockGroups();
   let settings: AppSettings = {
-    liveBufferSecs: 2, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
+    liveBufferSecs: 2, timeshiftMinutes: 60, hwdec: 'auto-safe', debugLogging: false, audioDevice: null, audioOutput: 'stereo',
     deinterlace: 'auto', hdrOutput: 'auto', subtitleSize: 100, subtitleBackground: true, resumeLastChannel: false,
+    autoRefreshHours: 4, refreshDuringPlayback: true,
   };
+  let plex: PlexStatus = { signedIn: false, accountName: null, serverId: null, serverName: null };
+  let plexPinChecks = 0;
+  let tmdbKey = mode === 'tmdb';
   let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, notes: null, lastChecked: null, ready: false };
   let searchIndex: { programme: Programme; channel: Channel; hay: string }[] | null = null;
   let statsTimer: ReturnType<typeof setInterval> | null = null;
@@ -261,7 +313,7 @@ export function createMockBackend(): Backend {
       if (!p) throw appError('stream', 'That programme is not available to play.');
       const dur = p.endUtc - p.startUtc;
       const saved = p.channelId % 2 === 0 ? Math.floor(dur / 3) : null;
-      setPlayer({ state: 'Resolving', mode: 'catchup', channelId: p.channelId, programme: p, position: resume && saved ? saved : 0, duration: dur, buffered: 0, seekable: true, resumeAt: resume && saved ? saved : null, error: null });
+      setPlayer({ state: 'Resolving', mode: 'catchup', channelId: p.channelId, programme: p, title: null, mediaId: null, position: resume && saved ? saved : 0, duration: dur, buffered: 0, seekable: true, resumeAt: resume && saved ? saved : null, error: null });
       seekableTicker('catchup');
       return null;
     },
@@ -275,7 +327,7 @@ export function createMockBackend(): Backend {
       const [cid] = programmeId.split(':').map(Number);
       const p = genProgrammes(cid ?? 0, 0, 4e9, scheduled).find((x) => x.id === programmeId);
       const ch = channels.find((c) => c.id === cid);
-      if (p && ch) vod.addRecording(nowSec(), { title: p.title ?? ch.name, channelId: ch.id, channelName: ch.name, startUtc: p.startUtc, endUtc: p.endUtc }, kind === 'series');
+      if (p && ch) vod.addRecording(nowSec(), { title: p.title ?? ch.name, subtitle: p.subtitle, description: p.description, season: p.season, episode: p.episode, channelId: ch.id, channelName: ch.name, startUtc: p.startUtc, endUtc: p.endUtc }, kind === 'series');
       emit('catalog://updated', { scope: 'recordings', sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
       return null;
     },
@@ -342,7 +394,7 @@ export function createMockBackend(): Backend {
       const info = vod.vodInfo(kind, id);
       if (!info) throw appError('stream', 'This title is not available to play right now. Try again later.');
       const at = resume && info.resumeSecs ? info.resumeSecs : 0;
-      setPlayer({ state: 'Resolving', mode: 'vod', channelId: null, programme: null, title: info.title, position: at, duration: info.durationSecs, buffered: at, seekable: true, resumeAt: null, error: null });
+      setPlayer({ state: 'Resolving', mode: 'vod', channelId: null, programme: null, title: info.title, mediaId: id, position: at, duration: info.durationSecs, buffered: at, seekable: true, resumeAt: null, error: null });
       seekableTicker('vod');
       return null;
     },
@@ -373,14 +425,22 @@ export function createMockBackend(): Backend {
       if (!r) throw appError('stream', 'That recording is gone. It may have been deleted.');
       const live = r.status === 'recording';
       const dur = (live ? nowSec() : r.endUtc) - r.startUtc;
-      setPlayer({ state: 'Resolving', mode: 'recording', channelId: r.channelId, programme: null, title: r.title, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: null, error: null });
+      setPlayer({ state: 'Resolving', mode: 'recording', channelId: r.channelId, programme: null, title: r.title, mediaId: id, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: null, error: null });
       seekableTicker('recording');
       return null;
     },
     get_player_state: () => player,
     play_channel: ({ channelId }) => {
       if (new URLSearchParams(location.search).has('failplay')) throw appError('stream', 'The server did not answer. Try again in a moment.');
-      setPlayer({ state: 'Resolving', mode: 'live', channelId, error: null, programme: mockNowNext(channelId, nowSec(), scheduled).now, position: null, duration: null, buffered: null, seekable: false, resumeAt: null });
+      behind = 0;
+      liveSince = nowSec() - 1200;
+      setPlayer({ state: 'Resolving', mode: 'live', channelId, title: null, mediaId: null, error: null, programme: mockNowNext(channelId, nowSec(), scheduled).now, position: null, duration: null, buffered: null, seekable: true, resumeAt: null, timeline: liveTimeline() });
+      if (tick) clearInterval(tick);
+      tick = setInterval(() => {
+        if (player.mode !== 'live') return;
+        if (player.state === 'Paused') behind += 1;
+        setPlayer({ timeline: liveTimeline() });
+      }, 1000);
       setTimeout(() => setPlayer({ state: 'Connecting' }), 150);
       setTimeout(() => {
         // `?fail=<id>` in the URL makes that channel fail, to exercise the error overlay.
@@ -396,7 +456,12 @@ export function createMockBackend(): Backend {
       else if (command.kind === 'stop') setPlayer({ ...idleState(), state: 'Stopped' });
       else if (command.kind === 'setVolume') setPlayer({ volume: command.volume });
       else if (command.kind === 'setMuted') setPlayer({ muted: command.muted });
-      else if (command.kind === 'seek') setPlayer({ position: Math.max(0, Math.min(command.seconds, player.duration ?? command.seconds)) });
+      else if ((command.kind === 'seekTo' || command.kind === 'seekBy') && player.mode === 'live') {
+        const tl = liveTimeline();
+        const target = command.kind === 'seekTo' ? command.utc : (tl?.playheadUtc ?? nowSec()) + command.seconds;
+        behind = Math.max(0, Math.min(nowSec() - target, nowSec() - (tl?.bufferStartUtc ?? nowSec())));
+        setPlayer({ timeline: liveTimeline() });
+      } else if (command.kind === 'seek') setPlayer({ position: Math.max(0, Math.min(command.seconds, player.duration ?? command.seconds)) });
       else if (command.kind === 'setAudioTrack') setPlayer({ tracks: player.tracks.map((t) => (t.kind === 'audio' ? { ...t, selected: t.id === command.id } : t)) });
       else if (command.kind === 'setSubtitleTrack') setPlayer({ tracks: player.tracks.map((t) => (t.kind === 'sub' ? { ...t, selected: t.id === command.id } : t)) });
       else if (command.kind === 'goLive' && player.channelId != null) impl.play_channel({ channelId: player.channelId });
@@ -443,6 +508,7 @@ export function createMockBackend(): Backend {
       void sync(sourceId);
       return null;
     },
+    get_recent_transitions: () => transitions.slice(-3),
     get_diagnostics: () => ({
       appVersion: '0.0.0-mock',
       serverVersions: sources.map((s) => s.serverVersion ?? 'unknown'),
@@ -535,8 +601,11 @@ export function createMockBackend(): Backend {
       streamInUse.set(channelId, index);
       return null;
     },
-    list_audio_devices: () => [{ id: 'default', name: 'System default' }, { id: 'hdmi-1', name: 'Demo TV (HDMI)' }, { id: 'usb-1', name: 'Demo headset (USB)' }],
+    get_video_caps: () => ({ rtxVideo: true, rtxAdapter: 'Demo RTX adapter' }),
+    list_audio_devices: () => [{ id: 'auto', name: 'Autoselect device' }, { id: 'hdmi-1', name: 'Demo TV (HDMI)' }, { id: 'usb-1', name: 'Demo headset (USB)' }],
     get_update_status: () => update,
+    get_release_notes: ({ version }) => ({ version, body: update.notes ?? null, source: 'manifest' as const }),
+    open_external_link: () => null,
     set_update_channel: ({ channel }) => {
       update = { ...update, channel, available: null, notes: null, ready: false };
       emit('update://status', update);
@@ -562,6 +631,65 @@ export function createMockBackend(): Backend {
     },
     set_fullscreen: () => null,
     set_mini_player: () => null,
+    media_server_status: () => ({ plex: { ...plex } }),
+    plex_sign_in_start: () => {
+      plexPinChecks = 0;
+      return { id: 1, code: 'DEMO', authUrl: 'https://app.plex.tv/auth#?code=DEMO' };
+    },
+    plex_sign_in_check: async () => {
+      await wait(300);
+      if (++plexPinChecks < 1) return false;
+      plex = { ...plex, signedIn: true, accountName: 'demo-user' };
+      return true;
+    },
+    plex_servers: () => [
+      { id: 'srv-home', name: 'Home server', owned: true },
+      { id: 'srv-friend', name: 'Friend’s server', owned: false },
+    ],
+    plex_select_server: async ({ serverId }) => {
+      await wait(400);
+      plex = { ...plex, serverId, serverName: serverId === 'srv-home' ? 'Home server' : 'Friend’s server' };
+      return { plex: { ...plex } };
+    },
+    media_server_sign_out: () => {
+      plex = { signedIn: false, accountName: null, serverId: null, serverName: null };
+      return null;
+    },
+    // Synthetic: VOD and recordings with an even id are "in the library".
+    media_server_match: ({ target }) => {
+      if (!plex.serverId) return null;
+      const hit = target.kind === 'programme' ? target.id.length % 2 === 0 : target.id % 2 === 0;
+      return hit
+        ? { server: 'plex' as const, serverName: plex.serverName ?? 'Plex', kind: target.kind === 'vod' ? 'movie' as const : 'show' as const, title: 'Demo title', url: 'https://app.plex.tv/desktop' }
+        : null;
+    },
+    media_server_open: () => null,
+    media_details: async ({ target }) => {
+      await wait(250);
+      if (target.kind === 'programme') {
+        const [cid] = target.id.split(':').map(Number);
+        const p = genProgrammes(cid ?? 0, 0, 4e9, scheduled).find((x) => x.id === target.id);
+        if (!p) throw appError('local', 'That programme is no longer in the guide.');
+        return mockDetails({ kind: 'programme', title: p.title ?? 'Programme', episodeTitle: p.subtitle, season: p.season, episode: p.episode, description: p.description, isNew: p.isNew, isLive: p.isLive, isPremiere: p.isPremiere, isFinale: p.isFinale, runtimeMins: Math.round((p.endUtc - p.startUtc) / 60) }, tmdbKey);
+      }
+      if (target.kind === 'recording') {
+        const r = vod.getRecording(target.id);
+        if (!r) throw appError('local', 'That recording is gone.');
+        return mockDetails({ kind: 'recording', title: r.title, episodeTitle: r.subtitle, season: r.season, episode: r.episode, description: r.description, runtimeMins: Math.round((r.endUtc - r.startUtc) / 60) }, tmdbKey);
+      }
+      return mockDetails({ kind: 'movie', title: 'Demo title', description: 'Synthetic plot for a demo title.' }, tmdbKey);
+    },
+    tmdb_status: () => ({ configured: tmdbKey, language: 'en-US' }),
+    tmdb_set_key: async ({ key }) => {
+      await wait(500);
+      if (key.trim().length < 8) throw appError('auth', 'TMDB rejected the API key.');
+      tmdbKey = true;
+      return { configured: true, language: 'en-US' };
+    },
+    tmdb_clear_key: () => {
+      tmdbKey = false;
+      return { configured: false, language: 'en-US' };
+    },
   };
 
   // `?mock=update`: a newer version is downloaded and waiting (rail dot, Settings → Updates card).

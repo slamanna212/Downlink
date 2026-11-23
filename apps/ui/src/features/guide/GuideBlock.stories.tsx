@@ -30,7 +30,7 @@ export const States: Story = {
         </div>
       ))}
       <div style={{ position: 'relative', height: 64 }}>
-        <GuideBlock p={{ ...P, title: 'Focused (ring)' }} row={0} state="future" x={0} y={0} w={420} h={64} pct={0} focused tabbable />
+        <GuideBlock p={{ ...P, title: 'Focused (tint, no ring)' }} row={0} state="future" x={0} y={0} w={420} h={64} pct={0} focused tabbable />
       </div>
       <span className={classes.blockTime}>Hover any block to see the hover fill.</span>
     </div>

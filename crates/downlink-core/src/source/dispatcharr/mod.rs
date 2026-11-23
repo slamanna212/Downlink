@@ -61,14 +61,14 @@ impl std::fmt::Debug for Credentials {
 #[derive(Debug, Clone)]
 pub struct ClientOptions {
     /// Self-signed certificates, behind an explicit per-source toggle only.
-    pub insecure_tls: bool,
+    pub tls_pin: Option<crate::tls::Pin>,
     pub timeout: Duration,
 }
 
 impl Default for ClientOptions {
     fn default() -> Self {
         Self {
-            insecure_tls: false,
+            tls_pin: None,
             timeout: Duration::from_secs(30),
         }
     }
@@ -163,7 +163,7 @@ pub struct DispatcharrClient {
     http: reqwest::Client,
     base: Url,
     creds: Credentials,
-    insecure_tls: bool,
+    tls_pin: Option<crate::tls::Pin>,
     tokens: tokio::sync::Mutex<Tokens>,
     sem: Semaphore,
     secrets: Mutex<RedactionSet>,
@@ -252,10 +252,14 @@ impl DispatcharrClient {
         opts: ClientOptions,
     ) -> Result<Self> {
         let base = normalise_base_url(base_url)?;
-        let http = crate::tls::apply(reqwest::Client::builder(), opts.insecure_tls)?
-            .timeout(opts.timeout)
-            .user_agent(crate::user_agent())
-            .build()?;
+        let http = crate::http::authenticated(crate::tls::apply(
+            reqwest::Client::builder(),
+            &base,
+            opts.tls_pin.as_ref(),
+        )?)
+        .timeout(opts.timeout)
+        .user_agent(crate::user_agent())
+        .build()?;
         let mut secrets = RedactionSet::new();
         match &creds {
             Credentials::ApiKey(k) => {
@@ -270,7 +274,7 @@ impl DispatcharrClient {
             http,
             base,
             creds,
-            insecure_tls: opts.insecure_tls,
+            tls_pin: opts.tls_pin,
             tokens: tokio::sync::Mutex::new(Tokens::default()),
             sem: Semaphore::new(MAX_CONCURRENT),
             secrets: Mutex::new(secrets),
@@ -329,7 +333,8 @@ impl DispatcharrClient {
                 },
             );
         }
-        let t: TokenDto = resp.json().await?;
+        let bytes = crate::http::read_body(resp, 256 * 1024, AppError::from).await?;
+        let t: TokenDto = serde_json::from_slice(&bytes)?;
         let access = t
             .access
             .ok_or_else(|| AppError::server("The server did not return a token."))?;
@@ -353,7 +358,8 @@ impl DispatcharrClient {
                 .send()
                 .await?;
             if resp.status().is_success() {
-                let t: TokenDto = resp.json().await?;
+                let bytes = crate::http::read_body(resp, 256 * 1024, AppError::from).await?;
+                let t: TokenDto = serde_json::from_slice(&bytes)?;
                 if let Some(a) = t.access {
                     self.remember_secret(&a);
                     tokens.access_exp = jwt_exp(&a);
@@ -403,6 +409,18 @@ impl DispatcharrClient {
         query: &[(&str, String)],
         body: Option<&Value>,
     ) -> Result<Reply> {
+        self.call_bounded(method, path, query, body, 32 * 1024 * 1024)
+            .await
+    }
+
+    async fn call_bounded(
+        &self,
+        method: Method,
+        path: &str,
+        query: &[(&str, String)],
+        body: Option<&Value>,
+        max_bytes: usize,
+    ) -> Result<Reply> {
         let url = self.url(path)?;
         for attempt in 0..2 {
             let (hname, hval) = self.auth_header().await?;
@@ -439,7 +457,7 @@ impl DispatcharrClient {
                 .get(CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned);
-            let body = resp.bytes().await?.to_vec();
+            let body = crate::http::read_body(resp, max_bytes, AppError::from).await?;
             return Ok(Reply {
                 status,
                 retry_after,
@@ -1008,11 +1026,12 @@ impl DispatcharrClient {
 
     pub async fn logo(&self, logo_id: &str) -> Result<Logo> {
         let r = self
-            .call(
+            .call_bounded(
                 Method::GET,
                 &format!("api/channels/logos/{logo_id}/cache"),
                 &[],
                 None,
+                crate::images::MAX_IMAGE_BYTES,
             )
             .await?
             .ok("that logo")?;
@@ -1035,14 +1054,14 @@ impl DispatcharrClient {
         let u = Url::parse(url)?;
         if u.origin() != self.base.origin() || !u.path().starts_with(self.base.path()) {
             // Another host (a poster CDN): fetched anonymously. The key never goes elsewhere.
-            return crate::images::fetch_public(url, self.insecure_tls).await;
+            return crate::images::fetch_public(url, self.tls_pin.as_ref()).await;
         }
         let rel = u.path().strip_prefix(self.base.path()).unwrap_or_default();
         // Keep the query: image URLs select the variant (`?kind=backdrop&index=0`).
         let pairs: Vec<(String, String)> = u.query_pairs().into_owned().collect();
         let q: Vec<(&str, String)> = pairs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
         let r = self
-            .call(Method::GET, rel, &q, None)
+            .call_bounded(Method::GET, rel, &q, None, crate::images::MAX_IMAGE_BYTES)
             .await?
             .ok("that image")?;
         Ok(crate::images::RawImage {
@@ -1083,13 +1102,19 @@ impl DispatcharrClient {
             .iter()
             .find_map(|k| v.get(*k).and_then(|x| x.as_str()))
             .ok_or_else(|| AppError::server("The server did not return a catch-up address."))?;
-        let url = self.base.join(url)?.to_string();
-        self.remember_secret(&id);
+        let id = SessionId(id);
+        self.remember_secret(&id.0);
+        let url = match self.base.join(url) {
+            Ok(url) if url.origin() == self.base.origin() => url.to_string(),
+            _ => {
+                let _ = self.delete_catchup(&id).await;
+                return Err(AppError::stream(
+                    "This catch-up session points at another server.",
+                ));
+            }
+        };
         self.remember_secret(&url);
-        Ok(CatchupSession {
-            id: SessionId(id),
-            url,
-        })
+        Ok(CatchupSession { id, url })
     }
 
     pub async fn catchup_position(&self, session: &SessionId, position_secs: u64) -> Result<()> {
@@ -1131,7 +1156,7 @@ impl DispatcharrClient {
             .base
             .join(&format!("proxy/ts/stream/{channel_uuid}?output_format=hls"))?;
         let auth = self.auth_header().await?;
-        match crate::source::probe_redirect(url.as_str(), &[auth], self.insecure_tls).await? {
+        match crate::source::probe_redirect(url.as_str(), &[auth], self.tls_pin.as_ref()).await? {
             crate::source::RedirectOutcome::Redirect(loc) => {
                 let u = reqwest::Url::parse(loc.expose())?;
                 let token = hls_token_of(u.path()).ok_or_else(|| {
@@ -1219,7 +1244,9 @@ impl DispatcharrClient {
     /// play-time resolve and carry no headers into the plan the player sees.
     pub async fn live_plan(&self, ch: &ChannelKey) -> Result<PlayPlan> {
         let auth = self.auth_header().await?;
-        build_live_plan(&self.base, ch, Some(auth), self.redaction_set())
+        let mut plan = build_live_plan(&self.base, ch, Some(auth), self.redaction_set())?;
+        plan.tls_pin = self.tls_pin.clone();
+        Ok(plan)
     }
 }
 
@@ -1238,6 +1265,15 @@ fn check_app_data_key(key: &str) -> Result<()> {
         Err(AppError::local(
             "Synced data keys must be 8 to 64 characters long.",
         ))
+    }
+}
+
+/// The active provider stream id in a `/proxy/ts/status` payload (number or string).
+fn status_stream_id(v: &Value) -> Option<String> {
+    match v.get("stream_id")? {
+        Value::Number(n) => Some(n.to_string()),
+        Value::String(s) if !s.is_empty() => Some(s.clone()),
+        _ => None,
     }
 }
 
@@ -1285,6 +1321,7 @@ pub fn build_live_plan(
         redact.add(v.expose());
     }
     Ok(PlayPlan {
+        tls_pin: None,
         url: url.to_string(),
         headers: auth.into_iter().collect(),
         surface: Surface::Ts,
@@ -1357,7 +1394,7 @@ impl Source for DispatcharrClient {
         let plan = self.live_plan(&ch).await?;
         // Redirect and Unknown profiles: resolve in Rust with redirects disabled; mpv gets the
         // Location and no key. A 2xx (profile was really Proxy) hands back the original plan.
-        plan.resolve_at_play(self.insecure_tls).await
+        plan.resolve_at_play(self.tls_pin.as_ref()).await
     }
 
     async fn catchup(&self, ch: ChannelKey, p: &Programme) -> Result<PlayPlan> {
@@ -1372,6 +1409,7 @@ impl Source for DispatcharrClient {
         redact.add(s.id.0.clone());
         redact.add(auth.1.expose());
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url: s.url,
             headers: vec![auth],
             surface: Surface::Direct,
@@ -1427,6 +1465,13 @@ impl Source for DispatcharrClient {
         self.provider_info(kind, ext_id).await
     }
 
+    async fn programme_detail(
+        &self,
+        ext_id: &str,
+    ) -> Result<Option<crate::source::ProgrammeExtra>> {
+        self.program_detail(ext_id).await
+    }
+
     async fn play_vod(&self, item: &VodItem) -> Result<PlayPlan> {
         self.vod_plan(item).await
     }
@@ -1479,6 +1524,13 @@ impl Source for DispatcharrClient {
             Some(u) => DispatcharrClient::change_stream(self, u, stream_id).await,
             None => Ok(false),
         }
+    }
+
+    async fn active_stream_id(&self, ch: &ChannelKey) -> Result<Option<String>> {
+        let Some(u) = ch.uuid.as_deref() else {
+            return Ok(None);
+        };
+        Ok(self.ts_status(u).await?.as_ref().and_then(status_stream_id))
     }
 
     async fn channel_stream_info(&self, ch_ext_id: &str) -> Result<Vec<StreamInfo>> {

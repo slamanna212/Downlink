@@ -1,4 +1,4 @@
-# Manual dev build: "Run workflow", pick a branch (normally `dev`). Runs the Linux tests, builds Windows + Linux
+# Manual dev build: "Run workflow", pick a branch (normally `dev`). Runs the Linux tests, builds Windows, Linux, macOS
 # and publishes a pre-release straight away, then points the in-app dev update channel at it. See docs/release.md.
 #
 # Version: vX.Y.Z-dev.<run number>. The run number always increases, so the updater can order dev builds.
@@ -24,7 +24,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       tag: ${{ steps.v.outputs.tag }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Compute dev version and tag
         id: v

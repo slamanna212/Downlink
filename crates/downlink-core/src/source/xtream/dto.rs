@@ -1,7 +1,7 @@
 //! Tolerant Xtream wire types: numbers as strings, missing fields, `null` for "none".
 
 use base64::Engine;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use crate::source::Programme;
@@ -81,7 +81,7 @@ pub struct LiveStreamDto {
     pub direct_source: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct VodStreamDto {
     #[serde(default, deserialize_with = "str_or_empty")]
     pub stream_id: String,
@@ -95,13 +95,22 @@ pub struct VodStreamDto {
     pub container_extension: Option<String>,
     #[serde(default, deserialize_with = "opt_str")]
     pub rating: Option<String>,
+    /// The same score on a 0-5 scale; the fallback when `rating` is absent or zero.
+    #[serde(default, deserialize_with = "opt_str")]
+    pub rating_5based: Option<String>,
     #[serde(default, deserialize_with = "opt_i64")]
     pub added: Option<i64>,
     #[serde(default, deserialize_with = "opt_i64")]
     pub year: Option<i64>,
+    /// Some panels send the TMDB id as `tmdb`, others as `tmdb_id` (separate fields, not an
+    /// alias: a row carrying both must still parse).
+    #[serde(default, deserialize_with = "opt_str")]
+    pub tmdb: Option<String>,
+    #[serde(default, deserialize_with = "opt_str")]
+    pub tmdb_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SeriesDto {
     #[serde(default, deserialize_with = "str_or_empty")]
     pub series_id: String,
@@ -115,12 +124,19 @@ pub struct SeriesDto {
     pub category_id: Option<String>,
     #[serde(default, deserialize_with = "opt_str")]
     pub rating: Option<String>,
+    /// The same score on a 0-5 scale; the fallback when `rating` is absent or zero.
+    #[serde(default, deserialize_with = "opt_str")]
+    pub rating_5based: Option<String>,
     #[serde(default, deserialize_with = "opt_str")]
     pub genre: Option<String>,
     #[serde(rename = "releaseDate", default, deserialize_with = "opt_str")]
     pub release_date: Option<String>,
     #[serde(default, deserialize_with = "first_str")]
     pub backdrop_path: Option<String>,
+    #[serde(default, deserialize_with = "opt_str")]
+    pub tmdb: Option<String>,
+    #[serde(default, deserialize_with = "opt_str")]
+    pub tmdb_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

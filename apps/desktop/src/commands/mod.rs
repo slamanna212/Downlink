@@ -6,6 +6,8 @@ pub mod app;
 pub mod catalog;
 pub mod diagnostics;
 pub mod media;
+pub mod mediaserver;
+pub mod metadata;
 pub mod player;
 pub mod settings;
 pub mod updates;

@@ -156,6 +156,19 @@ impl Store {
         Ok(r.rows_affected())
     }
 
+    /// Drop one source's programmes that ended before `before_utc`.
+    pub async fn prune_source_programmes(&self, source_id: i64, before_utc: i64) -> Result<u64> {
+        let r = sqlx::query(
+            "DELETE FROM programme WHERE end_utc < ?
+               AND channel_id IN (SELECT id FROM channel WHERE source_id = ?)",
+        )
+        .bind(before_utc)
+        .bind(source_id)
+        .execute(self.pool())
+        .await?;
+        Ok(r.rows_affected())
+    }
+
     /// Drop programmes that ended before `before_utc` (PLAN §7.4).
     pub async fn prune_programmes(&self, before_utc: i64) -> Result<u64> {
         let r = sqlx::query("DELETE FROM programme WHERE end_utc < ?")

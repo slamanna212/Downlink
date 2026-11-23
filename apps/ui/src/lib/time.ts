@@ -28,7 +28,11 @@ export function isValidZone(tz: string): boolean {
 
 /** Display zone (defaults to the system zone; the user may override later). */
 export function setDisplayZone(tz: string): void {
-  if (isValidZone(tz)) zone = tz;
+  if (isValidZone(tz)) {
+    zone = tz;
+    clockCache.clear();
+    dayCache = null;
+  }
 }
 export function getDisplayZone(): string {
   return zone;
@@ -43,7 +47,18 @@ function at(epoch: Epoch) {
 export const nowEpoch = (): Epoch => dayjs().unix();
 
 /** 14:05 */
-export const formatClock = (epoch: Epoch): string => at(epoch).format('HH:mm');
+// dayjs.tz is slow (it builds an Intl formatter per call) and the guide formats thousands of block times,
+// so clock strings are memoised per epoch (cleared when the display zone changes, bounded in size).
+const clockCache = new Map<Epoch, string>();
+const CLOCK_CACHE_MAX = 20_000;
+export const formatClock = (epoch: Epoch): string => {
+  const hit = clockCache.get(epoch);
+  if (hit !== undefined) return hit;
+  if (clockCache.size >= CLOCK_CACHE_MAX) clockCache.clear();
+  const s = at(epoch).format('HH:mm');
+  clockCache.set(epoch, s);
+  return s;
+};
 /** Thu 19 Nov */
 export const formatDay = (epoch: Epoch): string => at(epoch).format('ddd D MMM');
 /** Thu 19 Nov, 14:05 */
@@ -73,9 +88,15 @@ export const isLiveNow = (start: Epoch, end: Epoch, now: Epoch = nowEpoch()): bo
 export const minutesLeft = (end: Epoch, now: Epoch = nowEpoch()): number => Math.max(0, Math.ceil((end - now) / 60));
 
 /** Epoch of local midnight (display zone) for the day containing `epoch`. */
-export const startOfDay = (epoch: Epoch): Epoch =>
+export const startOfDay = (epoch: Epoch): Epoch => {
+  // The scroll handler calls this every frame; remember the last local day as [start, end) to skip dayjs.
+  if (dayCache && epoch >= dayCache.start && epoch < dayCache.end) return dayCache.start;
   // dayjs.tz().startOf('day') mis-resolves times on a clock-change day; build the local midnight explicitly.
-  dayjs.tz(`${at(epoch).format('YYYY-MM-DD')}T00:00:00`, zone).unix();
+  const start = dayjs.tz(`${at(epoch).format('YYYY-MM-DD')}T00:00:00`, zone).unix();
+  dayCache = { start, end: addDays(start, 1) };
+  return start;
+};
+let dayCache: { start: Epoch; end: Epoch } | null = null;
 
 /** Floor to a guide tick (default 30 min) in the display zone. */
 export function floorToTick(epoch: Epoch, minutes = 30): Epoch {
@@ -128,4 +149,66 @@ export const recentWindowStart = (hours: number, now: Epoch = nowEpoch()): Epoch
 /** Whole hours and rounded minutes of a duration in seconds. */
 export function splitHoursMinutes(totalSeconds: number): { h: number; m: number } {
   return { h: Math.floor(totalSeconds / 3600), m: Math.round((totalSeconds % 3600) / 60) };
+}
+
+// ---- Channel timeline (player scrub bar): a window of wall-clock time centred on the playhead ----
+
+export interface TimeWindow {
+  start: Epoch;
+  end: Epoch;
+}
+
+/** Window of `spanSeconds` centred on `center`. */
+export const timelineWindow = (center: Epoch, spanSeconds: number): TimeWindow => ({
+  start: center - spanSeconds / 2,
+  end: center + spanSeconds / 2,
+});
+
+/** 0..1 position of `epoch` in the window (not clamped). */
+export const ratioOfEpoch = (w: TimeWindow, epoch: Epoch): number => (w.end > w.start ? (epoch - w.start) / (w.end - w.start) : 0);
+
+/** Epoch at ratio `r` (clamped to 0..1) of the window. */
+export const epochAtRatio = (w: TimeWindow, r: number): Epoch => w.start + Math.min(1, Math.max(0, r)) * (w.end - w.start);
+
+export interface TimelineSegment {
+  /** 0..1 within the window. */
+  start: number;
+  end: number;
+  title: string | null;
+}
+
+/**
+ * Bar segments for the programmes overlapping the window, split at programme boundaries. With no
+ * programmes the whole bar is one segment. Gaps between programmes in the guide become untitled segments.
+ */
+export function programmeSegments(programmes: { startUtc: Epoch; endUtc: Epoch; title: string | null }[], w: TimeWindow): TimelineSegment[] {
+  const clamp = (r: number) => Math.min(1, Math.max(0, r));
+  const inWindow = programmes
+    .filter((p) => p.endUtc > w.start && p.startUtc < w.end && p.endUtc > p.startUtc)
+    .sort((a, b) => a.startUtc - b.startUtc);
+  const out: TimelineSegment[] = [];
+  let cursor = 0;
+  for (const p of inWindow) {
+    const s = clamp(ratioOfEpoch(w, p.startUtc));
+    const e = clamp(ratioOfEpoch(w, p.endUtc));
+    if (e <= cursor) continue;
+    if (s > cursor) out.push({ start: cursor, end: s, title: null });
+    out.push({ start: Math.max(s, cursor), end: e, title: p.title });
+    cursor = e;
+  }
+  if (cursor < 1) out.push({ start: cursor, end: 1, title: null });
+  return out;
+}
+
+/** "−5:20" behind live; empty within `slack` seconds of the edge. */
+export const formatBehindLive = (seconds: number, slack = 5): string => (seconds > slack ? `−${formatDuration(seconds)}` : '');
+
+/** Coarse bucket of an epoch (default 5 min), for query keys that should not change every second. */
+export const bucketEpoch = (epoch: Epoch, seconds = 300): Epoch => Math.floor(epoch / seconds) * seconds;
+
+/** A calendar date the server sends as `YYYY-MM-DD` (air / release dates): no zone, no shift. */
+export function formatCalendarDate(iso: string | null | undefined): string | null {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const d = dayjs.utc(iso);
+  return d.isValid() ? d.format('D MMM YYYY') : null;
 }

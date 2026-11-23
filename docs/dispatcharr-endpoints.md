@@ -81,7 +81,16 @@ be refused; the picker then shows no provider names (the refusal is cached for 1
 | `POST /api/epg/current-programs/` | body `{channel_uuids:[…]}` (also `epg_data_ids:[…]`; `{}` = all channels with a current programme) | **bare array** of grid rows plus `channel_uuid` [`epg_current_programs_uuids`, `epg_current_programs_all`]. Channels with no current programme are omitted. Not a `{"data":…}` envelope. |
 | `GET /api/epg/programs/search/` | see below | paginated envelope [`epg_programs_search_*`] |
 
-**Programme search (resolved).** Filters: `title`, `description` (AND/OR, quoted phrases, parentheses;
+**Programme detail.** `GET /api/epg/programs/{id}/` (stored programme id; dummy ids are not rows) returns the grid row plus
+`categories[], rating, rating_system, star_ratings[{value,system}], credits{actors[{name,role?,guest?}],directors[],writers[],producers[],presenters[]},
+video_quality, aspect_ratio, stereo, is_previously_shown, country, language, production_date (XMLTV <date>), original_air_date,
+content_advisory[], content_ratings[], event_details, runtime, runtime_units, imdb_id, tmdb_id, tvdb_id (from <episode-num system=…>),
+icon, images[], poster_url` [`epg_program_detail`; `epg_program_detail_rich` is a hand-written synthetic example of a full guide].
+How much is filled depends entirely on the EPG source (a plain XMLTV dump often has none of it; Schedules Direct fills most). `poster_url`
+is absolute and built from the request Host: map it onto the configured base. A status endpoint; Downlink calls it only when a details
+view opens, cached for 6 h.
+
+ Filters: `title`, `description` (AND/OR, quoted phrases, parentheses;
 `title_regex`, `title_whole_words`, `description_regex`, `description_whole_words`), `channel` (name substring),
 `channel_id` (exact id), `tvg_id` (exact), `group` (channel or stream group substring), `stream` (stream name
 substring), `epg_source` (id), `airing_at` (instant, `start<=t<end`), `start_after`, `start_before`, `end_after`,
@@ -214,7 +223,7 @@ decoder should not model them at all.
 `{id, start_time, end_time, task_id, custom_properties, channel (int id)}`. Create body: `{channel, start_time, end_time, custom_properties:{program:{title,description}}}`.
 - `end_time` must be in the future: past windows get 400 `{"non_field_errors":["End time must be in the future."]}` (`recording_past_error`). `start_time` may be in the past (starts immediately; `task_id` becomes `dvr-now-<id>-<hash>`, otherwise `dvr-recording-<id>`).
 - **State is `custom_properties.status`**, and it is **absent while scheduled** for one-off and series-created recordings (`recording_scheduled_oneoff`, `recording_scheduled_series`); recurring-rule recordings carry `status: "scheduled"` (`recording_scheduled_recurring`). Values seen: `scheduled`, `recording`, `completed`, `stopped`; source also has `interrupted` and `cancelled`. Treat missing as scheduled, and finished = `completed|stopped|interrupted` (the same set `extend` refuses).
-- **In progress** (`recording_in_progress`): `status: "recording"`, `file_url` = `output_file_url` = `/api/channels/recordings/{id}/hls/index.m3u8`, plus `_hls_dir`, `file_name`, `file_path`, `started_at` (naive UTC string). The playlist is `application/x-mpegURL`, `EVENT` type, 4 s segments, **segment URIs are absolute and built from the request Host** (`recording_in_progress_hls_playlist`): rewrite their origin to the configured server. Segments (`/hls/seg_00000.ts`) return 403 without `X-API-Key`, 200 with, so the player needs the header per file. `GET …/file/` while recording answers `302` to the HLS playlist.
+- **In progress** (`recording_in_progress`): `status: "recording"`, `file_url` = `output_file_url` = `/api/channels/recordings/{id}/hls/index.m3u8`, plus `_hls_dir`, `file_name`, `file_path`, `started_at` (naive UTC string). The playlist is `application/x-mpegURL`, `EVENT` type, 4 s segments, **segment URIs are absolute and built from the request Host** (`recording_in_progress_hls_playlist`): rewrite their origin to the configured server. Segments (`/hls/seg_00000.ts`) return 403 without `X-API-Key`, 200 with, so the loopback proxy adds the header on requests to the configured server. `GET …/file/` while recording answers `302` to the HLS playlist.
 - **Completed/stopped** (`recording_completed`, `recording_after_stop`): `file_url` = `output_file_url` = `/api/channels/recordings/{id}/file/` (Matroska, `Range` supported, `Content-Disposition: inline; filename=…mkv`), plus `ended_at`, `bytes_written`, `remux_success`, `stream_info{width,height,resolution,source_fps,video_codec,audio_codec,…}` when probed. `stopped` adds `stopped_at`; the HLS fields are gone.
 - **Extend**: `POST …/{id}/extend/` body is **`{"extra_minutes": n}`** (positive int), not `minutes` (that returns 400 `{"success":false,"error":"extra_minutes must be a positive integer"}`). Success: `200 {"success":true,"new_end_time":"…+00:00"}`; a finished recording returns 400 `{"success":false,"error":"Recording has already finished"}`.
 - **Stop**: `POST …/{id}/stop/` → `200 {"success":true,"status":"stopped"}`; partial content stays playable (status becomes `stopped` within seconds, file at `/file/`).

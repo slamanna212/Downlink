@@ -4,18 +4,23 @@
 //! refresh only upserts and never deletes.
 
 use std::collections::{HashMap, HashSet};
+use std::io;
 use std::path::PathBuf;
 
 use chrono_tz::Tz;
 use tokio::sync::mpsc;
 
 use super::matching::{ChanInfo, Method, match_channels};
-use super::{XmltvChannel, parse_channels, parse_programmes};
+use super::{MAX_CHANNELS, XmltvChannel, parse_channels, try_parse_programmes};
 use crate::error::{AppError, Result};
 use crate::source::TimeWindow;
 use crate::store::{ProgrammeRow, Store};
+use crate::util::import_limit;
 
 pub const BATCH: usize = 5_000;
+const MAX_BATCH_TEXT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_CHANNEL_PROGRAMMES: usize = 2_000_000;
+const MAX_PROGRAMME_TEXT_BYTES: usize = 512 * 1024 * 1024;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MatchSummary {
@@ -82,11 +87,15 @@ type ChanRow = (i64, String, Option<String>, Option<String>, String);
 
 async fn chan_infos(store: &Store, source_id: i64) -> Result<Vec<ChanInfo>> {
     let rows: Vec<ChanRow> = sqlx::query_as(
-        "SELECT id, ext_id, tvg_id, tvg_name, name FROM channel WHERE source_id = ?",
+        "SELECT id, ext_id, tvg_id, tvg_name, name FROM channel WHERE source_id = ? LIMIT ?",
     )
     .bind(source_id)
+    .bind((MAX_CHANNELS + 1) as i64)
     .fetch_all(store.pool())
     .await?;
+    if rows.len() > MAX_CHANNELS {
+        return Err(import_limit().into());
+    }
     Ok(rows
         .into_iter()
         .map(|(id, ext_id, tvg_id, tvg_name, name)| ChanInfo {
@@ -105,37 +114,38 @@ pub async fn apply_matches(
     source_id: i64,
     xmltv: &[XmltvChannel],
 ) -> Result<(HashMap<String, Vec<i64>>, MatchSummary)> {
+    let matches = prepare_matches(store, source_id, xmltv).await?;
+    save_matches(store, &matches.updates).await?;
+    Ok((matches.by_xmltv, matches.summary))
+}
+
+struct ChannelMatches {
+    by_xmltv: HashMap<String, Vec<i64>>,
+    summary: MatchSummary,
+    updates: Vec<(i64, &'static str)>,
+}
+
+async fn prepare_matches(
+    store: &Store,
+    source_id: i64,
+    xmltv: &[XmltvChannel],
+) -> Result<ChannelMatches> {
     let chans = chan_infos(store, source_id).await?;
     let remap = store.epg_remaps(source_id).await?;
     let matches = match_channels(&chans, xmltv, &remap);
     let mut summary = MatchSummary::default();
     let mut by_xmltv: HashMap<String, Vec<i64>> = HashMap::new();
     let matched: HashMap<i64, Method> = matches.iter().map(|m| (m.channel_id, m.method)).collect();
-    let mut tx = store.pool().begin().await?;
-    for batch in chans.chunks(1000) {
-        let updates: Vec<_> = batch
-            .iter()
-            .map(|c| {
-                let method = matched.get(&c.id);
-                if method.is_none() {
-                    summary.unmatched.push(c.name.clone());
-                }
-                (c.id, method.map_or("none", |m| m.as_str()))
-            })
-            .collect();
-        sqlx::query(
-            "WITH matches AS (
-               SELECT json_extract(value, '$[0]') AS id, json_extract(value, '$[1]') AS method
-               FROM json_each(?)
-             )
-             UPDATE channel SET epg_match = matches.method FROM matches
-             WHERE channel.id = matches.id AND channel.epg_match IS NOT matches.method",
-        )
-        .bind(serde_json::to_string(&updates)?)
-        .execute(&mut *tx)
-        .await?;
-    }
-    tx.commit().await?;
+    let updates = chans
+        .into_iter()
+        .map(|c| {
+            let method = matched.get(&c.id);
+            if method.is_none() {
+                summary.unmatched.push(c.name);
+            }
+            (c.id, method.map_or("none", |m| m.as_str()))
+        })
+        .collect();
     for m in matches {
         match m.method {
             Method::Id => summary.by_id += 1,
@@ -145,7 +155,30 @@ pub async fn apply_matches(
         }
         by_xmltv.entry(m.xmltv_id).or_default().push(m.channel_id);
     }
-    Ok((by_xmltv, summary))
+    Ok(ChannelMatches {
+        by_xmltv,
+        summary,
+        updates,
+    })
+}
+
+async fn save_matches(store: &Store, updates: &[(i64, &'static str)]) -> Result<()> {
+    let mut tx = store.pool().begin().await?;
+    for batch in updates.chunks(1000) {
+        sqlx::query(
+            "WITH matches AS (
+               SELECT json_extract(value, '$[0]') AS id, json_extract(value, '$[1]') AS method
+               FROM json_each(?)
+             )
+             UPDATE channel SET epg_match = matches.method FROM matches
+             WHERE channel.id = matches.id AND channel.epg_match IS NOT matches.method",
+        )
+        .bind(serde_json::to_string(batch)?)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
 }
 
 /// What one channel's feed covers: the stored span and the programme starts seen in it.
@@ -224,25 +257,41 @@ pub async fn ingest_with_progress(
     let xmltv = tokio::task::spawn_blocking(move || parse_channels(&p1))
         .await
         .map_err(|_| AppError::local("Reading the guide was interrupted."))??;
-    let (by_xmltv, summary) = apply_matches(store, source_id, &xmltv).await?;
-    let by_xmltv = std::sync::Arc::new(by_xmltv);
+    let ChannelMatches {
+        by_xmltv,
+        summary,
+        updates,
+    } = prepare_matches(store, source_id, &xmltv).await?;
+    drop(xmltv);
     let shifts = channel_shifts(store, source_id).await?;
 
     let (tx, mut rx) = mpsc::channel::<Vec<ProgrammeRow>>(4);
-    let map = by_xmltv.clone();
-    let parser = tokio::task::spawn_blocking(move || {
+    let parser = tokio::task::spawn_blocking(move || -> io::Result<_> {
         let mut batch: Vec<ProgrammeRow> = Vec::with_capacity(BATCH);
         // De-duplicate by (channel, start): the first one in a batch wins. Duplicates in real
         // feeds are near each other, so a per-batch set bounds memory.
         let mut seen: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
         let (mut unmatched, mut outside) = (0u64, 0u64);
         let mut cov: HashMap<i64, Coverage> = HashMap::new();
-        let stats = parse_programmes(&path, default_tz, |p| {
-            let Some(ids) = map.get(&p.channel) else {
+        let mut batch_bytes = 0;
+        let mut text_bytes = 0;
+        let mut channel_programmes = 0;
+        let cancelled = || io::Error::new(io::ErrorKind::BrokenPipe, "The guide import stopped.");
+        let stats = try_parse_programmes(&path, default_tz, |p| {
+            let Some(ids) = by_xmltv.get(&p.channel) else {
                 // XMLTV ids are matched case-insensitively against the channel list.
                 unmatched += 1;
-                return;
+                return Ok(());
             };
+            channel_programmes += ids.len();
+            if channel_programmes > MAX_CHANNEL_PROGRAMMES {
+                return Err(import_limit());
+            }
+            let row_bytes = [&p.title, &p.subtitle, &p.description]
+                .into_iter()
+                .filter_map(|part| part.as_ref())
+                .map(String::len)
+                .sum::<usize>();
             let mut any_in = false;
             for id in ids {
                 // `tvg-shift`: this channel's guide runs that many seconds off the feed's clock.
@@ -263,6 +312,11 @@ pub async fn ingest_with_progress(
                 c.first_start = c.first_start.min(start);
                 c.last_end = c.last_end.max(end);
                 c.starts.insert(start);
+                text_bytes += row_bytes;
+                if text_bytes > MAX_PROGRAMME_TEXT_BYTES {
+                    return Err(import_limit());
+                }
+                batch_bytes += row_bytes;
                 batch.push(ProgrammeRow {
                     channel_id: *id,
                     start_utc: start,
@@ -275,19 +329,22 @@ pub async fn ingest_with_progress(
                     episode: p.episode,
                     flags: p.flags,
                 });
+                if batch.len() >= BATCH || batch_bytes >= MAX_BATCH_TEXT_BYTES {
+                    seen.clear();
+                    batch_bytes = 0;
+                    tx.blocking_send(std::mem::replace(&mut batch, Vec::with_capacity(BATCH)))
+                        .map_err(|_| cancelled())?;
+                }
             }
             if !any_in {
                 outside += 1;
             }
-            if batch.len() >= BATCH {
-                seen.clear();
-                let _ = tx.blocking_send(std::mem::replace(&mut batch, Vec::with_capacity(BATCH)));
-            }
-        });
+            Ok(())
+        })?;
         if !batch.is_empty() {
-            let _ = tx.blocking_send(batch);
+            tx.blocking_send(batch).map_err(|_| cancelled())?;
         }
-        (stats, unmatched, outside, cov)
+        Ok((stats, unmatched, outside, cov))
     });
 
     let mut written = 0usize;
@@ -297,12 +354,14 @@ pub async fn ingest_with_progress(
     }
     let (stats, unmatched, outside, cov) = parser
         .await
-        .map_err(|_| AppError::local("Reading the guide was interrupted."))?;
-    let stats = stats?;
+        .map_err(|_| AppError::local("Reading the guide was interrupted."))??;
     // Only a feed read to the end may replace anything: a truncated one proves nothing about
     // what is missing from it.
-    if !stats.truncated && !cov.is_empty() {
-        replace_within_coverage(store, &cov).await?;
+    if !stats.truncated {
+        save_matches(store, &updates).await?;
+        if !cov.is_empty() {
+            replace_within_coverage(store, &cov).await?;
+        }
     }
     Ok(IngestReport {
         programmes: written,

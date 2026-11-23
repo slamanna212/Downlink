@@ -29,6 +29,7 @@ use crate::catchup::template::{CatchupTemplate, ExpandCtx, Mode, TimeSemantics, 
 use crate::error::{AppError, Result};
 use crate::m3u::load::{Fetched, Fetcher, HttpFetcher};
 use crate::redact::RedactionSet;
+use crate::source::vod::clean_tmdb;
 
 const MAX_CONCURRENT: usize = 2;
 
@@ -42,7 +43,7 @@ struct AccountState {
 pub struct XtreamClient {
     id: SourceId,
     http: reqwest::Client,
-    insecure_tls: bool,
+    tls_pin: Option<crate::tls::Pin>,
     base: Url,
     username: String,
     password: SecretString,
@@ -51,17 +52,48 @@ pub struct XtreamClient {
     vault: crate::vault::Vault,
     has_vod: std::sync::atomic::AtomicBool,
     vod_cache: tokio::sync::Mutex<VodCache>,
+    /// Persists the VOD lists across restarts; `None` for throwaway clients (connection tests).
+    store: Option<crate::store::Store>,
 }
 
 /// Xtream has no server-side paging or search: the movie and series lists are fetched whole and
-/// served from memory for a few minutes.
+/// served from memory, backed by `meta_cache` so a restart does not download them again.
 #[derive(Default)]
 struct VodCache {
-    movies: Option<(std::time::Instant, std::sync::Arc<Vec<VodStreamDto>>)>,
-    series: Option<(std::time::Instant, std::sync::Arc<Vec<SeriesDto>>)>,
+    movies: Slot<VodStreamDto>,
+    series: Slot<SeriesDto>,
 }
 
-const VOD_CACHE_TTL: Duration = Duration::from_secs(600);
+/// `(fetched_at UTC seconds, rows)`.
+type Slot<T> = Option<(i64, std::sync::Arc<Vec<T>>)>;
+
+/// How long a fetched movie or series list is served before it is fetched again (only when VOD is
+/// being browsed: nothing refetches it in the background). VOD libraries change slowly.
+const VOD_CACHE_TTL_SECS: i64 = 6 * 3600;
+
+/// A cached VOD row whose artwork URLs are templated through the vault before it is written to
+/// SQLite (rule 7: no credentials in the database).
+trait VodRow: serde::Serialize + serde::de::DeserializeOwned + Send + Sync {
+    fn template(&mut self, vault: &crate::vault::Vault);
+}
+
+impl VodRow for VodStreamDto {
+    fn template(&mut self, vault: &crate::vault::Vault) {
+        self.icon = self.icon.as_deref().map(|u| vault.template_url(u));
+    }
+}
+
+impl VodRow for SeriesDto {
+    fn template(&mut self, vault: &crate::vault::Vault) {
+        self.cover = self.cover.as_deref().map(|u| vault.template_url(u));
+        self.backdrop_path = self.backdrop_path.as_deref().map(|u| vault.template_url(u));
+    }
+}
+
+/// `meta_cache` key prefix for a source's VOD lists (trailing `:` so source 1 never matches 12).
+pub fn vod_cache_prefix(source_id: i64) -> String {
+    format!("xtvod:{source_id}:")
+}
 
 impl std::fmt::Debug for XtreamClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -110,6 +142,14 @@ fn real_rating(r: Option<&str>) -> Option<String> {
     }
 }
 
+/// The 0-10 `rating`, or `rating_5based` doubled when the panel only fills that one.
+fn pick_rating(ten: Option<&str>, five: Option<&str>) -> Option<String> {
+    real_rating(ten).or_else(|| {
+        let v: f64 = real_rating(five)?.parse().ok()?;
+        (v <= 5.0).then(|| format!("{:.1}", v * 2.0))
+    })
+}
+
 fn year_in_title(name: &str) -> Option<i64> {
     let t = name.trim_end();
     let inner = t.strip_suffix(')')?.rsplit_once('(')?.1;
@@ -129,17 +169,22 @@ impl XtreamClient {
         base_url: &str,
         username: &str,
         password: SecretString,
-        insecure_tls: bool,
+        tls_pin: Option<crate::tls::Pin>,
     ) -> Result<Self> {
+        let base = normalise_base(base_url)?;
         Ok(Self {
             id,
-            http: crate::tls::apply(reqwest::Client::builder(), insecure_tls)?
-                .timeout(Duration::from_secs(60))
-                .connect_timeout(Duration::from_secs(20))
-                .user_agent(crate::user_agent())
-                .build()?,
-            insecure_tls,
-            base: normalise_base(base_url)?,
+            http: crate::http::authenticated(crate::tls::apply(
+                reqwest::Client::builder(),
+                &base,
+                tls_pin.as_ref(),
+            )?)
+            .timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(20))
+            .user_agent(crate::user_agent())
+            .build()?,
+            tls_pin,
+            base,
             username: username.to_owned(),
             password,
             sem: Semaphore::new(MAX_CONCURRENT),
@@ -147,7 +192,23 @@ impl XtreamClient {
             vault: crate::vault::Vault::new(),
             has_vod: std::sync::atomic::AtomicBool::new(false),
             vod_cache: tokio::sync::Mutex::new(VodCache::default()),
+            store: None,
         })
+    }
+
+    /// Keep the VOD lists in `store` as well as in memory.
+    #[must_use]
+    pub fn with_store(mut self, store: crate::store::Store) -> Self {
+        self.store = Some(store);
+        self
+    }
+
+    pub(crate) fn attach_credentials(
+        &self,
+        secrets: std::sync::Arc<dyn crate::auth::SecretStore>,
+        uuid: &str,
+    ) -> Result<()> {
+        self.vault.attach(secrets, uuid)
     }
 
     pub fn base_url(&self) -> &Url {
@@ -287,7 +348,14 @@ impl XtreamClient {
                 s => AppError::from_status(s.as_u16(), None, what),
             });
         }
-        let bytes = resp.bytes().await?;
+
+        // Xtream catalogues are delivered as a single unpaginated response.
+        let max_bytes = if action.is_some() {
+            128 * 1024 * 1024
+        } else {
+            256 * 1024
+        };
+        let bytes = crate::http::read_body(resp, max_bytes, AppError::from).await?;
         if bytes.iter().all(u8::is_ascii_whitespace) {
             return Ok(Value::Null);
         }
@@ -459,31 +527,85 @@ impl XtreamClient {
     }
 
     fn fetcher(&self) -> Result<HttpFetcher> {
-        HttpFetcher::new(self.insecure_tls)
+        HttpFetcher::new(self.tls_pin.as_ref())
     }
 
     async fn movies_cached(&self) -> Result<std::sync::Arc<Vec<VodStreamDto>>> {
-        let mut g = self.vod_cache.lock().await;
-        if let Some((t, v)) = &g.movies
-            && t.elapsed() < VOD_CACHE_TTL
-        {
-            return Ok(v.clone());
-        }
-        let v = std::sync::Arc::new(self.vod_streams(None).await?);
-        g.movies = Some((std::time::Instant::now(), v.clone()));
-        Ok(v)
+        self.list_cached(VodKind::Movie, |c| &mut c.movies, || self.vod_streams(None))
+            .await
     }
 
     async fn series_cached(&self) -> Result<std::sync::Arc<Vec<SeriesDto>>> {
+        self.list_cached(VodKind::Series, |c| &mut c.series, || self.series(None))
+            .await
+    }
+
+    /// Memory, then `meta_cache`, then the server. A failed fetch serves the newest stale copy.
+    async fn list_cached<T, F, Fut>(
+        &self,
+        kind: VodKind,
+        slot: impl Fn(&mut VodCache) -> &mut Slot<T>,
+        fetch: F,
+    ) -> Result<std::sync::Arc<Vec<T>>>
+    where
+        T: VodRow + Clone,
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<Vec<T>>>,
+    {
+        let now = crate::sync::now_utc();
         let mut g = self.vod_cache.lock().await;
-        if let Some((t, v)) = &g.series
-            && t.elapsed() < VOD_CACHE_TTL
+        if let Some((at, v)) = slot(&mut g)
+            && now - *at < VOD_CACHE_TTL_SECS
         {
             return Ok(v.clone());
         }
-        let v = std::sync::Arc::new(self.series(None).await?);
-        g.series = Some((std::time::Instant::now(), v.clone()));
-        Ok(v)
+        let key = format!(
+            "{}{}",
+            vod_cache_prefix(self.id.0),
+            if kind == VodKind::Movie {
+                "movie"
+            } else {
+                "series"
+            }
+        );
+        if slot(&mut g).is_none()
+            && let Some(store) = &self.store
+            && let Ok(Some((body, at))) = store.meta_get(&key).await
+            && let Ok(rows) = serde_json::from_str::<Vec<T>>(&body)
+        {
+            // Too old: kept only as the fallback for a failed fetch below.
+            let v = std::sync::Arc::new(rows);
+            *slot(&mut g) = Some((at, v.clone()));
+            if now - at < VOD_CACHE_TTL_SECS {
+                return Ok(v);
+            }
+        }
+        match fetch().await {
+            Ok(mut rows) => {
+                rows.iter_mut().for_each(|r| r.template(&self.vault));
+                self.vault.persist().await?;
+                if let Some(store) = &self.store {
+                    match serde_json::to_string(&rows) {
+                        Ok(body) => {
+                            if let Err(e) = store.meta_put(&key, &body, now).await {
+                                tracing::warn!(error = %e, "saving the VOD list failed");
+                            }
+                        }
+                        Err(e) => tracing::warn!(error = %e, "saving the VOD list failed"),
+                    }
+                }
+                let v = std::sync::Arc::new(rows);
+                *slot(&mut g) = Some((now, v.clone()));
+                Ok(v)
+            }
+            Err(e) => match slot(&mut g) {
+                Some((_, v)) => {
+                    tracing::warn!(error = %e, "serving the cached VOD list");
+                    Ok(v.clone())
+                }
+                None => Err(e),
+            },
+        }
     }
 
     async fn category_counts(
@@ -512,7 +634,7 @@ impl XtreamClient {
             ext_id: m.stream_id.clone(),
             title: m.name.clone(),
             year,
-            rating: real_rating(m.rating.as_deref()),
+            rating: pick_rating(m.rating.as_deref(), m.rating_5based.as_deref()),
             poster: m
                 .icon
                 .as_deref()
@@ -520,6 +642,7 @@ impl XtreamClient {
                 .map(|i| self.vault.template_url(i)),
             category_ext: m.category_id.clone(),
             container: m.container_extension.clone(),
+            tmdb_id: clean_tmdb(m.tmdb.clone()).or_else(|| clean_tmdb(m.tmdb_id.clone())),
             ..Default::default()
         }
     }
@@ -534,7 +657,7 @@ impl XtreamClient {
                 .as_deref()
                 .and_then(|d| d.get(..4))
                 .and_then(|y| y.parse().ok()),
-            rating: real_rating(s.rating.as_deref()),
+            rating: pick_rating(s.rating.as_deref(), s.rating_5based.as_deref()),
             genre: s.genre.clone().filter(|g| !g.is_empty()),
             plot: s.plot.clone().filter(|p| !p.is_empty()),
             poster: s
@@ -548,6 +671,7 @@ impl XtreamClient {
                 .filter(|i| !i.is_empty())
                 .map(|i| self.vault.template_url(i)),
             category_ext: s.category_id.clone(),
+            tmdb_id: clean_tmdb(s.tmdb.clone()).or_else(|| clean_tmdb(s.tmdb_id.clone())),
             ..Default::default()
         }
     }
@@ -632,6 +756,7 @@ impl Source for XtreamClient {
             .iter()
             .map(|s| self.live_to_channel(s, tz.as_deref()))
             .collect();
+        self.vault.persist().await?;
         Ok(ChannelPage {
             count: Some(channels.len() as u64),
             channels,
@@ -656,11 +781,20 @@ impl Source for XtreamClient {
         Ok(Vec::new())
     }
 
-    async fn guide_feed(&self) -> Result<Option<super::GuideFeed>> {
+    async fn guide_feed(
+        &self,
+        prev: Option<&crate::m3u::load::Validators>,
+    ) -> Result<Option<super::GuideFeed>> {
+        use crate::m3u::load::Conditional;
         let url = self.xmltv_url()?;
-        let file: Fetched = self.fetcher()?.fetch(&url).await?;
+        let (file, validators): (Option<Fetched>, _) =
+            match self.fetcher()?.fetch_if_changed(&url, prev).await? {
+                Conditional::NotModified => (None, prev.cloned().unwrap_or_default()),
+                Conditional::Fetched(f, v) => (Some(f), v),
+            };
         Ok(Some(super::GuideFeed {
             file,
+            validators,
             default_tz: self.st().server_tz,
         }))
     }
@@ -676,6 +810,7 @@ impl Source for XtreamClient {
         let mut redact = self.redaction_set();
         redact.add(url.clone());
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url,
             headers: vec![],
             surface: if hls { Surface::Hls } else { Surface::Ts },
@@ -723,6 +858,7 @@ impl Source for XtreamClient {
         redact.add(url.clone());
         // Template-path sessions have no server session to delete.
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url,
             headers: vec![],
             surface: Surface::Direct,
@@ -858,6 +994,7 @@ impl Source for XtreamClient {
         let mut redact = self.redaction_set();
         redact.add(url.clone());
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             surface: if ext == "m3u8" {
                 Surface::Hls
             } else {
@@ -882,7 +1019,7 @@ impl Source for XtreamClient {
     }
 
     async fn fetch_image(&self, url: &str) -> Result<crate::images::RawImage> {
-        crate::images::fetch_public(&self.vault.resolve(url)?, self.insecure_tls).await
+        crate::images::fetch_public(&self.vault.resolve(url)?, self.tls_pin.as_ref()).await
     }
 }
 

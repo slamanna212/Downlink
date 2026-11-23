@@ -39,7 +39,7 @@ impl Respond for Grid {
         };
         let (start, end) = (parse("start"), parse("end"));
         let mut rows = vec![];
-        let mut t = start - start.rem_euclid(3600) - 3600;
+        let mut t = start - start.rem_euclid(3600);
         while t < end {
             for tvg in &self.tvg_ids {
                 rows.push(json!({

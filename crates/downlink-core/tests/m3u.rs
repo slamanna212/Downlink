@@ -181,3 +181,23 @@ async fn generated_20k_fixture_if_present() {
     assert_eq!(pl.entries.len(), 20_000);
     assert_eq!(pl.header.tvg_urls, ["http://iptv.test/epg.xml"]);
 }
+
+#[tokio::test]
+async fn include_breadth_is_bounded() {
+    let dir = tempfile::tempdir().unwrap();
+    let top = dir.path().join("wide.m3u");
+    let mut entries = String::new();
+    for i in 0..100 {
+        entries.push_str(&format!(
+            "#EXTINF:-1 type=\"playlist\",Include\nhttp://example.test/{i}\n"
+        ));
+    }
+    std::fs::write(&top, entries).unwrap();
+    let error = load::load(&Location::File(top), &MemFetcher(HashMap::new()))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "That playlist includes too many other playlists."
+    );
+}

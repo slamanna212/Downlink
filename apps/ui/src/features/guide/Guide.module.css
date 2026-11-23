@@ -121,6 +121,24 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.epRow {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  min-width: 0;
+  margin-bottom: var(--mantine-spacing-xs);
+}
+.epLine {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--mantine-font-size-md);
+  font-weight: 600;
+  color: var(--dl-text-2);
+}
+/* The episode line takes a row: keep the pane's height by trimming the description. */
+.epRow + .desc { -webkit-line-clamp: 2; }
 .actions {
   display: flex;
   gap: var(--mantine-spacing-sm);
@@ -281,8 +299,11 @@
 }
 .block[data-state='now'] .face { background: var(--dl-guide-now); }
 .block[data-focused] { z-index: 2; }
+/* No ring on guide cells (overrides the global focus ring, incl. tv density); focus is the background tint only. */
+.block.block[data-focused],
+.block.block:focus-visible { outline: none; box-shadow: none; }
 .block[data-focused] .face,
-.block:focus-visible .face { box-shadow: var(--dl-focus-ring); background: var(--dl-row-focus); }
+.block:focus-visible .face { background: var(--dl-row-focus); }
 
 .fill {
   position: absolute;
@@ -327,6 +348,8 @@
   white-space: nowrap;
 }
 .block[data-state='past-none'] .blockTime { color: var(--dl-text-disabled); }
+.blockCode { margin-right: var(--mantine-spacing-sm); font-weight: 600; color: var(--dl-text-2); }
+.block[data-state='past-none'] .blockCode { color: var(--dl-text-disabled); }
 .histIcon { color: var(--dl-accent-text); display: inline-flex; flex: none; }
 .recDot {
   width: 7px;

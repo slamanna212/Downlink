@@ -6,15 +6,12 @@ upload to one release, so the workflow collects every asset + .sig and calls thi
 
 Keys produced:
   windows-x86_64          Downlink_<ver>_x64-setup.exe
-  darwin-aarch64          Downlink_<ver>_universal.app.tar.gz
-  darwin-x86_64           Downlink_<ver>_universal.app.tar.gz
+  darwin-aarch64          Downlink_<ver>_aarch64.app.tar.gz (Apple Silicon only; Intel Macs get no key)
   linux-x86_64            Downlink_<ver>_amd64.AppImage
   linux-x86_64-deb        Downlink_<ver>_amd64.deb
 
-darwin-* keys only with --macos (macOS builds are not in the pipeline yet).
-
 Usage: make-latest-json.py --version 0.2.0 --repo owner/name --tag v0.2.0 \
-         --assets DIR [--notes FILE] [--macos] [--out latest.json]
+         --assets DIR [--notes FILE] [--out latest.json]
 Fails if any platform asset or its .sig is missing.
 """
 import argparse
@@ -25,8 +22,7 @@ import sys
 
 PATTERNS = {
     "windows-x86_64": ["*_x64-setup.exe"],
-    "darwin-aarch64": ["*_universal.app.tar.gz", "*.app.tar.gz"],
-    "darwin-x86_64": ["*_universal.app.tar.gz", "*.app.tar.gz"],
+    "darwin-aarch64": ["*_aarch64.app.tar.gz"],
     "linux-x86_64": ["*_amd64.AppImage"],
     "linux-x86_64-deb": ["*_amd64.deb"],
 }
@@ -47,14 +43,11 @@ def main() -> int:
     ap.add_argument("--tag", required=True, help="release tag the asset URLs point at")
     ap.add_argument("--assets", required=True, type=pathlib.Path)
     ap.add_argument("--notes", type=pathlib.Path)
-    ap.add_argument("--macos", action="store_true", help="include darwin-* keys (needs the universal .app.tar.gz)")
     ap.add_argument("--out", type=pathlib.Path, default=pathlib.Path("latest.json"))
     a = ap.parse_args()
 
     platforms, missing = {}, []
     for key, globs in PATTERNS.items():
-        if not a.macos and key.startswith("darwin-"):
-            continue
         f = find(a.assets, globs)
         sig = pathlib.Path(str(f) + ".sig") if f else None
         if not f or not sig.is_file():

@@ -39,6 +39,10 @@ struct EpisodeRow {
     season_number: Option<i64>,
     #[serde(default, deserialize_with = "super::dto::de_opt_i64")]
     episode_number: Option<i64>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    tmdb_id: Option<String>,
+    #[serde(default, deserialize_with = "super::dto::de_opt_string")]
+    imdb_id: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -62,6 +66,8 @@ impl EpisodeRow {
             season: self.season_number,
             episode: self.episode_number,
             duration_secs: self.duration_secs.filter(|d| *d > 0),
+            tmdb_id: clean_tmdb(self.tmdb_id),
+            imdb_id: clean_imdb(self.imdb_id),
             ..Default::default()
         })
     }
@@ -77,6 +83,55 @@ fn first_http(v: Option<&Value>) -> Option<String> {
         other => flex_string(other)?,
     };
     (c.starts_with("http://") || c.starts_with("https://")).then_some(c)
+}
+
+/// Cast, director, release date, certification and trailer from a VOD row or `provider-info`:
+/// top-level fields first, then `custom_properties` (series rows keep them there).
+fn vod_extra(v: &Value, cp: Option<&Value>) -> crate::source::VodExtra {
+    use crate::source::meta::{iso_date, people};
+    let pick = |keys: &[&str]| -> Option<&Value> {
+        keys.iter()
+            .find_map(|k| v.get(*k).filter(|x| !x.is_null() && x.as_str() != Some("")))
+            .or_else(|| {
+                keys.iter().find_map(|k| {
+                    cp.and_then(|c| c.get(*k))
+                        .filter(|x| !x.is_null() && x.as_str() != Some(""))
+                })
+            })
+    };
+    let text = |keys: &[&str]| {
+        pick(keys)
+            .and_then(flex_string)
+            .filter(|t| !t.trim().is_empty())
+    };
+    crate::source::VodExtra {
+        cast: people(pick(&["actors", "cast"])),
+        directors: people(pick(&["director", "directors"])),
+        country: text(&["country"]),
+        release_date: text(&["release_date", "releaseDate", "releasedate"])
+            .and_then(|d| iso_date(&d)),
+        certification: text(&["age", "mpaa_rating", "certification"]).filter(|a| a.trim() != "0"),
+        original_title: text(&["o_name", "original_name"])
+            .filter(|o| s(v, "name").as_deref() != Some(o.as_str())),
+        trailer: text(&["youtube_trailer", "trailer"]).and_then(|t| youtube_id(&t)),
+    }
+}
+
+/// A YouTube video id from an id or a watch / short URL.
+fn youtube_id(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    let id = if let Some(i) = t.find("v=") {
+        &t[i + 2..]
+    } else if let Some(i) = t.find("youtu.be/") {
+        &t[i + 9..]
+    } else {
+        t
+    };
+    let id: String = id
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    (id.len() == 11).then_some(id)
 }
 
 /// Fields of `provider-info` we use. The reply also holds an `m3u_account` summary and more; serde
@@ -144,8 +199,15 @@ impl DispatcharrClient {
             return Ok(None);
         }
         let r = r.ok("that title's details")?;
-        let info: ProviderInfo = serde_json::from_slice(&r.body)?;
+        let raw: Value = serde_json::from_slice(&r.body)?;
         drop(r);
+        let cp_owned: Option<Value> = match raw.get("custom_properties") {
+            Some(Value::String(t)) => serde_json::from_str(t).ok(),
+            Some(o) => Some(o.clone()),
+            None => None,
+        };
+        let extra = Some(vod_extra(&raw, cp_owned.as_ref())).filter(|x| !x.is_empty());
+        let info: ProviderInfo = serde_json::from_value(raw)?;
         Ok(Some(VodItem {
             kind: Some(kind),
             ext_id: ext_id.to_owned(),
@@ -156,8 +218,36 @@ impl DispatcharrClient {
             duration_secs: info.duration_secs.filter(|d| *d > 0),
             backdrop: first_http(info.backdrop_path.as_ref())
                 .map(|u| self.server_url(&u).unwrap_or(u)),
+            extra,
             ..Default::default()
         }))
+    }
+
+    /// `GET /api/epg/programs/{id}/` (0.34+): the rich programme view (categories, credits,
+    /// ratings, artwork, external ids). A status endpoint. Dummy-EPG ids are not stored rows, and a
+    /// 404 (older servers, expired row) is "nothing more".
+    pub async fn program_detail(
+        &self,
+        ext_id: &str,
+    ) -> Result<Option<crate::source::ProgrammeExtra>> {
+        if ext_id.is_empty() || !ext_id.bytes().all(|b| b.is_ascii_digit()) {
+            return Ok(None);
+        }
+        let r = self
+            .call(
+                Method::GET,
+                &format!("api/epg/programs/{ext_id}/"),
+                &[],
+                None,
+            )
+            .await?;
+        if matches!(r.status.as_u16(), 404 | 405) {
+            return Ok(None);
+        }
+        let v: Value = r.ok("that programme's details")?.json()?;
+        Ok(Some(crate::source::meta::programme_extra_from(&v, |u| {
+            self.server_url(u)
+        })))
     }
 
     // ---- VOD --------------------------------------------------------------------------------
@@ -278,6 +368,9 @@ impl DispatcharrClient {
                 .map(|u| self.server_url(&u).unwrap_or(u)),
             category_ext: None,
             container: None,
+            tmdb_id: clean_tmdb(s(v, "tmdb_id")),
+            imdb_id: clean_imdb(s(v, "imdb_id")),
+            extra: Some(vod_extra(v, cp)).filter(|x| !x.is_empty()),
             ext_id: id,
         })
     }
@@ -422,6 +515,7 @@ impl DispatcharrClient {
             headers.push(("X-API-Key".to_owned(), k.clone()));
         }
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url: url.to_string(),
             headers,
             surface: Surface::Direct,
@@ -516,6 +610,19 @@ impl DispatcharrClient {
             rule_ext,
             tvg_id: s(&program, "tvg_id"),
             file_url: s(&cp, "file_url"),
+            subtitle: s(&program, "sub_title").filter(|t| !t.is_empty()),
+            description: s(&program, "description").filter(|t| !t.is_empty()),
+            season: program
+                .get("season")
+                .or_else(|| cp.get("season"))
+                .and_then(flex_i64)
+                .filter(|n| *n > 0),
+            episode: program
+                .get("episode")
+                .or_else(|| cp.get("episode"))
+                .and_then(flex_i64)
+                .filter(|n| *n > 0),
+            programme_ext: s(&program, "id"),
         })
     }
 
@@ -541,6 +648,7 @@ impl DispatcharrClient {
             "end_time": fmt_time(r.end_utc)?,
             "custom_properties": { "program": {
                 "id": r.programme_ext_id, "tvg_id": r.tvg_id, "title": r.title, "description": r.description,
+                "sub_title": r.subtitle, "season": r.season, "episode": r.episode,
                 "start_time": fmt_time(r.start_utc)?, "end_time": fmt_time(r.end_utc)?,
             }},
         });
@@ -696,20 +804,21 @@ impl DispatcharrClient {
                 None => format!("api/channels/recordings/{}/file/", rec.ext_id),
             }
         };
-        let url = if rel.starts_with("http://") || rel.starts_with("https://") {
-            let u = reqwest::Url::parse(&rel)?;
-            if u.origin() != self.base.origin() {
-                return Err(AppError::stream("This recording points at another server."));
-            }
-            u.to_string()
+        let url = if rel.starts_with("//") {
+            self.base.join(&rel)?
         } else {
-            self.base.join(rel.trim_start_matches('/'))?.to_string()
+            self.base.join(rel.trim_start_matches('/'))?
         };
+        if url.origin() != self.base.origin() {
+            return Err(AppError::stream("This recording points at another server."));
+        }
+        let url = url.to_string();
         let auth: (String, SecretString) = self.auth_header().await?;
         let mut redact = self.redaction_set();
         redact.add(auth.1.expose());
         let hls = url.contains(".m3u8");
         Ok(PlayPlan {
+            tls_pin: self.tls_pin.clone(),
             url,
             headers: vec![auth],
             surface: if hls { Surface::Hls } else { Surface::Direct },

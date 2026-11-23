@@ -7,6 +7,8 @@
 pub enum Profile {
     /// Live TV.
     Live,
+    /// Live TV with a disk-backed timeshift buffer (pause / rewind / fast-forward live).
+    Timeshift,
     /// Catch-up, VOD, recordings.
     Seekable,
     /// A live multiview tile (PLAN §4.11): the live profile, nothing else.
@@ -19,7 +21,10 @@ pub enum Profile {
 impl Profile {
     /// Live sessions treat an end of file as a failure (the stream should never end).
     pub fn is_live(self) -> bool {
-        matches!(self, Self::Live | Self::Multiview | Self::MultiviewDense)
+        matches!(
+            self,
+            Self::Live | Self::Timeshift | Self::Multiview | Self::MultiviewDense
+        )
     }
 }
 
@@ -210,7 +215,7 @@ pub fn valid_hwdec(v: &str) -> bool {
 pub struct Preferences {
     pub alang: String,
     pub slang: String,
-    /// "Live buffer" setting, seconds. Clamped to 1..=10.
+    /// "Live buffer" setting, seconds. Clamped to 3..=10 (the floor we always try to keep buffered).
     pub live_buffer_secs: u32,
     /// `hwdec` value, default `auto-safe`; invalid values fall back to it.
     pub hwdec: String,
@@ -223,14 +228,32 @@ pub struct Preferences {
     /// A per-file `User-Agent` header from the play plan still wins.
     pub user_agent: String,
     pub hdr_output: HdrOutput,
+    /// Live timeshift buffer length in seconds; 0 turns timeshift off. Clamped to
+    /// [`TIMESHIFT_MIN_SECS`]..=[`TIMESHIFT_MAX_SECS`] otherwise.
+    pub timeshift_secs: u32,
+    /// Directory for the on-disk timeshift cache (`demuxer-cache-dir`). Empty = mpv's default.
+    pub timeshift_dir: String,
+    /// NVIDIA RTX Video Super Resolution (Windows, RTX cards). Single player only, never tiles.
+    pub rtx_super_resolution: bool,
+    /// NVIDIA RTX Video HDR: SDR shown as HDR (Windows, RTX cards, needs `hdr_output` Auto).
+    pub rtx_hdr: bool,
 }
+
+/// Lowest live buffer: never run the cache thinner than this.
+pub const LIVE_BUFFER_MIN_SECS: u32 = 3;
+
+/// Shortest and longest timeshift buffer.
+pub const TIMESHIFT_MIN_SECS: u32 = 15 * 60;
+pub const TIMESHIFT_MAX_SECS: u32 = 3 * 60 * 60;
+/// Bytes per second the timeshift cache is sized for (about 12 Mbit/s, a high HD bitrate).
+pub const TIMESHIFT_BYTES_PER_SEC: u64 = 1_500_000;
 
 impl Default for Preferences {
     fn default() -> Self {
         Self {
             alang: String::new(),
             slang: String::new(),
-            live_buffer_secs: 2,
+            live_buffer_secs: 3,
             hwdec: "auto-safe".to_owned(),
             deinterlace: Deinterlace::Auto,
             audio_mode: AudioMode::Surround,
@@ -238,13 +261,25 @@ impl Default for Preferences {
             subtitle: SubtitleStyle::default(),
             user_agent: String::new(),
             hdr_output: HdrOutput::Auto,
+            timeshift_secs: 60 * 60,
+            timeshift_dir: String::new(),
+            rtx_super_resolution: false,
+            rtx_hdr: false,
         }
     }
 }
 
 impl Preferences {
     pub fn live_buffer_secs_clamped(&self) -> u32 {
-        self.live_buffer_secs.clamp(1, 10)
+        self.live_buffer_secs.clamp(LIVE_BUFFER_MIN_SECS, 10)
+    }
+
+    /// Timeshift buffer length in seconds, `None` when timeshift is off.
+    pub fn timeshift_secs_effective(&self) -> Option<u32> {
+        (self.timeshift_secs > 0).then(|| {
+            self.timeshift_secs
+                .clamp(TIMESHIFT_MIN_SECS, TIMESHIFT_MAX_SECS)
+        })
     }
 
     pub fn hwdec_effective(&self) -> &str {
@@ -277,9 +312,87 @@ impl Preferences {
         o.extend(subtitle_options(&self.subtitle));
         if cfg!(target_os = "windows") {
             o.push(colorspace_hint(self.hdr_output));
+        } else {
+            // Render-API surfaces (Linux, macOS) never signal HDR through mpv.
+            o.push(kv("target-colorspace-hint", "no"));
         }
         o
     }
+}
+
+/// Label of the RTX Video filter in mpv's `vf` chain.
+pub const RTX_FILTER_LABEL: &str = "rtx";
+
+/// Upscale factor for RTX Video Super Resolution: how much the video (`dw`×`dh`, aspect-corrected)
+/// grows to fit the output (`ow`×`oh`, pixels). `None` when the video is not upscaled noticeably.
+///
+/// The factor is rounded up to a quarter step so resizing the window does not rebuild the filter on
+/// every pixel; the renderer scales the slightly larger frame down to fit.
+pub fn rtx_scale(video: (i64, i64), output: (i64, i64)) -> Option<f64> {
+    let ((dw, dh), (ow, oh)) = (video, output);
+    if dw <= 0 || dh <= 0 || ow <= 0 || oh <= 0 {
+        return None;
+    }
+    let fit = (ow as f64 / dw as f64).min(oh as f64 / dh as f64);
+    if fit < 1.1 {
+        return None;
+    }
+    Some(((fit * 4.0).ceil() / 4.0).min(4.0))
+}
+
+/// The `vf` chain for NVIDIA RTX Video (mpv `d3d11vpp`), or an empty string for none.
+///
+/// Super Resolution only applies to the single player (`profile` not a multiview tile) and only
+/// when the video is upscaled (`scale`). RTX HDR needs HDR output on; the filter itself skips
+/// sources that are already HDR. Output format is left to mpv, which picks the 10-bit RGB format
+/// RTX HDR requires. Callers pass `rtx_available` from [`crate::gpu::video_caps`]; the filter is
+/// never built on platforms without a D3D11 renderer.
+pub fn rtx_video_filter(
+    prefs: &Preferences,
+    profile: Profile,
+    scale: Option<f64>,
+    rtx_available: bool,
+) -> String {
+    if !rtx_available || !cfg!(target_os = "windows") {
+        return String::new();
+    }
+    rtx_filter_string(prefs, profile, scale)
+}
+
+fn rtx_filter_string(prefs: &Preferences, profile: Profile, scale: Option<f64>) -> String {
+    let tile = matches!(profile, Profile::Multiview | Profile::MultiviewDense);
+    let scale = scale.filter(|_| prefs.rtx_super_resolution && !tile);
+    let hdr = prefs.rtx_hdr && prefs.hdr_output == HdrOutput::Auto;
+    let mut opts: Vec<String> = Vec::new();
+    if let Some(s) = scale {
+        opts.push(format!("scale={s:.2}"));
+        opts.push("scaling-mode=nvidia".to_owned());
+    }
+    if hdr {
+        opts.push("nvidia-true-hdr=yes".to_owned());
+    }
+    if opts.is_empty() {
+        return String::new();
+    }
+    format!("@{RTX_FILTER_LABEL}:d3d11vpp={}", opts.join(":"))
+}
+
+/// What an RTX Video `vf` chain from [`rtx_video_filter`] asks for: the Super Resolution factor
+/// (if upscaling) and whether RTX HDR is requested. For the playback info panel.
+pub fn rtx_filter_parts(vf: &str) -> (Option<f64>, bool) {
+    let Some(opts) = vf.split_once("d3d11vpp=").map(|(_, o)| o) else {
+        return (None, false);
+    };
+    let mut scale = None;
+    let mut hdr = false;
+    for o in opts.split(':') {
+        match o.split_once('=') {
+            Some(("scale", v)) => scale = v.parse::<f64>().ok(),
+            Some(("nvidia-true-hdr", v)) => hdr = v == "yes",
+            _ => {}
+        }
+    }
+    (scale, hdr)
 }
 
 /// `--wid` (Windows) renders with mpv's own swapchain, so mpv signals HDR to the OS itself.
@@ -312,7 +425,13 @@ pub const AUDIO_OUTPUTS: &str = "";
 pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
     let mut o: Opts = Vec::new();
     match backend {
-        RenderBackend::RenderApi => o.push(kv("vo", "libmpv")),
+        RenderBackend::RenderApi => {
+            o.push(kv("vo", "libmpv"));
+            // The surface (not mpv) owns HDR signalling: mpv must tone-map to SDR unless the
+            // Linux HDR surface overrides target-trc/prim/peak at run time. `yes`/`no` are valid
+            // on every mpv we support (0.40 takes a flag, 0.41+ a choice).
+            o.push(kv("target-colorspace-hint", "no"));
+        }
         RenderBackend::WidWindow => {
             o.push(kv("vo", "gpu-next"));
             o.push(kv(
@@ -362,21 +481,78 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
 }
 
 /// Profile options, applied per file via `loadfile`.
+///
+/// Subtitles and closed captions are off for every play: mpv's default `sid=auto` would otherwise
+/// pick a caption track (EIA-608/708 in the video, DVB/teletext) matching `slang` or the forced
+/// flag on its own. The player's subtitle menu turns one on after load (`SubtitleTrack`), and
+/// because this is a per-file option the choice never carries over to the next channel.
 pub fn profile_options(profile: Profile, prefs: &Preferences) -> Opts {
+    let mut o = vec![kv("sid", "no")];
+    o.extend(profile_cache_options(profile, prefs));
+    o
+}
+
+fn profile_cache_options(profile: Profile, prefs: &Preferences) -> Opts {
     match profile {
-        Profile::Multiview => profile_options(Profile::Live, prefs),
+        Profile::Multiview => profile_cache_options(Profile::Live, prefs),
         Profile::MultiviewDense => {
-            let mut o = profile_options(Profile::Live, prefs);
+            let mut o = profile_cache_options(Profile::Multiview, prefs);
             o.push(kv("vd-lavc-skiploopfilter", "nonkey"));
             o
         }
+        // Keep at least `live_buffer_secs` (>= 3) read ahead: the demuxer reads that far past the
+        // playhead (readahead), the cache may hold twice that so a burst is not discarded, and
+        // after an underrun playback pauses until the buffer is full again (cache-pause-wait)
+        // instead of stuttering along on a near-empty cache.
         Profile::Live => vec![
             kv("cache", "yes"),
-            kv("cache-secs", prefs.live_buffer_secs_clamped().to_string()),
-            kv("demuxer-readahead-secs", "2"),
+            kv(
+                "cache-secs",
+                (prefs.live_buffer_secs_clamped() * 2).to_string(),
+            ),
+            kv("cache-pause", "yes"),
+            kv(
+                "cache-pause-wait",
+                prefs.live_buffer_secs_clamped().to_string(),
+            ),
+            kv(
+                "demuxer-readahead-secs",
+                prefs.live_buffer_secs_clamped().to_string(),
+            ),
             kv("demuxer-max-bytes", "32MiB"),
             kv("demuxer-max-back-bytes", "16MiB"),
         ],
+        Profile::Timeshift => {
+            let Some(secs) = prefs.timeshift_secs_effective() else {
+                return profile_cache_options(Profile::Live, prefs);
+            };
+            let bytes = u64::from(secs) * TIMESHIFT_BYTES_PER_SEC;
+            // Reading continues while paused (cache-secs covers the whole buffer) and seeking
+            // stays inside the cache; the forward and back limits are each one buffer long so a
+            // pause of the full length still fits. The cache lives on disk, not in RAM.
+            let mut o = vec![
+                kv("cache", "yes"),
+                kv("cache-on-disk", "yes"),
+                kv("force-seekable", "yes"),
+                kv("demuxer-seekable-cache", "yes"),
+                kv("cache-secs", secs.to_string()),
+                kv(
+                    "cache-pause-wait",
+                    prefs.live_buffer_secs_clamped().to_string(),
+                ),
+                kv("cache-pause", "yes"),
+                kv(
+                    "demuxer-readahead-secs",
+                    prefs.live_buffer_secs_clamped().to_string(),
+                ),
+                kv("demuxer-max-bytes", bytes.to_string()),
+                kv("demuxer-max-back-bytes", bytes.to_string()),
+            ];
+            if !prefs.timeshift_dir.is_empty() {
+                o.push(kv("demuxer-cache-dir", prefs.timeshift_dir.clone()));
+            }
+            o
+        }
         Profile::Seekable => vec![
             kv("cache", "yes"),
             kv("demuxer-readahead-secs", "20"),
@@ -399,11 +575,23 @@ pub fn loadfile_options(
     prefs: &Preferences,
     headers: &[(String, String)],
     start_secs: Option<f64>,
+    start_paused: bool,
 ) -> String {
-    let mut parts: Vec<String> = profile_options(profile, prefs)
-        .into_iter()
-        .map(|(k, v)| format!("{k}={}", quote(&v)))
-        .collect();
+    // `pause` is engine state that survives `loadfile`: a session paused (or one that failed while
+    // paused) would otherwise start the next file frozen while the UI says it is playing.
+    let mut parts: Vec<String> = vec![
+        if start_paused {
+            "pause=yes"
+        } else {
+            "pause=no"
+        }
+        .to_owned(),
+    ];
+    parts.extend(
+        profile_options(profile, prefs)
+            .into_iter()
+            .map(|(k, v)| format!("{k}={}", quote(&v))),
+    );
     // A plan-supplied User-Agent (M3U `http-user-agent`, pipe headers) goes through mpv's own
     // per-file option so it replaces the default instead of being sent twice.
     let (ua, rest): (Vec<_>, Vec<_>) = headers
@@ -432,6 +620,79 @@ pub fn loadfile_options(
 mod tests {
     use super::*;
 
+    #[test]
+    fn rtx_scale_factor() {
+        // 1080p on a 4K window: exactly 2x.
+        assert_eq!(rtx_scale((1920, 1080), (3840, 2160)), Some(2.0));
+        // 720p on 4K: 3x. 576i (aspect-corrected 1024x576) on 1080p: 1.875 -> 2.0.
+        assert_eq!(rtx_scale((1280, 720), (3840, 2160)), Some(3.0));
+        assert_eq!(rtx_scale((1024, 576), (1920, 1080)), Some(2.0));
+        // Letterboxed: the tighter axis wins. 1920x800 in 2560x1440 -> 1.333 -> 1.5.
+        assert_eq!(rtx_scale((1920, 800), (2560, 1440)), Some(1.5));
+        // No (or barely any) upscaling, and nonsense sizes.
+        assert_eq!(rtx_scale((1920, 1080), (1920, 1080)), None);
+        assert_eq!(rtx_scale((1920, 1080), (2000, 1125)), None);
+        assert_eq!(rtx_scale((1920, 1080), (960, 540)), None);
+        assert_eq!(rtx_scale((0, 0), (3840, 2160)), None);
+        // Tiny sources are capped at 4x.
+        assert_eq!(rtx_scale((320, 180), (3840, 2160)), Some(4.0));
+    }
+
+    #[test]
+    fn rtx_filter_chain() {
+        let both = Preferences {
+            rtx_super_resolution: true,
+            rtx_hdr: true,
+            ..Preferences::default()
+        };
+        assert_eq!(
+            rtx_filter_string(&both, Profile::Live, Some(2.0)),
+            "@rtx:d3d11vpp=scale=2.00:scaling-mode=nvidia:nvidia-true-hdr=yes"
+        );
+        // No upscaling needed: HDR only.
+        assert_eq!(
+            rtx_filter_string(&both, Profile::Seekable, None),
+            "@rtx:d3d11vpp=nvidia-true-hdr=yes"
+        );
+        // Multiview tiles never get Super Resolution, but keep RTX HDR.
+        for p in [Profile::Multiview, Profile::MultiviewDense] {
+            assert_eq!(
+                rtx_filter_string(&both, p, Some(2.0)),
+                "@rtx:d3d11vpp=nvidia-true-hdr=yes"
+            );
+        }
+        // RTX HDR needs HDR output.
+        let sdr = Preferences {
+            hdr_output: HdrOutput::Off,
+            ..both.clone()
+        };
+        assert_eq!(
+            rtx_filter_string(&sdr, Profile::Live, Some(1.5)),
+            "@rtx:d3d11vpp=scale=1.50:scaling-mode=nvidia"
+        );
+        assert_eq!(rtx_filter_string(&sdr, Profile::Multiview, Some(1.5)), "");
+        // The info panel reads the chain back.
+        assert_eq!(
+            rtx_filter_parts("@rtx:d3d11vpp=scale=2.00:scaling-mode=nvidia:nvidia-true-hdr=yes"),
+            (Some(2.0), true)
+        );
+        assert_eq!(
+            rtx_filter_parts("@rtx:d3d11vpp=nvidia-true-hdr=yes"),
+            (None, true)
+        );
+        assert_eq!(rtx_filter_parts(""), (None, false));
+        // Both off: no filter.
+        assert_eq!(
+            rtx_filter_string(&Preferences::default(), Profile::Live, Some(2.0)),
+            ""
+        );
+        // No RTX adapter, or not Windows: never a filter.
+        assert_eq!(rtx_video_filter(&both, Profile::Live, Some(2.0), false), "");
+        if !cfg!(target_os = "windows") {
+            assert_eq!(rtx_video_filter(&both, Profile::Live, Some(2.0), true), "");
+        }
+    }
+
     fn has(o: &Opts, k: &str, v: &str) -> bool {
         o.iter().any(|(a, b)| a == k && b == v)
     }
@@ -450,12 +711,31 @@ mod tests {
     }
 
     #[test]
+    fn every_profile_starts_with_subtitles_off() {
+        let p = Preferences::default();
+        for prof in [
+            Profile::Live,
+            Profile::Timeshift,
+            Profile::Seekable,
+            Profile::Multiview,
+            Profile::MultiviewDense,
+        ] {
+            let o = profile_options(prof, &p);
+            assert_eq!(o.iter().filter(|(k, _)| k == "sid").count(), 1);
+            assert!(has(&o, "sid", "no"), "{prof:?}");
+            assert!(loadfile_options(prof, &p, &[], None, false).contains("sid=%2%no"));
+        }
+    }
+
+    #[test]
     fn multiview_profiles() {
         let p = Preferences::default();
         let mv = profile_options(Profile::Multiview, &p);
         assert_eq!(mv, profile_options(Profile::Live, &p));
+        assert!(has(&mv, "sid", "no"));
         let dense = profile_options(Profile::MultiviewDense, &p);
         assert!(has(&dense, "vd-lavc-skiploopfilter", "nonkey"));
+        assert!(has(&dense, "sid", "no"));
         assert!(Profile::MultiviewDense.is_live() && !Profile::Seekable.is_live());
     }
 
@@ -489,9 +769,11 @@ mod tests {
         };
         let o = base_options(&off, RenderBackend::WidWindow);
         assert!(has(&o, "target-colorspace-hint", "no"));
-        // The render API path never sets it: on Linux the surface owns HDR signalling.
+        // The render API path always tone-maps unless the surface overrides it, even on Auto.
         let o = base_options(&Preferences::default(), RenderBackend::RenderApi);
-        assert!(!o.iter().any(|(k, _)| k == "target-colorspace-hint"));
+        assert!(has(&o, "target-colorspace-hint", "no"));
+        let live = Preferences::default().live_options();
+        assert!(live.iter().any(|(k, _)| k == "target-colorspace-hint"));
     }
 
     #[test]
@@ -508,12 +790,16 @@ mod tests {
 
     #[test]
     fn live_buffer_is_clamped() {
-        for (input, want) in [(0u32, "1"), (2, "2"), (10, "10"), (99, "10")] {
+        for (input, want) in [(0u32, "3"), (2, "3"), (5, "5"), (10, "10"), (99, "10")] {
             let p = Preferences {
                 live_buffer_secs: input,
                 ..Preferences::default()
             };
-            assert!(has(&profile_options(Profile::Live, &p), "cache-secs", want));
+            let o = profile_options(Profile::Live, &p);
+            assert!(has(&o, "cache-pause-wait", want));
+            assert!(has(&o, "demuxer-readahead-secs", want));
+            let cache: u32 = want.parse().unwrap_or(0) * 2;
+            assert!(has(&o, "cache-secs", &cache.to_string()));
         }
     }
 
@@ -521,7 +807,8 @@ mod tests {
     fn live_and_seekable_profiles() {
         let p = Preferences::default();
         let live = profile_options(Profile::Live, &p);
-        assert!(has(&live, "demuxer-readahead-secs", "2"));
+        assert!(has(&live, "demuxer-readahead-secs", "3"));
+        assert!(has(&live, "cache-pause", "yes"));
         assert!(has(&live, "demuxer-max-bytes", "32MiB"));
         assert!(has(&live, "demuxer-max-back-bytes", "16MiB"));
         let seek = profile_options(Profile::Seekable, &p);
@@ -529,6 +816,45 @@ mod tests {
         assert!(has(&seek, "demuxer-max-bytes", "128MiB"));
         assert!(has(&seek, "demuxer-max-back-bytes", "64MiB"));
         assert!(!seek.iter().any(|(k, _)| k == "cache-secs"));
+    }
+
+    #[test]
+    fn timeshift_profile_uses_a_disk_cache_sized_from_the_setting() {
+        let p = Preferences {
+            timeshift_secs: 3600,
+            timeshift_dir: "/tmp/ts".into(),
+            ..Preferences::default()
+        };
+        let o = profile_options(Profile::Timeshift, &p);
+        assert!(has(&o, "cache-on-disk", "yes"));
+        assert!(has(&o, "force-seekable", "yes"));
+        assert!(has(&o, "cache-secs", "3600"));
+        assert!(has(&o, "demuxer-max-back-bytes", "5400000000"));
+        assert!(has(&o, "demuxer-max-bytes", "5400000000"));
+        assert!(has(&o, "demuxer-cache-dir", "/tmp/ts"));
+        assert!(Profile::Timeshift.is_live());
+    }
+
+    #[test]
+    fn timeshift_is_clamped_and_can_be_off() {
+        let at = |secs| {
+            Preferences {
+                timeshift_secs: secs,
+                ..Preferences::default()
+            }
+            .timeshift_secs_effective()
+        };
+        assert_eq!(at(0), None);
+        assert_eq!(at(60), Some(TIMESHIFT_MIN_SECS));
+        assert_eq!(at(99_999), Some(TIMESHIFT_MAX_SECS));
+        let off = Preferences {
+            timeshift_secs: 0,
+            ..Preferences::default()
+        };
+        assert_eq!(
+            profile_options(Profile::Timeshift, &off),
+            profile_options(Profile::Live, &off)
+        );
     }
 
     #[test]
@@ -544,10 +870,11 @@ mod tests {
             &Preferences::default(),
             &[("X-API-Key".into(), "k,1".into())],
             None,
+            false,
         );
         // inner list: "X-API-Key: k\,1" (15 bytes), the comma escaped for mpv's list parser
         assert!(s.contains("http-header-fields=%15%X-API-Key: k\\,1"), "{s}");
-        assert!(s.contains("cache-secs=%1%2"));
+        assert!(s.contains("cache-secs=%1%6"));
     }
 
     #[test]
@@ -560,6 +887,7 @@ mod tests {
                 ("Referer".into(), "http://r.test".into()),
             ],
             None,
+            false,
         );
         assert!(
             s.contains("http-header-fields=%46%Authorization: Bearer t,Referer: http://r.test"),
@@ -577,6 +905,7 @@ mod tests {
                 ("X-API-Key".into(), "k".into()),
             ],
             None,
+            false,
         );
         assert!(s.contains("user-agent=%10%Agent/1, x"), "{s}");
         assert!(s.contains("http-header-fields=%12%X-API-Key: k"), "{s}");
@@ -596,8 +925,36 @@ mod tests {
     }
 
     #[test]
+    fn every_load_starts_unpaused() {
+        for p in [Profile::Live, Profile::Timeshift, Profile::Seekable] {
+            let s = loadfile_options(p, &Preferences::default(), &[], None, false);
+            assert!(s.starts_with("pause=no,"), "{s}");
+        }
+    }
+
+    #[test]
+    fn start_paused_loads_paused() {
+        let s = loadfile_options(
+            Profile::Seekable,
+            &Preferences::default(),
+            &[],
+            Some(30.0),
+            true,
+        );
+        assert!(s.starts_with("pause=yes,"), "{s}");
+        assert!(s.contains("start=%6%30.000"), "{s}");
+        assert!(!s.contains("pause=no"), "{s}");
+    }
+
+    #[test]
     fn no_headers_no_header_option() {
-        let s = loadfile_options(Profile::Seekable, &Preferences::default(), &[], Some(12.5));
+        let s = loadfile_options(
+            Profile::Seekable,
+            &Preferences::default(),
+            &[],
+            Some(12.5),
+            false,
+        );
         assert!(!s.contains("http-header-fields"));
         assert!(s.contains("start=%6%12.500"));
     }

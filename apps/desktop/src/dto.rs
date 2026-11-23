@@ -4,12 +4,14 @@
 use downlink_core::service::ProgrammeDto;
 use downlink_core::{AppError, ErrorCode};
 use downlink_player::options::{SubtitleBackground, SubtitleSize};
+use downlink_player::timeshift::{media_to_utc, utc_to_media};
 use downlink_player::{
     AudioMode, Deinterlace, FailureInfo, FailureKind, HdrOutput, PlayMode, PlayerSnapshot,
     Preferences, SessionState, WaitingOn,
 };
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::OnceLock;
 
 pub fn phase_name(s: SessionState) -> &'static str {
     match s {
@@ -51,6 +53,8 @@ pub struct PlayerStateDto {
     pub programme: Option<ProgrammeDto>,
     /// Title of VOD / recording media (null for live and catch-up).
     pub title: Option<String>,
+    /// VOD item / recording id being played (null for live and catch-up).
+    pub media_id: Option<i64>,
     pub resume_at: Option<f64>,
     pub position: Option<f64>,
     pub duration: Option<f64>,
@@ -69,7 +73,30 @@ pub struct PlayerStateDto {
     pub transitioned_at: i64,
     /// Audio and subtitle tracks of the current file (video tracks are left out).
     pub tracks: Vec<TrackDto>,
+    /// Wall-clock timeline of a live or catch-up session (null for VOD and recordings).
+    pub timeline: Option<TimelineDto>,
 }
+
+/// `Timeline` of types.ts. All values are UTC seconds (fractional) except `behindLiveSecs`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineDto {
+    pub playhead_utc: f64,
+    /// Newest moment that can be played: the live edge.
+    pub live_edge_utc: f64,
+    /// Oldest moment in the local timeshift buffer (live only).
+    pub buffer_start_utc: Option<f64>,
+    /// Oldest moment in the server archive (channels with catch-up only).
+    pub archive_start_utc: Option<f64>,
+    pub behind_live_secs: f64,
+    /// `buffer` | `archive` | `live`.
+    pub source: &'static str,
+}
+
+/// Seconds behind the edge that still count as "live".
+pub const LIVE_SLACK_SECS: f64 = 10.0;
+/// Cushion kept behind the buffer tip when jumping to live: the tip itself has nothing buffered ahead.
+pub const LIVE_CUSHION_SECS: f64 = 3.0;
 
 /// `Track` of types.ts: one audio or subtitle track (teletext and DVB subtitles are `sub`).
 #[derive(Debug, Clone, Serialize)]
@@ -80,6 +107,8 @@ pub struct TrackDto {
     pub lang: Option<String>,
     pub title: Option<String>,
     pub codec: Option<String>,
+    pub channels: Option<String>,
+    pub default: bool,
     pub selected: bool,
 }
 
@@ -98,6 +127,8 @@ pub fn track_dtos(tracks: &[downlink_player::Track]) -> Vec<TrackDto> {
                 lang: t.lang.clone(),
                 title: t.title.clone(),
                 codec: t.codec.clone(),
+                channels: t.channels.clone(),
+                default: t.default,
                 selected: t.selected,
             })
         })
@@ -111,11 +142,138 @@ pub struct SessionInfo {
     pub mode: Option<PlayMode>,
     pub programme: Option<ProgrammeDto>,
     pub title: Option<String>,
+    /// VOD item or recording id (with `mode`), for media-server lookups.
+    pub media_id: Option<i64>,
     pub resume_at: Option<f64>,
     pub failure: Option<AppError>,
     /// A server-side failover attempt is in progress.
     pub failover_active: bool,
     pub transitioned_at: i64,
+    /// Archive days of the channel (0 = no catch-up).
+    pub archive_days: i64,
+    /// Live playback uses the timeshift buffer.
+    pub timeshift: bool,
+    /// Catch-up playback: UTC start of the programme being played (media time 0).
+    pub catchup_start_utc: Option<i64>,
+}
+
+/// Wall-clock timeline for a live or catch-up session; `now` is UTC seconds.
+pub fn timeline(snap: &PlayerSnapshot, info: &SessionInfo, now: f64) -> Option<TimelineDto> {
+    info.channel_id?;
+    let mode = info.mode.or(snap.mode)?;
+    let archive_start_utc =
+        (info.archive_days > 0).then_some(now - info.archive_days as f64 * 86_400.0);
+    match mode {
+        PlayMode::Live => {
+            let pos = snap.position_secs;
+            let (playhead, edge, buffer_start) = match (snap.live_anchor, pos) {
+                (Some(a), Some(p)) => {
+                    let edge = snap
+                        .seek_range
+                        .map_or(a.media_secs.max(p), |(_, e)| e.max(p));
+                    let start = snap
+                        .seek_range
+                        .filter(|_| info.timeshift)
+                        .map(|(s, _)| media_to_utc(a, s.min(p)));
+                    (media_to_utc(a, p), media_to_utc(a, edge), start)
+                }
+                _ => (now, now, None),
+            };
+            let behind = (edge - playhead).max(0.0);
+            Some(TimelineDto {
+                playhead_utc: playhead,
+                live_edge_utc: edge,
+                buffer_start_utc: buffer_start,
+                archive_start_utc,
+                behind_live_secs: behind,
+                source: if behind > LIVE_SLACK_SECS {
+                    "buffer"
+                } else {
+                    "live"
+                },
+            })
+        }
+        PlayMode::Catchup => {
+            let start = info.catchup_start_utc? as f64;
+            let playhead = start + snap.position_secs.unwrap_or(0.0).max(0.0);
+            Some(TimelineDto {
+                playhead_utc: playhead,
+                live_edge_utc: now,
+                buffer_start_utc: None,
+                archive_start_utc,
+                behind_live_secs: (now - playhead).max(0.0),
+                source: "archive",
+            })
+        }
+        PlayMode::Vod | PlayMode::Recording => None,
+    }
+}
+
+/// Where a wall-clock seek goes (see `Playback::seek_to`).
+#[derive(Debug, Clone, PartialEq)]
+pub enum SeekRoute {
+    /// Seek inside the current file to this media time.
+    Media(f64),
+    /// Return to the live stream (jump to the newest buffered moment, or reload live).
+    Live,
+    /// Load the archive at this UTC second.
+    Archive(i64),
+}
+
+/// Decide where a seek to `utc` goes. Pure; `catchup_end_utc` is the end of the programme
+/// currently played from the archive.
+pub fn seek_route(
+    snap: &PlayerSnapshot,
+    info: &SessionInfo,
+    tl: &TimelineDto,
+    catchup_end_utc: Option<i64>,
+    utc: f64,
+) -> SeekRoute {
+    if utc >= tl.live_edge_utc - LIVE_CUSHION_SECS {
+        return match (info.mode, snap.live_anchor, snap.seek_range) {
+            (Some(PlayMode::Live), Some(a), Some((_, end))) if info.timeshift => {
+                let target = utc_to_media(a, media_to_utc(a, end) - LIVE_CUSHION_SECS);
+                // Already inside the cushion: stay put rather than jump back.
+                match snap.position_secs {
+                    Some(p) if p >= target => SeekRoute::Media(p),
+                    _ => SeekRoute::Media(target),
+                }
+            }
+            _ => SeekRoute::Live,
+        };
+    }
+    let archive_ok = |u: f64| tl.archive_start_utc.is_some_and(|a| u >= a);
+    match info.mode {
+        Some(PlayMode::Live) => {
+            if let (Some(start), Some(a)) = (tl.buffer_start_utc, snap.live_anchor) {
+                if utc >= start {
+                    return SeekRoute::Media(utc_to_media(a, utc));
+                }
+                if archive_ok(utc) {
+                    return SeekRoute::Archive(utc.floor() as i64);
+                }
+                return SeekRoute::Media(utc_to_media(a, start));
+            }
+            if archive_ok(utc) {
+                SeekRoute::Archive(utc.floor() as i64)
+            } else {
+                SeekRoute::Media(snap.position_secs.unwrap_or(0.0))
+            }
+        }
+        Some(PlayMode::Catchup) => {
+            let start = info.catchup_start_utc.unwrap_or(0) as f64;
+            let end = catchup_end_utc.map_or(f64::INFINITY, |e| e as f64);
+            if utc >= start && utc < end {
+                SeekRoute::Media(utc - start)
+            } else if archive_ok(utc) {
+                SeekRoute::Archive(utc.floor() as i64)
+            } else {
+                // Before the archive window: the oldest moment that is still there.
+                SeekRoute::Archive(tl.archive_start_utc.map_or(start, |a| a.ceil() + 60.0) as i64)
+            }
+        }
+        _ => SeekRoute::Media(snap.position_secs.unwrap_or(0.0)),
+    }
 }
 
 pub fn player_state(snap: &PlayerSnapshot, info: &SessionInfo) -> PlayerStateDto {
@@ -127,20 +285,28 @@ pub fn player_state(snap: &PlayerSnapshot, info: &SessionInfo) -> PlayerStateDto
             None => AppError::new(ErrorCode::Stream, "Source unavailable. Try again."),
         })
     });
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64());
+    let timeline = timeline(snap, info, now);
     PlayerStateDto {
         state: phase_name(state),
         mode: mode.map(mode_name),
         channel_id: info.channel_id,
         programme: info.programme.clone(),
         title: info.title.clone(),
+        media_id: info.media_id,
         resume_at: info.resume_at,
         position: snap.position_secs,
         duration: snap.duration_secs,
         buffered: snap.buffered_secs,
-        seekable: matches!(
+        seekable: (matches!(
             mode,
             Some(PlayMode::Catchup | PlayMode::Vod | PlayMode::Recording)
-        ) && snap.duration_secs.is_some(),
+        ) && snap.duration_secs.is_some())
+            || timeline
+                .as_ref()
+                .is_some_and(|t| t.buffer_start_utc.is_some() || t.archive_start_utc.is_some()),
         volume: snap.volume.unwrap_or(100.0),
         muted: snap.muted,
         hwdec_current: snap.hwdec_current.clone(),
@@ -152,6 +318,7 @@ pub fn player_state(snap: &PlayerSnapshot, info: &SessionInfo) -> PlayerStateDto
         error,
         transitioned_at: info.transitioned_at,
         tracks: track_dtos(&snap.tracks),
+        timeline,
     }
 }
 
@@ -183,6 +350,13 @@ pub fn failure_error(f: &FailureInfo) -> AppError {
     }
 }
 
+static TIMESHIFT_DIR: OnceLock<String> = OnceLock::new();
+
+/// Set once at boot: where the on-disk timeshift cache lives.
+pub fn set_timeshift_dir(dir: String) {
+    let _ = TIMESHIFT_DIR.set(dir);
+}
+
 /// UI `AppSettings` (types.ts) -> player preferences. Unknown or missing fields keep defaults.
 pub fn preferences_from_settings(v: &Value) -> Preferences {
     let mut p = Preferences {
@@ -190,7 +364,11 @@ pub fn preferences_from_settings(v: &Value) -> Preferences {
         ..Preferences::default()
     };
     if let Some(n) = v.get("liveBufferSecs").and_then(Value::as_f64) {
-        p.live_buffer_secs = n.round().clamp(1.0, 10.0) as u32;
+        p.live_buffer_secs = n.round().clamp(3.0, 10.0) as u32;
+    }
+    p.timeshift_dir = TIMESHIFT_DIR.get().cloned().unwrap_or_default();
+    if let Some(m) = v.get("timeshiftMinutes").and_then(Value::as_f64) {
+        p.timeshift_secs = (m.round().clamp(0.0, 180.0) as u32) * 60;
     }
     if let Some(h) = v.get("hwdec").and_then(Value::as_str) {
         p.hwdec = h.to_owned();
@@ -213,6 +391,11 @@ pub fn preferences_from_settings(v: &Value) -> Preferences {
         Some("off") => HdrOutput::Off,
         _ => HdrOutput::Auto,
     };
+    p.rtx_super_resolution = v
+        .get("rtxSuperResolution")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    p.rtx_hdr = v.get("rtxHdr").and_then(Value::as_bool).unwrap_or(false);
     if let Some(pct) = v.get("subtitleSize").and_then(Value::as_f64) {
         p.subtitle.size = if pct < 85.0 {
             SubtitleSize::Small
@@ -235,6 +418,115 @@ pub fn preferences_from_settings(v: &Value) -> Preferences {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use downlink_player::LiveAnchor;
+
+    const NOW: f64 = 1_000_000.0;
+
+    /// Live, timeshift on: 600 s buffered (media 0..600), playing at media 300, edge = NOW.
+    fn live_buffered(archive_days: i64) -> (PlayerSnapshot, SessionInfo) {
+        let snap = PlayerSnapshot {
+            mode: Some(PlayMode::Live),
+            position_secs: Some(300.0),
+            seek_range: Some((0.0, 600.0)),
+            live_anchor: Some(LiveAnchor {
+                media_secs: 600.0,
+                utc_ms: (NOW * 1000.0) as i64,
+            }),
+            ..PlayerSnapshot::default()
+        };
+        let info = SessionInfo {
+            channel_id: Some(1),
+            mode: Some(PlayMode::Live),
+            timeshift: true,
+            archive_days,
+            ..SessionInfo::default()
+        };
+        (snap, info)
+    }
+
+    #[test]
+    fn live_timeline_maps_the_buffer_to_wall_clock() {
+        let (snap, info) = live_buffered(0);
+        let tl = timeline(&snap, &info, NOW).unwrap_or_else(|| panic!("timeline"));
+        assert_eq!(tl.playhead_utc, NOW - 300.0);
+        assert_eq!(tl.live_edge_utc, NOW);
+        assert_eq!(tl.buffer_start_utc, Some(NOW - 600.0));
+        assert_eq!(tl.archive_start_utc, None);
+        assert_eq!(tl.source, "buffer");
+    }
+
+    #[test]
+    fn seeks_route_to_buffer_archive_or_live() {
+        let (snap, info) = live_buffered(7);
+        let tl = timeline(&snap, &info, NOW).unwrap_or_else(|| panic!("timeline"));
+        // Inside the buffer: a media seek.
+        assert_eq!(
+            seek_route(&snap, &info, &tl, None, NOW - 100.0),
+            SeekRoute::Media(500.0)
+        );
+        // Older than the buffer, channel has an archive.
+        assert_eq!(
+            seek_route(&snap, &info, &tl, None, NOW - 3600.0),
+            SeekRoute::Archive((NOW - 3600.0) as i64)
+        );
+        // At the edge: jump to the newest buffered moment, no reload.
+        assert_eq!(
+            seek_route(&snap, &info, &tl, None, NOW + 50.0),
+            SeekRoute::Media(597.0)
+        );
+        // Already within the cushion of the tip: keep the position.
+        let mut near = snap.clone();
+        near.position_secs = Some(598.0);
+        assert_eq!(
+            seek_route(&near, &info, &tl, None, NOW + 50.0),
+            SeekRoute::Media(598.0)
+        );
+        // No archive: clamp to the start of the buffer.
+        let (snap, info) = live_buffered(0);
+        let tl = timeline(&snap, &info, NOW).unwrap_or_else(|| panic!("timeline"));
+        assert_eq!(
+            seek_route(&snap, &info, &tl, None, NOW - 3600.0),
+            SeekRoute::Media(0.0)
+        );
+    }
+
+    #[test]
+    fn catchup_seeks_stay_in_the_file_or_change_programme() {
+        let snap = PlayerSnapshot {
+            mode: Some(PlayMode::Catchup),
+            position_secs: Some(60.0),
+            ..PlayerSnapshot::default()
+        };
+        let start = (NOW - 7200.0) as i64;
+        let info = SessionInfo {
+            channel_id: Some(1),
+            mode: Some(PlayMode::Catchup),
+            archive_days: 1,
+            catchup_start_utc: Some(start),
+            ..SessionInfo::default()
+        };
+        let tl = timeline(&snap, &info, NOW).unwrap_or_else(|| panic!("timeline"));
+        assert_eq!(tl.playhead_utc, start as f64 + 60.0);
+        assert_eq!(tl.source, "archive");
+        let end = Some(start + 1800);
+        assert_eq!(
+            seek_route(&snap, &info, &tl, end, start as f64 + 600.0),
+            SeekRoute::Media(600.0)
+        );
+        assert_eq!(
+            seek_route(&snap, &info, &tl, end, start as f64 + 2000.0),
+            SeekRoute::Archive(start + 2000)
+        );
+        assert_eq!(seek_route(&snap, &info, &tl, end, NOW), SeekRoute::Live);
+    }
+
+    #[test]
+    fn timeshift_minutes_map_to_seconds() {
+        let p = preferences_from_settings(&serde_json::json!({ "timeshiftMinutes": 90 }));
+        assert_eq!(p.timeshift_secs, 5400);
+        let off = preferences_from_settings(&serde_json::json!({ "timeshiftMinutes": 0 }));
+        assert_eq!(off.timeshift_secs_effective(), None);
+    }
 
     #[test]
     fn settings_map_to_preferences() {
@@ -257,6 +549,16 @@ mod tests {
         assert_eq!(p.subtitle.size, SubtitleSize::Large);
         assert_eq!(p.subtitle.background, SubtitleBackground::None);
         assert_eq!(p.audio_device.as_deref(), Some("alsa/hdmi:X"));
+    }
+
+    #[test]
+    fn rtx_video_settings_default_off() {
+        let p = preferences_from_settings(&serde_json::json!({}));
+        assert!(!p.rtx_super_resolution && !p.rtx_hdr);
+        let on = preferences_from_settings(
+            &serde_json::json!({ "rtxSuperResolution": true, "rtxHdr": true }),
+        );
+        assert!(on.rtx_super_resolution && on.rtx_hdr);
     }
 
     #[test]
@@ -290,12 +592,14 @@ mod tests {
             let info = SessionInfo {
                 mode: Some(mode),
                 title: Some("A title".into()),
+                media_id: Some(7),
                 resume_at: Some(600.0),
                 ..SessionInfo::default()
             };
             let v = serde_json::to_value(player_state(&snap, &info)).unwrap_or_default();
             assert_eq!(v["mode"], name);
             assert_eq!(v["title"], "A title");
+            assert_eq!(v["mediaId"], 7);
             assert_eq!(v["seekable"], true);
             assert_eq!(v["resumeAt"], 600.0);
             assert!(v["channelId"].is_null());

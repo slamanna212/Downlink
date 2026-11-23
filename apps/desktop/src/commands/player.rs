@@ -48,6 +48,14 @@ pub enum UiCommand {
     Seek {
         seconds: f64,
     },
+    /// Wall-clock seek on a live or catch-up timeline (UTC seconds).
+    SeekTo {
+        utc: f64,
+    },
+    /// Relative seek on a live or catch-up timeline.
+    SeekBy {
+        seconds: f64,
+    },
     GoLive,
     SetVolume {
         volume: f64,
@@ -74,6 +82,8 @@ pub async fn player_command(state: State<'_, AppState>, command: UiCommand) -> C
         UiCommand::TogglePause => pb.command(PlayerCommand::TogglePause),
         UiCommand::Stop => pb.stop().await,
         UiCommand::Seek { seconds } => pb.command(PlayerCommand::SeekAbsolute { secs: seconds }),
+        UiCommand::SeekTo { utc } => pb.seek_to(utc).await,
+        UiCommand::SeekBy { seconds } => pb.seek_by(seconds).await,
         UiCommand::GoLive => pb.go_live().await,
         UiCommand::SetVolume { volume } => pb.command(PlayerCommand::Volume {
             percent: volume.clamp(0.0, 130.0).round() as u8,
@@ -109,8 +119,34 @@ pub async fn switch_stream(
         .await
 }
 
+/// Async commands are not guaranteed to run in the order the UI invoked them, so two quick bounds
+/// reports (e.g. mid-fullscreen-transition, then final) could apply final-then-stale and leave the video
+/// at the old size. The UI stamps each report with an increasing `seq`; a report older than the newest
+/// one already applied for its slot is dropped. `None` (older callers) always applies.
+#[derive(Default)]
+struct BoundsOrder(std::sync::Mutex<std::collections::HashMap<u32, u64>>);
+
+impl BoundsOrder {
+    /// True when the report for `slot` is the newest seen so far (and records it).
+    fn accept(&self, slot: u32, seq: Option<u64>) -> bool {
+        let Some(seq) = seq else { return true };
+        let mut m = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        match m.get(&slot) {
+            Some(&last) if seq < last => false,
+            _ => {
+                m.insert(slot, seq);
+                true
+            }
+        }
+    }
+}
+
+static BOUNDS_ORDER: std::sync::LazyLock<BoundsOrder> =
+    std::sync::LazyLock::new(BoundsOrder::default);
+
 /// Video rect in physical pixels (window client coordinates). `visible` defaults to true.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn set_video_bounds(
     state: State<'_, AppState>,
     x: i32,
@@ -119,10 +155,14 @@ pub async fn set_video_bounds(
     h: u32,
     scale: f64,
     visible: Option<bool>,
+    seq: Option<u64>,
 ) -> CmdResult<()> {
     if let Some(s) = state.surface().await {
-        s.set_bounds(SurfaceBounds { x, y, w, h, scale });
-        s.set_visible(visible.unwrap_or(true));
+        // Check and dispatch with no await in between, so the order accepted is the order applied.
+        if BOUNDS_ORDER.accept(0, seq) {
+            s.set_bounds(SurfaceBounds { x, y, w, h, scale });
+            s.set_visible(visible.unwrap_or(true));
+        }
     }
     Ok(())
 }
@@ -209,8 +249,12 @@ pub async fn multiview_set_bounds(
     h: u32,
     scale: f64,
     visible: Option<bool>,
+    seq: Option<u64>,
 ) -> CmdResult<()> {
     let pb = state.playback().await?;
+    if !BOUNDS_ORDER.accept(slot, seq) {
+        return Ok(());
+    }
     multiview(&pb)?
         .set_bounds(
             slot,
@@ -318,6 +362,14 @@ pub async fn set_stats_enabled(state: State<'_, AppState>, enabled: bool) -> Cmd
     Ok(())
 }
 
+/// Graphics features the playback settings can offer (NVIDIA RTX Video). Detected once per run.
+#[tauri::command]
+pub async fn get_video_caps() -> CmdResult<downlink_player::VideoCaps> {
+    tauri::async_runtime::spawn_blocking(downlink_player::video_caps)
+        .await
+        .map_err(|e| AppError::local(format!("GPU detection failed: {e}")))
+}
+
 #[derive(Serialize)]
 pub struct AudioDevice {
     id: String,
@@ -358,4 +410,26 @@ pub async fn play_vod(
 #[tauri::command]
 pub async fn play_recording(state: State<'_, AppState>, id: i64) -> CmdResult<()> {
     state.playback().await?.play_recording(id).await
+}
+
+#[cfg(test)]
+mod bounds_order_tests {
+    use super::BoundsOrder;
+
+    #[test]
+    fn drops_stale_reports_per_slot() {
+        let o = BoundsOrder::default();
+        assert!(o.accept(0, Some(10)));
+        assert!(!o.accept(0, Some(9)));
+        assert!(o.accept(0, Some(10)));
+        assert!(o.accept(0, Some(11)));
+        assert!(o.accept(1, Some(1)), "slots are independent");
+    }
+
+    #[test]
+    fn unstamped_reports_always_apply() {
+        let o = BoundsOrder::default();
+        assert!(o.accept(0, Some(5)));
+        assert!(o.accept(0, None));
+    }
 }

@@ -39,4 +39,5 @@ export const Player: Story = { args: { path: '/player' } };
 export const Multiview: Story = { args: { path: '/multiview' } };
 export const AddSource: Story = { args: { path: '/sources/add' } };
 export const SettingsPlayback: Story = { args: { path: '/settings/playback' } };
+export const SettingsMediaServer: Story = { args: { path: '/settings/mediaserver' } };
 export const SettingsAbout: Story = { args: { path: '/settings/about' } };

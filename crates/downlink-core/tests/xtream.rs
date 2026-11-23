@@ -28,7 +28,7 @@ fn client(server: &MockServer) -> XtreamClient {
         &server.uri(),
         USER,
         SecretString::new(PASS),
-        false,
+        None,
     )
     .unwrap()
 }
@@ -390,10 +390,10 @@ async fn guide_feed_downloads_xmltv_php() {
         .await;
     let c = client(&server);
     c.connect().await.unwrap();
-    let feed = c.guide_feed().await.unwrap().unwrap();
+    let feed = c.guide_feed(None).await.unwrap().unwrap();
     assert_eq!(feed.default_tz.as_deref(), Some("Europe/London"));
     assert_eq!(
-        downlink_core::xmltv::parse_channels(feed.file.path())
+        downlink_core::xmltv::parse_channels(feed.file.as_ref().unwrap().path())
             .unwrap()
             .len(),
         1
@@ -419,7 +419,7 @@ async fn errors_never_contain_credentials() {
         "http://127.0.0.1:1",
         USER,
         SecretString::new(PASS),
-        false,
+        None,
     )
     .unwrap();
     let e = dead.connect().await.unwrap_err();
@@ -540,4 +540,69 @@ async fn panel_b_decodes_into_the_same_models_as_the_base_set() {
     for (i, n) in names.iter().enumerate() {
         assert_eq!(base[i], b[i], "{n} differ between panels");
     }
+}
+
+#[tokio::test]
+async fn vod_lists_persist_across_restarts_without_credentials() {
+    use downlink_core::source::VodListQuery;
+    use downlink_core::store::Store;
+
+    let server = MockServer::start().await;
+    let movies = serde_json::json!([{
+        "stream_id": 7001, "name": "Synthetic Movie", "category_id": "5",
+        "stream_icon": format!("{}/movie/{USER}/{PASS}/poster.jpg", server.uri()),
+    }]);
+    Mock::given(method("GET"))
+        .and(path("/player_api.php"))
+        .and(query_param("action", "get_vod_streams"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(movies))
+        .expect(1) // first launch only
+        .mount(&server)
+        .await;
+    let store = Store::open_memory().await.unwrap();
+    let q = VodListQuery {
+        limit: 10,
+        ..Default::default()
+    };
+
+    let first = client(&server).with_store(store.clone());
+    let page = first.vod_list(VodKind::Movie, &q).await.unwrap();
+    assert_eq!(page.items[0].title, "Synthetic Movie");
+    let (body, _) = store.meta_get("xtvod:1:movie").await.unwrap().unwrap();
+    assert!(!body.contains(PASS), "no credentials in SQLite: {body}");
+
+    // "Restart": a new client on the same database serves the list without a request.
+    let second = client(&server).with_store(store.clone());
+    let page = second.vod_list(VodKind::Movie, &q).await.unwrap();
+    assert_eq!(page.items[0].title, "Synthetic Movie");
+}
+
+#[tokio::test]
+async fn vod_list_falls_back_to_the_saved_copy_when_the_server_fails() {
+    use downlink_core::source::VodListQuery;
+    use downlink_core::store::Store;
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/player_api.php"))
+        .and(query_param("action", "get_vod_streams"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&server)
+        .await;
+    let store = Store::open_memory().await.unwrap();
+    store
+        .meta_put(
+            "xtvod:1:movie",
+            r#"[{"stream_id":"7002","name":"Saved Movie"}]"#,
+            1, // long expired
+        )
+        .await
+        .unwrap();
+    let c = client(&server).with_store(store);
+    let q = VodListQuery {
+        limit: 10,
+        ..Default::default()
+    };
+    let page = c.vod_list(VodKind::Movie, &q).await.unwrap();
+    assert_eq!(page.items[0].title, "Saved Movie");
 }

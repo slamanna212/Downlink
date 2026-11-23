@@ -29,6 +29,13 @@ export const States: Story = {
           </div>
         )}
       </StateRow>
+      <StateRow title="rated">
+        {(s) => (
+          <div style={{ width: 160 }}>
+            <PosterTile tile={{ ...TILE, rating: 7.4 }} active={s === 'focus'} demo={demo(s)} />
+          </div>
+        )}
+      </StateRow>
     </Stack>
   ),
 };

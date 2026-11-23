@@ -20,10 +20,13 @@ import { useDLFocusable } from '../../lib/spatial';
 import { useInteractive } from '../../lib/perf';
 import { t } from '../../lib/i18n';
 import { useDetailStore } from '../../store/detail';
+import { openChannelMenu } from '../../store/contextMenu';
+import { openInfo } from '../../store/info';
 import { useUiStore } from '../../store/ui';
+import { freshGuideView, useViewStateStore, type GuideView } from '../../store/viewState';
 import { playCatchup, playChannel, restartProgramme } from '../player/actions';
 import { GuideBlock } from './GuideBlock';
-import { GuidePreview } from './GuidePreview';
+import { GuidePreview, GuideRecordItems } from './GuidePreview';
 import {
   CHANNEL_CHUNK, SPANS_HOURS, TIME_CHUNK, blockState, enterAction, indexAt, isCovered, mergeProgrammes, moveFocus,
   neededChunks, ppsFor, scrollToReveal, sliceRange, tickMarks, timeToX, totalHeight, totalWidth, visibleRange, withMargin, xToTime,
@@ -184,12 +187,14 @@ export function GuidePage() {
   const groups = useGroups();
   const counts = useCounts();
 
-  const [span, setSpan] = useState<SpanHours>(3);
-  const [groupId, setGroupId] = useState<number | null>(null);
+  // Coming back from the player: reopen where the user left (unless it is stale; then scroll to now).
+  const [restore] = useState(() => freshGuideView(useViewStateStore.getState().guide, nowEpoch()));
+  const [span, setSpan] = useState<SpanHours>(() => (SPANS_HOURS.includes(restore?.span as SpanHours) ? (restore?.span as SpanHours) : 3));
+  const [groupId, setGroupId] = useState<number | null>(restore?.groupId ?? null);
   const [size, setSize] = useState({ w: 1200, h: 700 });
   const [range, setRange] = useState<RenderRange | null>(null);
   const [leftTime, setLeftTime] = useState(() => nowEpoch());
-  const [focus, setFocusState] = useState<Focus>({ row: 0, t: nowEpoch() });
+  const [focus, setFocusState] = useState<Focus>(restore?.focus ?? { row: 0, t: nowEpoch() });
   const [recordOpen, setRecordOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollPos = useRef({ left: 0, top: 0 });
@@ -273,13 +278,38 @@ export function GuidePage() {
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const t = lastGeo.current ? xToTime(lastGeo.current, scrollPos.current.left + COL_W) : guideNowAnchor();
+    const first = !lastGeo.current;
+    const t = lastGeo.current ? xToTime(lastGeo.current, scrollPos.current.left + COL_W) : (restore?.leftTime ?? guideNowAnchor());
     el.scrollLeft = Math.max(0, timeToX(geo, t) - COL_W);
+    if (first && restore) el.scrollTop = Math.max(0, restore.topRows * geo.rowH);
     scrollPos.current = { left: el.scrollLeft, top: el.scrollTop };
     lastGeo.current = geo;
     cached.current = null;
     updateRef.current();
-  }, [geo, loaded, hasSource, COL_W, hasScroller]);
+  }, [geo, loaded, hasSource, COL_W, hasScroller, restore]);
+  // Remember the position for the next visit; written on leaving the page.
+  const snapshot = useRef<() => GuideView | null>(() => null);
+  useEffect(() => {
+    snapshot.current = () => {
+      const g = lastGeo.current;
+      if (!g) return null;
+      return {
+        leftTime: xToTime(g, scrollPos.current.left + COL_W),
+        topRows: scrollPos.current.top / g.rowH,
+        span,
+        groupId,
+        focus,
+        savedAt: nowEpoch(),
+      };
+    };
+  });
+  useEffect(
+    () => () => {
+      const v = snapshot.current();
+      if (v) useViewStateStore.getState().saveGuide(v);
+    },
+    [],
+  );
   // Row count or density change: refresh the render range without touching the scroll position.
   useEffect(() => {
     cached.current = null;
@@ -394,9 +424,9 @@ export function GuidePage() {
       const action = enterAction(blockState(p, ch, nowEpoch()));
       if (action === 'play-live') void playChannel(p.channelId).then((err) => (err ? undefined : navigate('/player')));
       else if (action === 'play-catchup') void playCatchup(p.id).then((err) => (err ? undefined : navigate('/player')));
-      else if (action === 'details') showDetail(p.channelId, p.id);
+      else if (action === 'details') openInfo({ kind: 'programme', programme: p, channel: ch });
     },
-    [rowChannel, focus.row, navigate, showDetail, tuneRow],
+    [rowChannel, focus.row, navigate, tuneRow],
   );
 
   const pageRows = Math.max(1, Math.floor((size.h - HEADER_H) / rowH) - 1);
@@ -419,6 +449,9 @@ export function GuidePage() {
     } else if ((e.key === 'r' || e.key === 'R') && caps.dvr && focusState && (focusState === 'now' || focusState === 'future')) {
       e.preventDefault();
       setRecordOpen(true);
+    } else if ((e.key === 'i' || e.key === 'I') && focusProgramme) {
+      e.preventDefault();
+      openInfo({ kind: 'programme', programme: focusProgramme, channel: focusChannel ?? undefined });
     } else if ((e.key === 'f' || e.key === 'F') && focusChannel) {
       e.preventDefault();
       favourite.mutate({ channelId: focusChannel.id, favourite: !focusChannel.isFavourite });
@@ -450,22 +483,29 @@ export function GuidePage() {
     if (!p) return;
     setFocusState({ row, t: p.startUtc });
     el.focus({ preventScroll: true });
-    const ch = channelFor(row);
-    const action = enterAction(blockState(p, ch, nowEpoch()));
-    if (action === 'play-live') void playChannel(p.channelId).then((err) => (err ? undefined : navigate('/player')));
-    else if (action === 'play-catchup') void playCatchup(p.id).then((err) => (err ? undefined : navigate('/player')));
-    else if (action === 'details') showDetail(p.channelId, p.id);
+    // A click opens the details (play from there); Enter on a focused block still plays straight away.
+    openInfo({ kind: 'programme', programme: p, channel: channelFor(row) });
   };
   const onContextMenu = (e: React.MouseEvent) => {
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-pid]');
-    if (!el || !caps.dvr) return;
-    e.preventDefault();
-    const row = Number(el.dataset.row);
-    const p = listFor(row)?.find((x) => x.id === el.dataset.pid);
-    if (p) {
+    const target = e.target as HTMLElement;
+    const el = target.closest<HTMLElement>('[data-pid]');
+    if (el) {
+      const row = Number(el.dataset.row);
+      const ch = channelFor(row);
+      const p = listFor(row)?.find((x) => x.id === el.dataset.pid);
+      if (!ch) return;
+      if (!p || !caps.dvr) return openChannelMenu(e, ch);
       setFocusState({ row, t: p.startUtc });
-      setRecordOpen(true);
+      openChannelMenu(
+        e,
+        ch,
+        <GuideRecordItems offline={offline} onRecord={(kind) => record.mutate({ programmeId: p.id, kind })} />,
+      );
+      return;
     }
+    const lab = target.closest<HTMLElement>('[data-tune]');
+    const ch = lab ? channelFor(Number(lab.dataset.tune)) : undefined;
+    if (ch) openChannelMenu(e, ch);
   };
 
   const onRecord = useStable((kind: 'once' | 'series') => {
@@ -475,6 +515,7 @@ export function GuidePage() {
   const onPrimary = useStable(() => activate(focusProgramme));
   const onFromStart = useStable(() => focusChannel && void restartProgramme(focusChannel.id).then((err) => (err ? undefined : navigate('/player'))));
   const onDetails = useStable(() => focusProgramme && showDetail(focusProgramme.channelId, focusProgramme.id));
+  const onInfo = useStable(() => focusProgramme && openInfo({ kind: 'programme', programme: focusProgramme, channel: focusChannel ?? undefined }));
   const onFavourite = useStable(() => focusChannel && favourite.mutate({ channelId: focusChannel.id, favourite: !focusChannel.isFavourite }));
   const onGroup = useStable((id: number | null) => {
     setGroupId(id);
@@ -545,6 +586,7 @@ export function GuidePage() {
         onPrimary={onPrimary}
         onFromStart={onFromStart}
         onDetails={onDetails}
+        onInfo={onInfo}
         onFavourite={onFavourite}
       />
       <GuideControls

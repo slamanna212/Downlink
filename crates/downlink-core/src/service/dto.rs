@@ -434,7 +434,7 @@ pub struct DiagnosticsData {
 }
 
 /// Settings are an open JSON object (the UI owns the field set); core validates only
-/// `liveBufferSecs` (1..=10) and persists the rest verbatim.
+/// `liveBufferSecs` (3..=10) and persists the rest verbatim.
 pub type SettingsDto = Value;
 
 // ---- VOD ------------------------------------------------------------------------------------
@@ -555,6 +555,11 @@ pub enum RecordKindArg {
 pub struct RecordingDto {
     pub id: i64,
     pub title: String,
+    /// Episode title, when the programme had one.
+    pub subtitle: Option<String>,
+    pub description: Option<String>,
+    pub season: Option<i64>,
+    pub episode: Option<i64>,
     pub channel_id: Option<i64>,
     pub channel_name: String,
     pub start_utc: i64,

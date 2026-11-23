@@ -50,6 +50,11 @@
   color: var(--dl-text-dim);
 }
 .divider { border-top: 1px solid var(--dl-hairline); }
+.rtxNote {
+  margin: var(--mantine-spacing-xs) 0 var(--mantine-spacing-md);
+  font-size: var(--mantine-font-size-sm);
+  color: var(--dl-text-dim);
+}
 
 .notes {
   margin-top: var(--mantine-spacing-lg);
@@ -68,17 +73,6 @@
   font-weight: 600;
   color: var(--dl-text);
 }
-.notesHeading {
-  margin: var(--mantine-spacing-sm) 0 var(--mantine-spacing-xs);
-  font-size: var(--mantine-font-size-sm);
-  font-weight: 600;
-  color: var(--dl-text);
-}
-.notesList {
-  margin: 0;
-  padding-left: var(--mantine-spacing-lg);
-}
-.notesPara { margin: var(--mantine-spacing-xs) 0; }
 
 .end { justify-content: flex-end; }
 .actions {
@@ -161,3 +155,6 @@
   margin-top: var(--mantine-spacing-md);
   background: var(--dl-surface-1);
 }
+.inlineForm { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mantine-spacing-sm); width: 100%; }
+.inlineForm > :first-child { flex: 1 0 100%; min-width: 0; }
+.attribution { margin: var(--mantine-spacing-lg) 0 0; font-size: var(--mantine-font-size-xs); color: var(--dl-text-faint); }

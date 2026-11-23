@@ -6,7 +6,7 @@ import {
   IconArrowsMaximize,
   IconDeviceTv,
   IconHome,
-  IconLayoutNavbar,
+  IconCalendarTime,
   IconListDetails,
   IconMovie,
   IconCircle,
@@ -23,7 +23,6 @@ import { useCaps, useSources } from '../../api/queries';
 import { dl } from '../../theme';
 import { Icon } from '../../components/Icon/Icon';
 import { useUiStore } from '../../store/ui';
-import { useDetailStore } from '../../store/detail';
 import { dayLabel, formatClock } from '../../lib/time';
 import { onOpenPalette } from '../../lib/palette';
 import { t } from '../../lib/i18n';
@@ -38,7 +37,6 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const { caps } = useCaps();
   const sources = useSources();
-  const showDetail = useDetailStore((s) => s.show);
   const density = useUiStore((s) => s.density);
   const setDensity = useUiStore((s) => s.setDensity);
   const railPref = useUiStore((s) => s.railPref);
@@ -64,13 +62,13 @@ export function CommandPalette() {
       mk(`c${c.id}`, `${c.number ?? ''} ${c.name}`.trim(), () => void playChannel(c.id).then((err) => (err ? undefined : navigate('/player'))), IconPlayerPlay),
     );
     const progActions = (q ? results.data?.programmes ?? [] : []).map(({ programme: p, channel }) =>
-      mk(`p${p.id}`, p.title ?? '', () => activateProgramme(p, channel, navigate, showDetail), IconLayoutNavbar, `${channel.name} · ${dayLabel(p.startUtc)} ${formatClock(p.startUtc)}`),
+      mk(`p${p.id}`, p.title ?? '', () => activateProgramme(p, channel, navigate), IconCalendarTime, `${channel.name} · ${dayLabel(p.startUtc)} ${formatClock(p.startUtc)}`),
     );
 
     const goActions = [
       mk('go-home', t('nav.home'), go('/'), IconHome),
       mk('go-channels', t('nav.channels'), go('/channels'), IconListDetails),
-      mk('go-guide', t('nav.guide'), go('/guide'), IconLayoutNavbar),
+      mk('go-guide', t('nav.guide'), go('/guide'), IconCalendarTime),
       ...(caps.vod ? [mk('go-movies', t('nav.movies'), go('/movies'), IconMovie), mk('go-series', t('nav.series'), go('/series'), IconDeviceTv)] : []),
       ...(caps.dvr ? [mk('go-rec', t('nav.recordings'), go('/recordings'), IconCircle)] : []),
     ].filter((a) => match(a.label ?? ''));
@@ -98,7 +96,7 @@ export function CommandPalette() {
       { group: t('palette.group.settings'), actions: settingsItems },
     ];
     return groups.filter((g) => g.actions.length > 0);
-  }, [q, results.data, caps.vod, caps.dvr, navigate, showDetail, sources.data, density, setDensity, railPref, setRailPref]);
+  }, [q, results.data, caps.vod, caps.dvr, navigate, sources.data, density, setDensity, railPref, setRailPref]);
 
   return (
     <Spotlight
