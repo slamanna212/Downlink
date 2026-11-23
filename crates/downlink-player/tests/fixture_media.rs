@@ -212,6 +212,39 @@ fn assert_stream(name: &str, codec: &str, w: i64, h: i64) -> Option<Player> {
 }
 
 #[test]
+fn audio_tracks_are_listed_and_switchable() {
+    let Some((p, _srv)) = play_clip("two_audio", 20.0) else {
+        return;
+    };
+    let audio = |p: &Player| {
+        p.snapshot()
+            .tracks
+            .into_iter()
+            .filter(|t| t.kind == "audio")
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        wait(|| audio(&p).len() == 2, 10),
+        "{:?}",
+        p.snapshot().tracks
+    );
+    let first = audio(&p);
+    assert_eq!(first[0].lang.as_deref(), Some("eng"));
+    assert_eq!(first[1].lang.as_deref(), Some("deu"));
+    p.command(downlink_player::PlayerCommand::AudioTrack { id: first[1].id })
+        .expect("aid");
+    assert!(
+        wait(
+            || audio(&p).iter().any(|t| t.id == first[1].id && t.selected),
+            10
+        ),
+        "selection never reached the snapshot: {:?} aid={:?}",
+        audio(&p),
+        p.engine().get_property("aid")
+    );
+}
+
+#[test]
 fn h264_aac_decodes_frames_at_fixture_resolution() {
     assert_stream("h264_aac_1080p30", "264", 1920, 1080);
 }

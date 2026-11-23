@@ -77,7 +77,7 @@ function Check({ on }: { on: boolean }) {
   return <span className={classes.menuCheck}>{on && <Icon icon={IconCheck} size={16} />}</span>;
 }
 
-/** Audio track menu (`A`). Hidden by the caller when the file has fewer than two audio tracks. */
+/** Audio track menu (`A`). Hidden by the caller when the file has no audio track; a single track is still listed so the user can see what plays. */
 export function AudioMenu({ tracks, opened, onChange }: MenuProps & { tracks: Track[] }) {
   const audio = tracks.filter((x) => x.kind === 'audio');
   return (

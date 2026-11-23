@@ -136,6 +136,46 @@ pub fn parse_tracks(json: &str) -> Vec<Track> {
         .collect()
 }
 
+/// The audio track the user chose, kept so a reconnect (which reloads the file and lets mpv pick
+/// its default again) can restore it by language and title rather than by id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioPick {
+    pub id: i64,
+    pub lang: Option<String>,
+    pub title: Option<String>,
+}
+
+impl AudioPick {
+    /// The pick for track `id` of `tracks`; `None` when it is not an audio track in the list.
+    pub fn of(id: i64, tracks: &[Track]) -> Option<Self> {
+        tracks
+            .iter()
+            .find(|t| t.kind == "audio" && t.id == id)
+            .map(|t| Self {
+                id,
+                lang: t.lang.clone(),
+                title: t.title.clone(),
+            })
+    }
+}
+
+/// The audio track of a (re)loaded file that matches `pick`: same language and title, then same
+/// language, then same id. `None` when nothing matches (the stream's own default stays).
+pub fn match_audio_pick(pick: &AudioPick, tracks: &[Track]) -> Option<i64> {
+    let audio: Vec<&Track> = tracks.iter().filter(|t| t.kind == "audio").collect();
+    let same_lang = |t: &Track| pick.lang.is_some() && t.lang == pick.lang;
+    audio
+        .iter()
+        .find(|t| same_lang(t) && t.title == pick.title)
+        .or_else(|| audio.iter().find(|t| same_lang(t)))
+        .or_else(|| {
+            audio
+                .iter()
+                .find(|t| pick.lang.is_none() && t.id == pick.id)
+        })
+        .map(|t| t.id)
+}
+
 /// An output device from `audio-device-list`.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -482,6 +522,10 @@ struct Shared {
     file_loaded: bool,
     last_stats: Option<Instant>,
     audio_fell_back: bool,
+    /// The user's audio choice for this session, and whether it still has to be restored on the
+    /// file mpv just (re)loaded.
+    audio_pick: Option<AudioPick>,
+    audio_pick_pending: bool,
     last_http_status: Option<u16>,
     decoder_codec: Option<String>,
     /// Engine deaths in the current session (one restart is allowed).
@@ -637,6 +681,8 @@ impl Player {
                 file_loaded: false,
                 last_stats: None,
                 audio_fell_back: false,
+                audio_pick: None,
+                audio_pick_pending: false,
                 last_http_status: None,
                 decoder_codec: None,
                 engine_restarts: 0,
@@ -764,6 +810,8 @@ impl Player {
         s.decoder_codec = None;
         s.engine_restarts = 0;
         s.engine_failure = None;
+        s.audio_pick = None;
+        s.audio_pick_pending = false;
         s.stats = Stats::default();
         go(
             &self.inner,
@@ -839,7 +887,14 @@ impl Player {
             PlayerCommand::Mute { muted } => {
                 e.set_property("mute", if muted { "yes" } else { "no" })
             }
-            PlayerCommand::AudioTrack { id } => e.set_property("aid", &id.to_string()),
+            PlayerCommand::AudioTrack { id } => {
+                {
+                    let mut s = self.lock();
+                    s.audio_pick = AudioPick::of(id, &s.stats.tracks);
+                    s.audio_pick_pending = false;
+                }
+                e.set_property("aid", &id.to_string())
+            }
             PlayerCommand::SubtitleTrack { id } => {
                 e.set_property("sid", &id.map_or("no".to_owned(), |i| i.to_string()))
             }
@@ -1022,6 +1077,7 @@ fn load_current(inner: &Inner, s: &mut Shared) -> Result<(), PlayerError> {
     // A new file starts a new timeline and a new cache.
     s.stats.seek_range = None;
     s.stats.live_anchor = None;
+    s.audio_pick_pending = s.audio_pick.is_some();
     // The new file's size is unknown until its video params arrive; the profile may differ.
     s.video_size = (0, 0);
     rtx_filter_for(inner, s, &prefs, req.profile);
@@ -1211,6 +1267,33 @@ fn handle_event(inner: &Inner, ev: EngineEvent) {
     }
 }
 
+/// After a reload, select the audio track the user had chosen (once per load).
+fn restore_audio_pick(inner: &Inner, s: &mut Shared) {
+    if !s.audio_pick_pending || s.request.is_none() {
+        return;
+    }
+    let Some(pick) = s.audio_pick.clone() else {
+        return;
+    };
+    if !s.stats.tracks.iter().any(|t| t.kind == "audio") {
+        return;
+    }
+    s.audio_pick_pending = false;
+    let Some(id) = match_audio_pick(&pick, &s.stats.tracks) else {
+        return;
+    };
+    if s.stats
+        .tracks
+        .iter()
+        .any(|t| t.kind == "audio" && t.id == id && t.selected)
+    {
+        return;
+    }
+    if let Err(e) = inner.eng().set_property("aid", &id.to_string()) {
+        tracing::debug!("could not restore the audio track: {e}");
+    }
+}
+
 fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) {
     match (name, value) {
         ("pause", PropValue::Flag(p)) => {
@@ -1289,6 +1372,7 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
             } else {
                 Vec::new()
             };
+            restore_audio_pick(inner, s);
             s.throttle.mark_dirty();
         }
         ("hwdec-current", v) => {
@@ -1785,6 +1869,44 @@ mod tests {
         assert!(!t[1].default);
         assert_eq!(t[2].channels, None);
         assert_eq!(t[3].channels.as_deref(), Some("3 ch"));
+    }
+
+    fn audio(id: i64, lang: Option<&str>, title: Option<&str>) -> Track {
+        Track {
+            id,
+            kind: "audio".into(),
+            lang: lang.map(Into::into),
+            title: title.map(Into::into),
+            codec: None,
+            channels: None,
+            default: false,
+            selected: false,
+        }
+    }
+
+    #[test]
+    fn audio_pick_is_restored_by_language_then_title() {
+        let before = [
+            audio(1, Some("eng"), None),
+            audio(2, Some("deu"), Some("Dub")),
+        ];
+        let pick = AudioPick::of(2, &before).expect("audio track");
+        // Same tracks, different ids after a reconnect.
+        let after = [
+            audio(5, Some("eng"), None),
+            audio(7, Some("deu"), Some("Dub")),
+        ];
+        assert_eq!(match_audio_pick(&pick, &after), Some(7));
+        // Title changed: language still wins; unknown language: nothing to restore.
+        let retitled = [audio(1, Some("eng"), None), audio(2, Some("deu"), None)];
+        assert_eq!(match_audio_pick(&pick, &retitled), Some(2));
+        let gone = [audio(1, Some("eng"), None)];
+        assert_eq!(match_audio_pick(&pick, &gone), None);
+        // No language: fall back to the same id.
+        let anon = [audio(1, None, None), audio(2, None, None)];
+        let pick = AudioPick::of(2, &anon).expect("audio track");
+        assert_eq!(match_audio_pick(&pick, &anon), Some(2));
+        assert!(AudioPick::of(9, &anon).is_none());
     }
 
     #[test]

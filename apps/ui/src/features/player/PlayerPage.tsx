@@ -283,7 +283,7 @@ export function PlayerPage() {
   const barHidden = idle && !paused && !failed && !infoOpen && menu === null;
   const audioTracks = player.tracks.filter((x) => x.kind === 'audio');
   const subTracks = player.tracks.filter((x) => x.kind === 'sub');
-  const hasAudioMenu = audioTracks.length > 1;
+  const hasAudioMenu = audioTracks.length > 0;
   const hasSubMenu = subTracks.length > 0;
 
   // Sessions are stopped when leaving the player (CLAUDE rule 6), unless the guide's mini player takes the
