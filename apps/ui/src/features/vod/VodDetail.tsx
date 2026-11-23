@@ -148,7 +148,6 @@ export function SeriesDetailPage() {
         {error && <p className={classes.msg} role="alert">{error}</p>}
       </Hero>
       <div className={classes.body}>
-        <VodExtras id={s.id} />
         <div className={classes.seasonTabs}>
           <Select
             size="sm"
@@ -164,6 +163,7 @@ export function SeriesDetailPage() {
         {season?.episodes.map((ep) => (
           <EpisodeRow key={ep.id} ep={ep} season={season.number} next={ep.id === data.nextEpisodeId} onPlay={() => void start('episode', ep.id, resumeUseful(ep.resumeSecs, ep.durationSecs))} />
         ))}
+        <VodExtras id={s.id} />
       </div>
     </div>
   );
