@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Select, UnstyledButton } from '@mantine/core';
 import { IconArrowLeft, IconStarFilled } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
@@ -13,7 +13,7 @@ import { resolveImg } from '../../lib/dlimg';
 import { t } from '../../lib/i18n';
 import { formatDuration } from '../../lib/time';
 import { playVod } from '../player/actions';
-import { progressOf, ratingLabel, resumeUseful, runtimeLabel } from './vod';
+import { progressOf, ratingLabel, resumeUseful, runtimeLabel, seasonsLabel } from './vod';
 import { VodExtras } from './VodExtras';
 import classes from './Vod.module.css';
 
@@ -123,6 +123,12 @@ export function SeriesDetailPage() {
   const q = useQuery({ queryKey: ['catalog', 'seriesDetail', id], queryFn: () => invoke('get_series', { id: Number(id) }) });
   const { start, error } = useStart();
   const data: SeriesDetail | undefined = q.data;
+  const qc = useQueryClient();
+  const knownSeasons = data?.series.seasonCount ?? 0;
+  // Opening a series stores its episodes; refresh the listing so its card shows the real season count.
+  useEffect(() => {
+    if (knownSeasons > 0) void qc.invalidateQueries({ queryKey: ['catalog', 'vod', 'series'] });
+  }, [knownSeasons, qc]);
   let nextInfo: { season: number; ep: Episode } | null = null;
   for (const sn of data?.seasons ?? []) for (const e of sn.episodes) if (e.id === data?.nextEpisodeId) nextInfo = { season: sn.number, ep: e };
   const [seasonNo, setSeasonNo] = useState<number | null>(null);
@@ -138,7 +144,7 @@ export function SeriesDetailPage() {
     <div className={classes.detail}>
       <Hero title={s.title} poster={s.poster} backdrop={s.backdrop} onBack={back} plot={s.plot}
         rating={s.rating}
-        meta={[s.year ? String(s.year) : null, s.seasonCount === 1 ? t('vod.season1') : t('vod.seasons', { count: s.seasonCount }), s.genres.join(', ')]}>
+        meta={[s.year ? String(s.year) : null, seasonsLabel(s.seasonCount), s.genres.join(', ')]}>
         <div className={classes.actions}>
           {nextInfo && (
             <DLButton variant="filled" size="lg" onClick={() => void start('episode', nextInfo.ep.id, !!resume)}>{label(nextInfo)}</DLButton>

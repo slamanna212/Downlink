@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { gridColumns, ratingLabel, progressOf, resumeUseful, runtimeLabel } from './vod';
+import { gridColumns, ratingLabel, progressOf, resumeUseful, runtimeLabel, seasonsLabel } from './vod';
 
 describe('vod helpers', () => {
+  it('season label hides an unknown (zero) count', () => {
+    expect(seasonsLabel(0)).toBeNull();
+    expect(seasonsLabel(1)).toBe('1 season');
+    expect(seasonsLabel(3)).toBe('3 seasons');
+  });
+
   it('rating label hides absent and zero scores', () => {
     expect(ratingLabel(7.44)).toBe('7.4');
     expect(ratingLabel(10)).toBe('10.0');

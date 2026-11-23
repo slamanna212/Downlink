@@ -27,3 +27,9 @@ export function gridColumns(width: number, minTile: number, gap: number): number
 export function ratingLabel(rating: number | null | undefined): string | null {
   return rating != null && Number.isFinite(rating) && rating > 0 ? rating.toFixed(1) : null;
 }
+
+/** "1 season" / "N seasons"; null while the count is unknown (0 until the series' episodes are fetched). */
+export function seasonsLabel(count: number | null | undefined): string | null {
+  if (!count || count < 1) return null;
+  return count === 1 ? t('vod.season1') : t('vod.seasons', { count });
+}
