@@ -8,6 +8,9 @@ an embedder. mpv 0.42 does not support that combination:
 - osdep/mac/app_bridge.m defines the cocoa_* entry points only with Swift, yet player/main.c and input/input.c
   call them under HAVE_COCOA. mpv links with b_lundef=false, so the dylib links and then crashes in
   mpv_create/mpv_initialize. Without Swift they are now no-ops.
+- player/main.c opens an internal "mac" client and hands it to cocoa_set_mpv_handle; the Swift AppHub owns and
+  destroys it. Without Swift nothing does, so mpv_destroy waits for it forever (hang on engine teardown). The
+  client is now only created with Swift.
 Applied by tools/mpv/macos.sh; drop it when the pinned mpv handles this upstream.
 
 --- a/meson.build
@@ -42,7 +45,7 @@ Applied by tools/mpv/macos.sh; drop it when the pinned mpv handles this upstream
 +void cocoa_init_media_keys(void) {}
 +void cocoa_uninit_media_keys(void) {}
 +void cocoa_set_input_context(struct input_ctx *input_context) {}
-+void cocoa_set_mpv_handle(struct mpv_handle *ctx) {}
++void cocoa_set_mpv_handle(struct mpv_handle *ctx) {} // unused: player/main.c only creates the client with Swift
 +void cocoa_init_cocoa_cb(void) {}
 +int cocoa_main(int argc, char *argv[]) { return 1; }
  #endif
@@ -57,3 +60,14 @@ Applied by tools/mpv/macos.sh; drop it when the pinned mpv handles this upstream
      &clipboard_backend_mac,
  #endif
  #if HAVE_WAYLAND && HAVE_WAYLAND_PROTOCOLS_1_39
+--- a/player/main.c
++++ b/player/main.c
+@@ -417,7 +417,7 @@
+ 
+     MP_STATS(mpctx, "start init");
+ 
+-#if HAVE_COCOA
++#if HAVE_COCOA && HAVE_SWIFT
+     mpv_handle *ctx = mp_new_client(mpctx->clients, "mac");
+     cocoa_set_mpv_handle(ctx);
+ #endif
