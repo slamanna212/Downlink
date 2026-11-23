@@ -94,16 +94,22 @@ test('multiview, one large and two stacked', async ({ page }) => {
   await page.getByRole('button', { name: 'Multiview' }).click();
   await expect(page).toHaveURL(/\/multiview/);
   const tiles = page.locator('[role=group][aria-label^="Slot"]');
-  for (const [i, name] of ['Cobalt Sports', 'Summit Music'].entries()) {
-    await page.getByRole('button', { name: 'Add channel' }).first().click();
+  await expect(tiles).toHaveCount(1);
+  // Same flow as tests/e2e/multiview.spec.ts: one picker, pick both, then its Add channel button closes it.
+  await page.getByRole('button', { name: 'Add channel' }).click();
+  for (const name of ['Cobalt Sports', 'Summit Music']) {
     await page.getByLabel('Search channels').fill(name);
+    await page.waitForTimeout(300);
     await page.getByRole('option', { name: new RegExp(name) }).first().click();
-    await page.keyboard.press('Escape'); // close the picker
-    await expect(tiles).toHaveCount(i + 2);
   }
+  await page.getByRole('dialog', { name: /Add channel/ }).waitFor();
+  await page.getByRole('button', { name: /Add channel/ }).click();
+  await expect(tiles).toHaveCount(3);
   await page.getByRole('radiogroup', { name: 'Layout (L)' }).getByText('One large, others small').click({ force: true });
-  await page.mouse.move(800, 500);
-  await page.mouse.move(810, 510); // wake the toolbar
+  // Wake the toolbar, then rest on its edge so no tile shows its hover controls.
+  const bar = (await page.getByRole('button', { name: /Add channel/ }).boundingBox())!;
+  await page.mouse.move(bar.x - 4, bar.y + bar.height / 2 - 20);
+  await page.mouse.move(bar.x - 4, bar.y + bar.height / 2);
   await page.waitForTimeout(500); // grid reflow
   await fakeVideo(page, '[role=group][aria-label^="Slot"]', [videoFrame(2), videoFrame(3), videoFrame(1)]);
   await shoot(page, 'multiview');

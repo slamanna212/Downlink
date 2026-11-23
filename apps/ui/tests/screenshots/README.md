@@ -5,7 +5,7 @@ pnpm -C apps/ui screenshots
 ```
 
 Builds the UI, serves it with the in-browser mock backend in showcase mode (`?mock=showcase`), and writes
-1600×1000 @2× PNGs to `apps/ui/screenshots/` (gitignored): `home`, `guide-playing`, `movies`, `now-playing`,
+1600×1000 @2× PNGs to `apps/ui/screenshots/` (gitignored): `home`, `guide-playing`, `movies`, `now-playing`, `multiview`,
 `recordings`.
 
 - Data is the synthetic mock catalogue. Nothing touches the network.

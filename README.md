@@ -38,7 +38,13 @@ While not required, this app is best used with [Dispatcharr](https://github.com/
 
 ## Screenshots
 
-_Screenshots will be added here. They will only show synthetic test data, never real channels or provider artwork._
+_All screenshots use synthetic test data. Channels, programmes and artwork are made up._
+
+| | |
+|:---:|:---:|
+| ![Home](.github/screenshots/home.png)<br>**Home** | ![Guide with live video playing](.github/screenshots/guide-playing.png)<br>**Guide with live preview** |
+| ![Now playing](.github/screenshots/now-playing.png)<br>**Now playing** | ![Multiview with one large and two small tiles](.github/screenshots/multiview.png)<br>**Multiview** |
+| ![Movies browse](.github/screenshots/movies.png)<br>**Movies** | ![Recordings](.github/screenshots/recordings.png)<br>**Recordings** |
 
 ## Getting started
 
