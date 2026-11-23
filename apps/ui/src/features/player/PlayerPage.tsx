@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useIdle } from '@mantine/hooks';
 import { Progress, Slider } from '@mantine/core';
 import {
@@ -16,7 +16,6 @@ import {
   IconPlayerPause,
   IconPlayerPlay,
   IconRefresh,
-  IconStar,
   IconRewindBackward10,
   IconRewindForward10,
   IconVolume,
@@ -24,7 +23,7 @@ import {
   IconX,
 } from '@tabler/icons-react';
 import { inTauri, invoke, listen } from '../../api/ipc';
-import { invalidateFavourites, useChannel, useChannelProgrammes, useMediaMatch, useNowNextWindow, useSources } from '../../api/queries';
+import { useChannel, useChannelProgrammes, useMediaMatch, useNowNextWindow, useSources } from '../../api/queries';
 import type { AppError, Channel, MediaTarget, PlayerState, SessionStats } from '../../api/types';
 import { dl } from '../../theme';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
@@ -32,7 +31,7 @@ import { DLButton } from '../../components/DLButton/DLButton';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { IconPlex } from '../../components/IconPlex/IconPlex';
 import { Icon } from '../../components/Icon/Icon';
-import { notifyError, notifyInfo } from '../../components/Notify/notify';
+import { notifyError } from '../../components/Notify/notify';
 import { SeekBar } from '../../components/SeekBar/SeekBar';
 import { Timeline, TIMELINE_SPAN_SECONDS } from '../../components/Timeline/Timeline';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
@@ -250,11 +249,6 @@ export function PlayerPage() {
 
   const sources = useSources();
   const { data: channel } = useChannel(player.channelId);
-  const channelRef = useRef<Channel | undefined>(channel);
-  useEffect(() => {
-    channelRef.current = channel;
-  });
-  const qc = useQueryClient();
   const ids = useMemo(() => (player.channelId != null ? [player.channelId] : []), [player.channelId]);
   const nn = useNowNextWindow(ids, `player|${player.channelId}`);
   const now = useNowEpoch(15_000);
@@ -311,16 +305,6 @@ export function PlayerPage() {
   );
   const togglePause = useCallback(() => cmd({ kind: paused ? 'resume' : 'pause' }), [cmd, paused]);
   const toggleMute = useCallback(() => cmd({ kind: 'setMuted', muted: !player.muted }), [cmd, player.muted]);
-  const toggleFavourite = useCallback(() => {
-    const st = usePlayerStore.getState().player;
-    const ch = channelRef.current;
-    if (st.channelId == null || !ch) return;
-    const favourite = !ch.isFavourite;
-    void invoke('set_favourite', { channelId: ch.id, favourite }).then(() => {
-      void invalidateFavourites(qc);
-      notifyInfo(t(favourite ? 'player.favouriteAdded' : 'player.favouriteRemoved', { name: ch.name }));
-    });
-  }, [qc]);
   // Timeline seeks (live buffer / archive): shown at once, sent once the user stops pressing.
   const [pendingUtc, setPendingUtc] = useState<number | null>(null);
   const pendingRef = useRef<{ utc: number; since: number } | null>(null);
@@ -416,7 +400,7 @@ export function PlayerPage() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Fullscreen: F11, and Ctrl+Cmd+F on macOS (F itself is favourite, PLAN §8.4).
+      // Fullscreen: F11, and Ctrl+Cmd+F on macOS .
       if (isFullscreenKey(e)) {
         e.preventDefault();
         toggleFullscreen();
@@ -459,7 +443,6 @@ export function PlayerPage() {
       else if (e.key === 'i' || e.key === 'I') setInfoOpen((v) => !v);
       else if ((e.key === 'a' || e.key === 'A') && hasAudioMenu) setMenu((m) => (m === 'audio' ? null : 'audio'));
       else if ((e.key === 't' || e.key === 'T') && hasSubMenu) setMenu((m) => (m === 'subs' ? null : 'subs'));
-      else if (e.key === 'f' || e.key === 'F') toggleFavourite();
       else if (e.key === 'ArrowLeft') seekBy(e.shiftKey ? -60 : -10);
       else if (e.key === 'ArrowRight') seekBy(e.shiftKey ? 60 : 10);
       else if (e.key === 's' || e.key === 'S') restart();
@@ -474,7 +457,7 @@ export function PlayerPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mini, toggleMini, entry, infoOpen, menu, hasAudioMenu, hasSubMenu, fullscreen, toggleFavourite, commitEntry, clearEntry, togglePause, toggleMute, goBack, seekBy, restart, goLive]);
+  }, [mini, toggleMini, entry, infoOpen, menu, hasAudioMenu, hasSubMenu, fullscreen, commitEntry, clearEntry, togglePause, toggleMute, goBack, seekBy, restart, goLive]);
 
   useEffect(() => () => {
     entryRequest.current++;
@@ -688,17 +671,6 @@ export function PlayerPage() {
               {hasSubMenu && <SubtitleMenu tracks={player.tracks} {...menuProps('subs')} />}
               {canSwitchStream && channel && (
                 <StreamMenu channelId={channel.id} onDenied={() => setStreamDenied(true)} {...menuProps('stream')} />
-              )}
-              {channel && (
-                <DLIconButton
-                  label={channel.isFavourite ? t('player.favouriteRemove') : t('player.favouriteAdd')}
-                  icon={IconStar}
-                  variant="overlay"
-                  size="lg"
-                  pressed={channel.isFavourite}
-                  filledGlyph={channel.isFavourite}
-                  onClick={toggleFavourite}
-                />
               )}
               {mediaMatch && (
                 <DLIconButton
