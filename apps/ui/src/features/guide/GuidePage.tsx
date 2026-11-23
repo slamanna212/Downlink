@@ -22,6 +22,7 @@ import { t } from '../../lib/i18n';
 import { useDetailStore } from '../../store/detail';
 import { openInfo } from '../../store/info';
 import { useUiStore } from '../../store/ui';
+import { freshGuideView, useViewStateStore, type GuideView } from '../../store/viewState';
 import { playCatchup, playChannel, restartProgramme } from '../player/actions';
 import { GuideBlock } from './GuideBlock';
 import { GuidePreview } from './GuidePreview';
@@ -185,12 +186,14 @@ export function GuidePage() {
   const groups = useGroups();
   const counts = useCounts();
 
-  const [span, setSpan] = useState<SpanHours>(3);
-  const [groupId, setGroupId] = useState<number | null>(null);
+  // Coming back from the player: reopen where the user left (unless it is stale; then scroll to now).
+  const [restore] = useState(() => freshGuideView(useViewStateStore.getState().guide, nowEpoch()));
+  const [span, setSpan] = useState<SpanHours>(() => (SPANS_HOURS.includes(restore?.span as SpanHours) ? (restore?.span as SpanHours) : 3));
+  const [groupId, setGroupId] = useState<number | null>(restore?.groupId ?? null);
   const [size, setSize] = useState({ w: 1200, h: 700 });
   const [range, setRange] = useState<RenderRange | null>(null);
   const [leftTime, setLeftTime] = useState(() => nowEpoch());
-  const [focus, setFocusState] = useState<Focus>({ row: 0, t: nowEpoch() });
+  const [focus, setFocusState] = useState<Focus>(restore?.focus ?? { row: 0, t: nowEpoch() });
   const [recordOpen, setRecordOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollPos = useRef({ left: 0, top: 0 });
@@ -274,13 +277,38 @@ export function GuidePage() {
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const t = lastGeo.current ? xToTime(lastGeo.current, scrollPos.current.left + COL_W) : guideNowAnchor();
+    const first = !lastGeo.current;
+    const t = lastGeo.current ? xToTime(lastGeo.current, scrollPos.current.left + COL_W) : (restore?.leftTime ?? guideNowAnchor());
     el.scrollLeft = Math.max(0, timeToX(geo, t) - COL_W);
+    if (first && restore) el.scrollTop = Math.max(0, restore.topRows * geo.rowH);
     scrollPos.current = { left: el.scrollLeft, top: el.scrollTop };
     lastGeo.current = geo;
     cached.current = null;
     updateRef.current();
-  }, [geo, loaded, hasSource, COL_W, hasScroller]);
+  }, [geo, loaded, hasSource, COL_W, hasScroller, restore]);
+  // Remember the position for the next visit; written on leaving the page.
+  const snapshot = useRef<() => GuideView | null>(() => null);
+  useEffect(() => {
+    snapshot.current = () => {
+      const g = lastGeo.current;
+      if (!g) return null;
+      return {
+        leftTime: xToTime(g, scrollPos.current.left + COL_W),
+        topRows: scrollPos.current.top / g.rowH,
+        span,
+        groupId,
+        focus,
+        savedAt: nowEpoch(),
+      };
+    };
+  });
+  useEffect(
+    () => () => {
+      const v = snapshot.current();
+      if (v) useViewStateStore.getState().saveGuide(v);
+    },
+    [],
+  );
   // Row count or density change: refresh the render range without touching the scroll position.
   useEffect(() => {
     cached.current = null;

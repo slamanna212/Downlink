@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -21,6 +21,7 @@ import { t } from '../../lib/i18n';
 import { usePlayerStore } from '../../store/player';
 import { useUiStore } from '../../store/ui';
 import { useDetailStore } from '../../store/detail';
+import { useViewStateStore } from '../../store/viewState';
 import { playChannel } from '../player/actions';
 import { ChannelRow } from './ChannelRow';
 import { GroupSidebar, selectionKey, type GroupSelection } from './GroupSidebar';
@@ -42,10 +43,14 @@ export function ChannelsPage() {
   const player = usePlayerStore((s) => s.player);
   const now = useNowEpoch();
 
-  const [selection, setSelection] = useState<GroupSelection>({ kind: 'all' });
-  const [query, setQuery] = useState('');
+  const [restore] = useState(() => useViewStateStore.getState().channels);
+  const [selection, setSelection] = useState<GroupSelection>(restore?.selection ?? { kind: 'all' });
+  const [query, setQuery] = useState(restore?.query ?? '');
   const deferred = useDeferredValue(query);
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(restore?.active ?? 0);
+  // Scroll offset still to be re-applied once the rows exist; null when nothing is pending.
+  const pendingScroll = useRef<number | null>(restore && restore.scrollTop > 0 ? restore.scrollTop : null);
+  const scrollTopRef = useRef(restore?.scrollTop ?? 0);
   const [firstVisible, setFirstVisible] = useState(0);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -73,9 +78,34 @@ export function ChannelsPage() {
     getScrollElement: () => scrollerRef.current,
     estimateSize: () => rowH,
     overscan: 8,
-    onChange: (v) => setFirstVisible(v.range?.startIndex ?? 0),
+    onChange: (v) => {
+      setFirstVisible(v.range?.startIndex ?? 0);
+      if (pendingScroll.current === null) scrollTopRef.current = v.scrollOffset ?? 0;
+    },
   });
   useEffect(() => virtualizer.measure(), [rowH, virtualizer]);
+
+  // Re-apply the saved scroll before paint (no flash of the top); keeps trying while more pages load.
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    const target = pendingScroll.current;
+    if (!el || target === null || channels.length === 0) return;
+    el.scrollTop = target;
+    if (el.scrollTop >= target - 1 || !hasNextPage) pendingScroll.current = null;
+  }, [channels.length, hasNextPage, list.isLoading]);
+
+  // Remember selection, filter, focused row and scroll for the next visit.
+  const snapshot = useRef({ selection, query, active });
+  useEffect(() => {
+    snapshot.current = { selection, query, active };
+  });
+  useEffect(
+    () => () => {
+      const pending = pendingScroll.current;
+      useViewStateStore.getState().saveChannels({ ...snapshot.current, scrollTop: pending ?? scrollTopRef.current });
+    },
+    [],
+  );
 
   // Now/next for a window around the viewport (one window above, the current one, one below).
   const windowIndex = Math.floor(firstVisible / WINDOW);
