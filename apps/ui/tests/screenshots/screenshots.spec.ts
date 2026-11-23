@@ -22,21 +22,26 @@ async function open(page: Page, path: string) {
   await page.addStyleTag({ content: '[class*="_devVideo_"], [class*="_miniDev_"] { display: none !important; }' });
 }
 
-/** Paints a fake video frame under the transparent rect `selector` (where libmpv draws in the real app). */
-async function fakeVideo(page: Page, selector: string, frame = videoFrame()) {
-  const box = await page.locator(selector).first().boundingBox();
-  if (!box) throw new Error(`no video rect for ${selector}`);
-  await page.evaluate(({ box, src }) => {
-    document.getElementById('shot-video')?.remove();
-    const img = document.createElement('img');
-    img.id = 'shot-video';
-    img.src = src;
-    Object.assign(img.style, {
-      position: 'fixed', left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px`,
-      objectFit: 'cover', zIndex: '-1', pointerEvents: 'none',
+/** Paints a fake video frame under each transparent rect matching `selector` (where libmpv draws in the real app). */
+async function fakeVideo(page: Page, selector: string, frames: string[] = [videoFrame()]) {
+  const boxes = await page.locator(selector).evaluateAll((els) => els.map((el) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  }));
+  if (boxes.length === 0) throw new Error(`no video rect for ${selector}`);
+  await page.evaluate(({ boxes, srcs }) => {
+    document.querySelectorAll('[data-shot-video]').forEach((el) => el.remove());
+    boxes.forEach((box, i) => {
+      const img = document.createElement('img');
+      img.dataset.shotVideo = '';
+      img.src = srcs[i % srcs.length]!;
+      Object.assign(img.style, {
+        position: 'fixed', left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px`,
+        objectFit: 'cover', zIndex: '-1', pointerEvents: 'none',
+      });
+      document.body.prepend(img);
     });
-    document.body.prepend(img);
-  }, { box, src: svgUrl(frame) });
+  }, { boxes, srcs: frames.map(svgUrl) });
   await page.waitForTimeout(100);
 }
 
@@ -79,6 +84,29 @@ test('now playing', async ({ page }) => {
   await page.mouse.move(900, 600);
   await page.mouse.move(910, 610); // wake the control bar
   await shoot(page, 'now-playing');
+});
+
+test('multiview, one large and two stacked', async ({ page }) => {
+  await open(page, '/channels');
+  await page.locator('[role=list] [data-index="8"]').focus(); // Tidepool Nature
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/\/player/);
+  await page.getByRole('button', { name: 'Multiview' }).click();
+  await expect(page).toHaveURL(/\/multiview/);
+  const tiles = page.locator('[role=group][aria-label^="Slot"]');
+  for (const [i, name] of ['Cobalt Sports', 'Summit Music'].entries()) {
+    await page.getByRole('button', { name: 'Add channel' }).first().click();
+    await page.getByLabel('Search channels').fill(name);
+    await page.getByRole('option', { name: new RegExp(name) }).first().click();
+    await page.keyboard.press('Escape'); // close the picker
+    await expect(tiles).toHaveCount(i + 2);
+  }
+  await page.getByRole('radiogroup', { name: 'Layout (L)' }).getByText('One large, others small').click({ force: true });
+  await page.mouse.move(800, 500);
+  await page.mouse.move(810, 510); // wake the toolbar
+  await page.waitForTimeout(500); // grid reflow
+  await fakeVideo(page, '[role=group][aria-label^="Slot"]', [videoFrame(2), videoFrame(3), videoFrame(1)]);
+  await shoot(page, 'multiview');
 });
 
 test('recordings', async ({ page }) => {

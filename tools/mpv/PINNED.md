@@ -34,7 +34,10 @@ by editing `pins.env` (and this file if the source changes) in one commit, with 
   moving past 7.1 needs another TLS backend).
 - The staged dylib is unsigned. The release job signs it (Developer ID, hardened runtime, timestamp) before
   bundling; `Contents/Frameworks` may only hold code, so the manifest and licences go to Resources.
-- CI caches the output keyed on `pins.env` and `macos.sh`.
+- mpv is built with Cocoa (needed for gl-cocoa / VideoToolbox GL interop) but without Swift. mpv 0.42 then still
+  compiles its Swift-only clipboard backend, so `patches/mpv-macos-clipboard-without-swift.patch` builds it only with
+  Swift. Re-check it on every mpv bump and drop it once upstream guards this.
+- CI caches the output keyed on `pins.env`, `macos.sh` and `patches/`.
 
 ## Rules
 

@@ -30,6 +30,7 @@ While not required, this app is best used with [Dispatcharr](https://github.com/
 - Playback powered by MPV: H.264, HEVC, MPEG-2, AC-3/E-AC-3, teletext, hardware decode where the
   machine allows it.
 - Full HDR Support: Correctly plays both SDR and HDR content on all display types with tone mapping where required
+- Multiview: Play multiple streams at once in different grid layouts and switch the active audio
 - System tray, media keys and OS media controls (MPRIS, Windows media overlay, macOS Now Playing), keeps the screen awake while playing, pauses and releases the stream when the machine sleeps.
 - Single instance and `downlink://channel/<uuid>` deep links.
 - Updates through signed releases, checked in the background and installed when you quit. Never mid-playback.

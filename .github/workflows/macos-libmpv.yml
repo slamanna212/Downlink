@@ -32,7 +32,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: tools/mpv/out/macos
-          key: libmpv-macos-arm64-${{ hashFiles('tools/mpv/pins.env', 'tools/mpv/macos.sh') }}
+          key: libmpv-macos-arm64-${{ hashFiles('tools/mpv/pins.env', 'tools/mpv/macos.sh', 'tools/mpv/patches/**') }}
           lookup-only: ${{ inputs.ignore_cache }}
 
       - name: Build libmpv
