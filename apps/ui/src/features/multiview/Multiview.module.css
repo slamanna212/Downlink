@@ -39,24 +39,9 @@
 .tile[data-empty],
 .tile[data-failed] { background: var(--dl-multiview-canvas); }
 
-/* Inset ring (an outer ring would be clipped by the neighbouring tile), shown only while the pointer
-   is on the focused tile so nothing sits on the picture otherwise. */
-.tile[data-focused]::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  box-shadow: inset 0 0 0 3px var(--dl-accent);
-  background: var(--dl-accent-wash);
-  opacity: 0;
-  transition: opacity 160ms ease;
-}
+/* The active tile carries no ring, border or wash in any state. */
 
-.tile[data-focused]:hover::after,
-.tile[data-focused]:has(:focus-visible)::after { opacity: 1; }
-
-/* Idle: the focus ring and audio indicator fade so they don't sit on the picture. */
-.root[data-idle] .tile[data-focused]::after,
+/* Idle: the audio indicator fades so it does not sit on the picture. */
 .root[data-idle] .audio { opacity: 0; }
 
 .glass {
@@ -354,6 +339,5 @@
   .actions,
   .audio,
   .label,
-  .toolbar,
-  .tile[data-focused]::after { transition: none; }
+  .toolbar { transition: none; }
 }

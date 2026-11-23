@@ -185,12 +185,12 @@ In 1.0 (PLAN §1.5, §4.11, D17).
   The canvas covers the whole view except the rects of tiles showing video (one SVG path with holes), so
   gaps, centred short rows and loading tiles never show the desktop through the transparent window.
 - One tile audible: AUDIO badge (accent tint) top-right; others show a muted icon. "Audio follows focus" on.
-- Focused tile: **inset** 3 px accent ring (an outer ring would be clipped) + accent wash, shown only while
-  the pointer is on that tile; otherwise nothing sits on the picture.
+- Active tile: **no ring, border or wash** in any state (rest, hover, keyboard focus, idle, TV). The tile
+  marks itself with `data-active`, which the global focus ring does not match; only the audio badge shows it.
 - Tile label pill top-left (`--dl-glass`, bare logo 48×24 with no plate, number, name). Programme + progress on scrim at bottom.
 - Hover / keyboard-focus actions centred: listen, make main, full screen, replace, remove (remove in live-text).
   Buttons sit on `--dl-tile-btn` (hover `--dl-tile-btn-hover`, pressed `--dl-tile-btn-pressed`) with a hairline.
-- Idle chrome: after `controlsIdleMs` without input the focus ring, audio indicator, tile actions and toolbar
+- Idle chrome: after `controlsIdleMs` without input the audio indicator, tile actions and toolbar
   fade out and the cursor hides; any mouse/key input brings them back. The toolbar stays while the pointer
   is on it or a picker is open.
 - Stream budget: picker footer only, "Uses 1 stream · 3 of 4 in use". The toolbar shows no count.

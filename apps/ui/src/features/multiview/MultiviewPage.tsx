@@ -228,7 +228,7 @@ function Tile(p: TileProps) {
       ref={ref}
       className={classes.tile}
       style={p.area}
-      data-focused={p.focused || undefined}
+      data-active={p.focused || undefined}
       data-audible={(p.audible && !!p.tile) || undefined}
       data-empty={!p.tile || undefined}
       data-failed={failed || undefined}
