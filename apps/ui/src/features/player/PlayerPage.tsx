@@ -353,8 +353,10 @@ export function PlayerPage() {
   );
   const restart = useCallback(() => {
     const st = usePlayerStore.getState().player;
-    if (st.channelId != null) void restartProgramme(st.channelId);
-  }, []);
+    if (st.mode === 'vod' || st.mode === 'recording') {
+      if (st.seekable) cmd({ kind: 'seek', seconds: 0 });
+    } else if (st.channelId != null) void restartProgramme(st.channelId);
+  }, [cmd]);
   // Behind live in the local buffer: jump to the edge without reloading. From the archive: back to the stream.
   const goLive = useCallback(() => {
     const st = usePlayerStore.getState().player;
@@ -471,11 +473,14 @@ export function PlayerPage() {
   const live = !timeshift && (player.mode === 'live' || player.mode === null);
   const tl = player.timeline;
   const behindLive = tl ? Math.max(0, tl.liveEdgeUtc - (pendingUtc ?? tl.playheadUtc)) : 0;
-  const canSkip = timeshift || (live && player.seekable);
+  // Every control below shows only when it does something for what is playing; nothing is shown disabled.
+  const canSkip = player.seekable && (player.timeline != null || (player.mode !== 'live' && player.mode !== null && (player.duration ?? 0) > 0));
   // A few seconds behind the tip still counts as live; hysteresis keeps the button from flickering.
   const [behindFlag, setBehindFlag] = useState(false);
   const behindNow = isBehindLive(behindLive, behindFlag);
   if (behindNow !== behindFlag) setBehindFlag(behindNow);
+  // Start over: live/catch-up restart the programme; VOD and recordings jump back to 0 once past the start.
+  const canRestart = ((live || catchup) && !!channel) || ((player.mode === 'vod' || player.mode === 'recording') && player.seekable && (player.position ?? 0) > 5);
   const showGoLive = catchup || (live && behindNow);
   const source = sources.data?.find((s) => s.id === channel?.sourceId);
   const sourceName = source?.name ?? '–';
@@ -626,7 +631,10 @@ export function PlayerPage() {
               )
             )}
             <div className={classes.controls}>
-              <DLIconButton label={t('player.back')} icon={IconArrowLeft} variant="overlay" size="lg" onClick={goBack} />
+              <div className={classes.group} data-slot="start">
+                <DLIconButton label={t('player.back')} icon={IconArrowLeft} variant="overlay" size="lg" onClick={goBack} />
+              </div>
+              <div className={classes.group} data-slot="transport">
               {canSkip && <DLIconButton label={t('player.back10')} icon={IconRewindBackward10} variant="overlay" size="lg" onClick={() => seekBy(-10)} />}
               <span className={classes.playPause}>
                 <DLIconButton
@@ -639,7 +647,7 @@ export function PlayerPage() {
                 />
               </span>
               {canSkip && <DLIconButton label={t('player.fwd10')} icon={IconRewindForward10} variant="overlay" size="lg" onClick={() => seekBy(10)} />}
-              {(live || catchup) && channel && (
+              {canRestart && (
                 <DLButton variant="overlay" size="lg" icon={IconHistory} keyHint="S" onClick={restart}>
                   {t('player.restart')}
                 </DLButton>
@@ -649,6 +657,8 @@ export function PlayerPage() {
                   {t('player.goLive')}
                 </DLButton>
               )}
+              </div>
+              <div className={classes.group} data-slot="volume">
               <DLIconButton
                 label={player.muted ? t('player.unmute') : t('player.mute')}
                 icon={player.muted ? IconVolumeOff : IconVolume}
@@ -666,7 +676,8 @@ export function PlayerPage() {
                 label={null}
                 thumbLabel={t('player.volume')}
               />
-              <span className={classes.spacer} />
+              </div>
+              <div className={`${classes.group} ${classes.groupEnd}`} data-slot="end">
               {hasAudioMenu && <AudioMenu tracks={player.tracks} {...menuProps('audio')} />}
               {hasSubMenu && <SubtitleMenu tracks={player.tracks} {...menuProps('subs')} />}
               {canSwitchStream && channel && (
@@ -700,6 +711,7 @@ export function PlayerPage() {
                 size="lg"
                 onClick={toggleFullscreen}
               />
+              </div>
             </div>
           </div>
         </div>

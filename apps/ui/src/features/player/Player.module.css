@@ -140,6 +140,10 @@
   margin-top: var(--mantine-spacing-md);
 }
 .spacer { flex: 1; }
+/* control bar slots: start | transport | volume | end. One layout for live, catch-up, VOD and recordings;
+   a control that does nothing for the current content is not rendered. */
+.group { display: flex; align-items: center; gap: var(--mantine-spacing-sm); }
+.groupEnd { margin-left: auto; }
 .volume { width: 96px; }
 
 /* resting 10% fill on play/pause */
