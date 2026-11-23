@@ -20,12 +20,13 @@ import { useDLFocusable } from '../../lib/spatial';
 import { useInteractive } from '../../lib/perf';
 import { t } from '../../lib/i18n';
 import { useDetailStore } from '../../store/detail';
+import { openChannelMenu } from '../../store/contextMenu';
 import { openInfo } from '../../store/info';
 import { useUiStore } from '../../store/ui';
 import { freshGuideView, useViewStateStore, type GuideView } from '../../store/viewState';
 import { playCatchup, playChannel, restartProgramme } from '../player/actions';
 import { GuideBlock } from './GuideBlock';
-import { GuidePreview } from './GuidePreview';
+import { GuidePreview, GuideRecordItems } from './GuidePreview';
 import {
   CHANNEL_CHUNK, SPANS_HOURS, TIME_CHUNK, blockState, enterAction, indexAt, isCovered, mergeProgrammes, moveFocus,
   neededChunks, ppsFor, scrollToReveal, sliceRange, tickMarks, timeToX, totalHeight, totalWidth, visibleRange, withMargin, xToTime,
@@ -486,15 +487,25 @@ export function GuidePage() {
     openInfo({ kind: 'programme', programme: p, channel: channelFor(row) });
   };
   const onContextMenu = (e: React.MouseEvent) => {
-    const el = (e.target as HTMLElement).closest<HTMLElement>('[data-pid]');
-    if (!el || !caps.dvr) return;
-    e.preventDefault();
-    const row = Number(el.dataset.row);
-    const p = listFor(row)?.find((x) => x.id === el.dataset.pid);
-    if (p) {
+    const target = e.target as HTMLElement;
+    const el = target.closest<HTMLElement>('[data-pid]');
+    if (el) {
+      const row = Number(el.dataset.row);
+      const ch = channelFor(row);
+      const p = listFor(row)?.find((x) => x.id === el.dataset.pid);
+      if (!ch) return;
+      if (!p || !caps.dvr) return openChannelMenu(e, ch);
       setFocusState({ row, t: p.startUtc });
-      setRecordOpen(true);
+      openChannelMenu(
+        e,
+        ch,
+        <GuideRecordItems offline={offline} onRecord={(kind) => record.mutate({ programmeId: p.id, kind })} />,
+      );
+      return;
     }
+    const lab = target.closest<HTMLElement>('[data-tune]');
+    const ch = lab ? channelFor(Number(lab.dataset.tune)) : undefined;
+    if (ch) openChannelMenu(e, ch);
   };
 
   const onRecord = useStable((kind: 'once' | 'series') => {

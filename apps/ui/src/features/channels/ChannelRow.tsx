@@ -9,6 +9,8 @@ import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { formatClock, formatRange, progress } from '../../lib/time';
 import { t } from '../../lib/i18n';
 import { episodeCode, episodeLine } from '../../lib/episode';
+import { openChannelMenu } from '../../store/contextMenu';
+import { RecordItems } from './RecordItems';
 import classes from './Channels.module.css';
 
 export interface ChannelRowProps {
@@ -62,13 +64,12 @@ export const ChannelRow = forwardRef<HTMLDivElement, ChannelRowProps>(function C
       data-index={dataIndex}
       onClick={onPlay}
       onFocus={onFocusRow}
-      onContextMenu={
-        showRecord
-          ? (e) => {
-              e.preventDefault();
-              setRecordOpen(true);
-            }
-          : undefined
+      onContextMenu={(e) =>
+        openChannelMenu(
+          e,
+          channel,
+          showRecord ? <RecordItems recordable={recordable} current={p} offline={offline} onRecord={onRecord} onDetails={onDetails} /> : undefined,
+        )
       }
     >
       <ChannelLogo channelId={channel.id} name={channel.name} src={channel.logo} />
@@ -112,24 +113,7 @@ export const ChannelRow = forwardRef<HTMLDivElement, ChannelRowProps>(function C
                 <DLIconButton label={t('guide.record')} icon={IconPlayerRecord} size="sm" tabIndex={-1} />
               </Menu.Target>
               <Menu.Dropdown>
-                {offline && <Menu.Label>{t('offline.recording')}</Menu.Label>}
-                {recordable.map((x) => (
-                  <div key={x.id}>
-                    <Menu.Label>
-                      {t(x === p ? 'channels.record.now' : 'channels.record.next', { time: formatClock(x.startUtc), title: x.title ?? '' })}
-                    </Menu.Label>
-                    <Menu.Item disabled={offline || x.isScheduled} onClick={() => onRecord?.(x.id, 'once')}>
-                      {x.isScheduled ? t('guide.recording') : t('guide.recordOnce')}
-                    </Menu.Item>
-                    <Menu.Item disabled={offline} onClick={() => onRecord?.(x.id, 'series')}>{t('guide.recordSeries')}</Menu.Item>
-                  </div>
-                ))}
-                {onDetails && (
-                  <>
-                    {recordable.length > 0 && <Menu.Divider />}
-                    <Menu.Item onClick={onDetails}>{t('channels.record.schedule')}</Menu.Item>
-                  </>
-                )}
+                <RecordItems recordable={recordable} current={p} offline={offline} onRecord={onRecord} onDetails={onDetails} />
               </Menu.Dropdown>
             </Menu>
           </span>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { MantineProvider } from '@mantine/core';
+import { ChannelContextMenu } from '../components/ContextMenu/ChannelContextMenu';
 import { Notifications } from '@mantine/notifications';
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { RouterProvider, type DataRouter } from 'react-router';
@@ -34,6 +35,7 @@ export function App({ router, client }: { router?: DataRouter; client?: QueryCli
       <Notifications position="bottom-right" limit={3} autoClose={5000}  />
       <QueryClientProvider client={qc}>
         <RouterProvider router={r} />
+      <ChannelContextMenu />
         <BlockingPrompt />
       </QueryClientProvider>
     </MantineProvider>

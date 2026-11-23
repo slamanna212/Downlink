@@ -72,6 +72,17 @@ function MiniPlayer() {
  * Preview pane. It follows focus after a 300 ms dwell. Everything shown is already in memory:
  * dwelling never calls a play command or touches a stream endpoint (CLAUDE rule 4).
  */
+/** Record items for the focused guide programme (preview menu and guide right-click menu). */
+export function GuideRecordItems({ offline, onRecord }: { offline: boolean; onRecord: (kind: 'once' | 'series') => void }) {
+  return (
+    <>
+      {offline && <Menu.Label>{t('offline.recording')}</Menu.Label>}
+      <Menu.Item disabled={offline} onClick={() => onRecord('once')}>{t('guide.recordOnce')}</Menu.Item>
+      <Menu.Item disabled={offline} onClick={() => onRecord('series')}>{t('guide.recordSeries')}</Menu.Item>
+    </>
+  );
+}
+
 export const GuidePreview = memo(function GuidePreview({ programme, channel, state, canRecord, offline, canCatchup, recordOpen, onRecordOpen, onRecord, onPrimary, onFromStart, onDetails, onInfo, onFavourite }: PreviewProps) {
   const [shown, setShown] = useState<{ p: Programme | null; ch: Channel | undefined; state: BlockState | null }>({ p: programme, ch: channel, state });
   useEffect(() => {
@@ -130,9 +141,7 @@ export const GuidePreview = memo(function GuidePreview({ programme, channel, sta
                   </Menu.Target>
                   <Menu.Dropdown>
                     {st === 'now' && canCatchup && <Menu.Item onClick={onFromStart}>{t('guide.fromStart')}</Menu.Item>}
-                    {canRecord && offline && <Menu.Label>{t('offline.recording')}</Menu.Label>}
-                    {canRecord && <Menu.Item disabled={offline} onClick={() => onRecord('once')}>{t('guide.recordOnce')}</Menu.Item>}
-                    {canRecord && <Menu.Item disabled={offline} onClick={() => onRecord('series')}>{t('guide.recordSeries')}</Menu.Item>}
+                    {canRecord && <GuideRecordItems offline={!!offline} onRecord={onRecord} />}
                   </Menu.Dropdown>
                 </Menu>
               )}
