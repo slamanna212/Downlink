@@ -20,6 +20,8 @@ I wanted a desktop IPTV player that could take advantage of all Dispatcharr offe
 
 While not required, this app is best used with [Dispatcharr](https://github.com/dispatcharr/dispatcharr).
 
+[Getting Ready Animation](.github/screenshots/first-sync.gif)
+
 ## Features
 
 - TV guide with now/next, local search of program titles and descriptions.
