@@ -991,7 +991,8 @@ not), colour primaries + bit depth, audio codec/channels/sample rate, container,
 A/V sync, buffer, dropped frames, `hwdec-current`. Errors are inline overlays with one action.
 Back (control bar button or Esc) returns to the screen the player was opened from. From the guide,
 playback continues in the preview pane's top-right box (mini player); clicking it reopens the player.
-With nothing playing the box is a programme-art placeholder.
+While the guide mini player is active, the preview pane describes what is playing regardless of grid
+focus. With nothing playing, the pane follows the grid selection and shows programme art.
 
 **Mini player (PiP).** `P` or the control-bar button turns the window into a compact, borderless,
 always-on-top video window (default 480×270, remembers size and corner) with hover-only play/pause,

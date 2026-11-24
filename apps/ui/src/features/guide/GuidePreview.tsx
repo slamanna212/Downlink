@@ -1,9 +1,10 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useNavigate } from 'react-router';
 import { Menu } from '@mantine/core';
 import { IconArrowsMaximize, IconHistory, IconInfoCircle, IconListDetails, IconPictureInPicture, IconPlayerPlay, IconStar, IconVolume, IconVolumeOff } from '@tabler/icons-react';
 import { inTauri, invoke } from '../../api/ipc';
-import { useNowNextWindow } from '../../api/queries';
+import { useChannel, useNowNextWindow } from '../../api/queries';
 import { ProgrammeArt } from '../../components/ProgrammeArt/ProgrammeArt';
 import { useNowEpoch } from '../../lib/useNow';
 import { setFullscreen } from '../player/fullscreen';
@@ -27,11 +28,11 @@ export interface PreviewProps {
   programme: Programme | null;
   channel: Channel | undefined;
   state: BlockState | null;
-  onPrimary: () => void;
-  onDetails: () => void;
+  onPrimary: (programme: Programme, channel: Channel) => void;
+  onDetails: (programme: Programme) => void;
   /** Opens the details modal for the programme (record from there or the right-click menu). */
-  onInfo: () => void;
-  onFavourite: () => void;
+  onInfo: (programme: Programme, channel: Channel) => void;
+  onFavourite: (channel: Channel) => void;
 }
 
 /** Opens the full player; `fullscreen` also puts the window in OS fullscreen. */
@@ -53,15 +54,12 @@ function useOpenPlayer() {
  * it, CLAUDE rule 6), clears the shell so the libmpv surface shows through its rect (the hero art is
  * masked around it), and opens the full player on click. Its own controls: mute, mini window, fullscreen.
  */
-function MiniPlayer() {
+function MiniPlayer({ live, programme }: { live: boolean; programme: Programme | null }) {
   const open = useOpenPlayer();
   const ref = useRef<HTMLDivElement | null>(null);
   useVideoBounds(ref);
-  const player = usePlayerStore((s) => s.player);
-  const ids = useMemo(() => (player.channelId != null ? [player.channelId] : []), [player.channelId]);
-  const nn = useNowNextWindow(ids, `mini|${player.channelId}`);
+  const muted = usePlayerStore((s) => s.player.muted);
   const now = useNowEpoch(30_000);
-  const prog = player.mode === 'live' || player.mode === null ? (nn.data?.[0]?.now ?? null) : null;
   // Layout effect: the shell must be clear on the first painted frame, or coming back from the player shows
   // one opaque frame over the video.
   useLayoutEffect(() => {
@@ -72,7 +70,7 @@ function MiniPlayer() {
       releaseSession();
     };
   }, []);
-  const mute = () => void invoke('player_command', { command: { kind: 'setMuted', muted: !player.muted } });
+  const mute = () => void invoke('player_command', { command: { kind: 'setMuted', muted: !muted } });
   return (
     <div ref={ref} className={classes.mini}>
       {!inTauri() && (
@@ -81,18 +79,18 @@ function MiniPlayer() {
         </span>
       )}
       <button type="button" className={classes.miniOpen} aria-label={t('guide.openPlayer')} onClick={() => open('player')} />
-      {(player.mode === 'live' || player.mode === null) && (
+      {live && (
         <span className={classes.miniBadge}>
           <StatusBadge kind="live" />
         </span>
       )}
       <div className={classes.miniControls}>
-        <DLIconButton label={player.muted ? t('player.unmute') : t('player.mute')} icon={player.muted ? IconVolumeOff : IconVolume} variant="overlay" size="sm" onClick={mute} />
+        <DLIconButton label={muted ? t('player.unmute') : t('player.mute')} icon={muted ? IconVolumeOff : IconVolume} variant="overlay" size="sm" onClick={mute} />
         <span className={classes.miniSpacer} />
         <DLIconButton label={t('player.miniPlayer')} icon={IconPictureInPicture} variant="overlay" size="sm" onClick={() => open('mini')} />
         <DLIconButton label={t('player.fullscreen')} icon={IconArrowsMaximize} variant="overlay" size="sm" onClick={() => open('fullscreen')} />
       </div>
-      {prog && <span className={classes.miniBar} style={{ width: `${progress(prog.startUtc, prog.endUtc, now) * 100}%` }} aria-hidden />}
+      {live && programme && <span className={classes.miniBar} style={{ width: `${progress(programme.startUtc, programme.endUtc, now) * 100}%` }} aria-hidden />}
     </div>
   );
 }
@@ -109,9 +107,9 @@ export function GuideRecordItems({ offline, onRecord }: { offline: boolean; onRe
 }
 
 /**
- * Guide hero. It follows focus after a 300 ms dwell. The text is already in memory; the artwork comes from
- * `programme_art` (guide icon first; server/TMDB fallback looked up once and cached in core). Nothing here
- * touches a stream endpoint (CLAUDE rule 4).
+ * Guide hero. Follows playback while the mini player is active, otherwise focus after a 300 ms dwell.
+ * Artwork comes from `programme_art` (guide icon first; server/TMDB fallback cached in core).
+ * Nothing here touches a stream endpoint (CLAUDE rule 4).
  */
 export const GuidePreview = memo(function GuidePreview({ programme, channel, state, onPrimary, onDetails, onInfo, onFavourite }: PreviewProps) {
   const [shown, setShown] = useState<{ p: Programme | null; ch: Channel | undefined; state: BlockState | null }>({ p: programme, ch: channel, state });
@@ -121,21 +119,35 @@ export const GuidePreview = memo(function GuidePreview({ programme, channel, sta
   }, [programme, channel, state]);
   const open = useOpenPlayer();
 
-  const playing = usePlayerStore((s) => ACTIVE_PHASES.has(s.player.state));
-  const playingChannel = usePlayerStore((s) => s.player.channelId);
-  const { p, ch, state: st } = shown;
-  const action = st ? enterAction(st) : 'none';
-  // Previewing what the mini player already plays: the primary goes full screen instead of re-tuning.
-  const previewing = playing && st === 'now' && ch?.id === playingChannel;
-  const primary = previewing
+  const { playing, channelId, mode, archived, title } = usePlayerStore(useShallow(({ player }) => ({
+    playing: ACTIVE_PHASES.has(player.state),
+    channelId: player.channelId,
+    mode: player.mode,
+    archived: player.mode === 'catchup' ? player.programme : null,
+    title: player.title,
+  })));
+  const live = mode === 'live' || mode === null;
+  const { data: playingChannel } = useChannel(playing ? channelId : null);
+  const liveIds = playing && live && channelId != null ? [channelId] : [];
+  const nn = useNowNextWindow(liveIds, `mini|${channelId}`);
+  // The now/next query carries placeholder data across channel changes. Never show the old channel.
+  const current = nn.data?.find((entry) => entry.channelId === channelId)?.now ?? null;
+  const p = playing ? (live ? current : archived?.channelId === channelId ? archived : null) : shown.p;
+  const ch = playing ? playingChannel : shown.ch;
+  const st = playing ? (live ? 'now' : mode === 'catchup' ? 'past-archive' : null) : shown.state;
+  const action = !playing && st ? enterAction(st) : 'none';
+  const showInfo = () => p && ch && onInfo(p, ch);
+  const activate = () => p && ch && onPrimary(p, ch);
+  const primary = playing
     ? { label: t('guide.fullScreen'), icon: IconArrowsMaximize, run: () => open('fullscreen') }
     : action === 'play-live'
-      ? { label: t('guide.watchLive'), icon: IconPlayerPlay, filled: true, run: onPrimary }
+      ? { label: t('guide.watchLive'), icon: IconPlayerPlay, filled: true, run: activate }
       : action === 'play-catchup'
-        ? { label: t('guide.playFromStart'), icon: IconHistory, run: onPrimary }
+        ? { label: t('guide.playFromStart'), icon: IconHistory, run: activate }
         : action === 'details'
-          ? { label: t('guide.moreInfo'), icon: IconInfoCircle, run: onInfo }
+          ? { label: t('guide.moreInfo'), icon: IconInfoCircle, run: showInfo }
           : null;
+  const fallbackTitle = p?.title || title || ch?.name;
   const epLine = p ? episodeLine(p) : null;
   return (
     <section className={classes.preview} data-mini={playing || undefined}>
@@ -162,25 +174,29 @@ export const GuidePreview = memo(function GuidePreview({ programme, channel, sta
               </div>
             )}
             {p.description && <p className={classes.desc}>{p.description}</p>}
-            <div className={classes.actions}>
-              {primary && (
-                <DLButton variant="filled" size="md" icon={primary.icon} filledGlyph={'filled' in primary} onClick={primary.run}>
-                  {primary.label}
-                </DLButton>
-              )}
-              {action === 'details' && !previewing ? (
-                <DLIconButton label={t('guide.channelDetails')} icon={IconListDetails} size="md" variant="default" onClick={onDetails} />
-              ) : (
-                <DLIconButton label={t('guide.moreInfo')} icon={IconInfoCircle} size="md" variant="default" onClick={onInfo} />
-              )}
-              <DLIconButton label={t(ch.isFavourite ? 'channels.favourite.remove' : 'channels.favourite.add')} icon={IconStar} size="md" variant="default" pressed={ch.isFavourite} filledGlyph={ch.isFavourite} onClick={onFavourite} />
-            </div>
           </>
+        ) : playing ? (
+          fallbackTitle && <h2 className={classes.title}>{fallbackTitle}</h2>
         ) : (
           <div className={classes.metaRow}>{t('guide.noSelection')}</div>
         )}
+        {(playing || (p && ch)) && (
+          <div className={classes.actions}>
+            {primary && (
+              <DLButton variant="filled" size="md" icon={primary.icon} filledGlyph={'filled' in primary} onClick={primary.run}>
+                {primary.label}
+              </DLButton>
+            )}
+            {p && ch && (action === 'details' ? (
+              <DLIconButton label={t('guide.channelDetails')} icon={IconListDetails} size="md" variant="default" onClick={() => onDetails(p)} />
+            ) : (
+              <DLIconButton label={t('guide.moreInfo')} icon={IconInfoCircle} size="md" variant="default" onClick={showInfo} />
+            ))}
+            {ch && (playing || p) && <DLIconButton label={t(ch.isFavourite ? 'channels.favourite.remove' : 'channels.favourite.add')} icon={IconStar} size="md" variant="default" pressed={ch.isFavourite} filledGlyph={ch.isFavourite} onClick={() => onFavourite(ch)} />}
+          </div>
+        )}
       </div>
-      {playing && <MiniPlayer />}
+      {playing && <MiniPlayer live={live} programme={p} />}
     </section>
   );
 });

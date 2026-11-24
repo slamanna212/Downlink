@@ -430,10 +430,9 @@ export function GuidePage() {
   );
 
   const activate = useCallback(
-    (p: Programme | null) => {
+    (p: Programme | null, ch = rowChannel.get(focus.row)) => {
       // No programme under the cursor (channel without guide data, or a gap): tune the channel live.
       if (!p) return tuneRow(focus.row);
-      const ch = rowChannel.get(focus.row) ?? undefined;
       const action = enterAction(blockState(p, ch, nowEpoch()));
       if (action === 'play-live') void playChannel(p.channelId).then((err) => (err ? undefined : navigate('/player')));
       else if (action === 'play-catchup') void playCatchup(p.id).then((err) => (err ? undefined : navigate('/player')));
@@ -522,10 +521,10 @@ export function GuidePage() {
     if (ch) openChannelMenu(e, ch);
   };
 
-  const onPrimary = useStable(() => activate(focusProgramme));
-  const onDetails = useStable(() => focusProgramme && showDetail(focusProgramme.channelId, focusProgramme.id));
-  const onInfo = useStable(() => focusProgramme && openInfo({ kind: 'programme', programme: focusProgramme, channel: focusChannel ?? undefined }));
-  const onFavourite = useStable(() => focusChannel && favourite.mutate({ channelId: focusChannel.id, favourite: !focusChannel.isFavourite }));
+  const onPrimary = useStable((p: Programme, ch: Channel) => activate(p, ch));
+  const onDetails = useStable((p: Programme) => showDetail(p.channelId, p.id));
+  const onInfo = useStable((p: Programme, ch: Channel) => openInfo({ kind: 'programme', programme: p, channel: ch }));
+  const onFavourite = useStable((ch: Channel) => favourite.mutate({ channelId: ch.id, favourite: !ch.isFavourite }));
   const onGroup = useStable((id: number | null) => {
     setGroupId(id);
     setFocusState({ row: 0, t: focus.t });

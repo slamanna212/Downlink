@@ -195,12 +195,13 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   Selection is remembered for the session (`store/viewState`).
 - **Channels**: group sidebar 220 + virtualised rows (logo 72×36 · number · name + badges · now + 2 px
   progress · next · catch-up days + fav). Playing row: accent wash, accent-text name, speaker icon.
-- **Guide**: 288 px hero (programme art under `--dl-hero-scrim`, follows focus after a 300 ms dwell): meta
+- **Guide**: 288 px hero (programme art under `--dl-hero-scrim`): meta
   line, 48/800 title, episode line, one-line description, primary (Watch live / Play from start / More info)
   + info and favorite icon buttons. Recording lives in the details modal and the right-click menu, not the
   hero. While something plays, a 384×216 mini player sits top-right in the hero (the art is masked around it)
-  with LIVE, a 2 px progress bar and hover controls (mute, mini window, fullscreen); focusing the playing
-  channel turns the primary into *Full screen* (OS fullscreen). Below: a 52 px toolbar (day stepper with
+  with LIVE and a 2 px progress bar for live playback, plus hover controls (mute, mini window, fullscreen).
+  The hero describes the active playback, and its primary action is *Full screen* (OS fullscreen).
+  With no active playback the hero follows grid focus after a 300 ms dwell. Below: a 52 px toolbar (day stepper with
   menu, Now, channel filter, 3/6/12/24 h). 40 px sticky time header · 200 px sticky channel column · 64 px
   rows · red now line + time pill. Blocks: past+archive `--dl-guide-past` + history icon · past no archive
   dashed, disabled text · now `--dl-guide-now` + 10% fill + 2 px bar · future `--dl-guide-future` ·
