@@ -40,13 +40,13 @@ While not required, this app is best used with [Dispatcharr](https://github.com/
 
 ## Screenshots
 
-_All screenshots use synthetic test data. Channels, programmes and artwork are made up._
+_All screenshots use synthetic test data. Channels, programs and artwork are made up._
 
 | | |
 |:---:|:---:|
-| ![Home](.github/screenshots/home.png)<br>**Home** | ![Guide with live video playing](.github/screenshots/guide-playing.png)<br>**Guide with live preview** |
-| ![Now playing](.github/screenshots/now-playing.png)<br>**Now playing** | ![Multiview with one large and two small tiles](.github/screenshots/multiview.png)<br>**Multiview** |
-| ![Movies browse](.github/screenshots/movies.png)<br>**Movies** | ![Recordings](.github/screenshots/recordings.png)<br>**Recordings** |
+| ![Home with a live hero, continue watching and favorites](.github/screenshots/home.png)<br>**Home** | ![Guide with live video playing](.github/screenshots/guide-playing.png)<br>**Guide with live preview** |
+| ![Now playing with the control bar and up-next card](.github/screenshots/now-playing.png)<br>**Now playing** | ![Multiview with one large and two small tiles](.github/screenshots/multiview.png)<br>**Multiview** |
+| ![Movies browse](.github/screenshots/movies.png)<br>**Movies** | ![Recordings grouped by show with a recording in progress](.github/screenshots/recordings.png)<br>**Recordings** |
 
 ## Getting started
 
