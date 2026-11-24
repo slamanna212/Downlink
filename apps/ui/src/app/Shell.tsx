@@ -174,6 +174,7 @@ export function Shell() {
   const fullscreen = useUiStore((s) => s.fullscreen);
   const mini = useUiStore((s) => s.mini);
   const videoHole = useUiStore((s) => s.videoHole);
+  const firstSync = useUiStore((s) => s.firstSync);
   const { loaded, hasSource } = useCaps();
   const { data: sources } = useSources();
   const qc = useQueryClient();
@@ -215,7 +216,7 @@ export function Shell() {
       <a href="#main" className={classes.skip}>
         {t('a11y.skipToContent')}
       </a>
-      {!((fullscreen || mini) && route === 'player') && !(pathname === '/sources/add' && loaded && !hasSource) && (
+      {!((fullscreen || mini) && route === 'player') && !(pathname === '/sources/add' && ((loaded && !hasSource) || firstSync)) && (
         <aside className={classes.rail} style={{ width }}>
           <Rail mode={mode} onToggle={() => setRailPref(collapsed ? 'expanded' : 'collapsed')} />
         </aside>
@@ -225,7 +226,7 @@ export function Shell() {
         <TitleBar onVideo={route === 'player'} inFlow={!underTitleBar(pathname)} passive={pathname.startsWith('/multiview')} />
       )}
       <main id="main" className={classes.main} tabIndex={-1}>
-        {route !== 'player' && hasSource && sources?.[0] && (
+        {route !== 'player' && !firstSync && hasSource && sources?.[0] && (
           <StatusBanner source={sources[0]} onRetry={() => retry.mutate(sources[0]!.id)} onSettings={() => void navigate('/settings/sources')} />
         )}
         <RouteTransition key={pathname} instant={fromVideo && route === 'app'}>

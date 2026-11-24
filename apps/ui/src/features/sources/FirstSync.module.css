@@ -1,0 +1,96 @@
+/* First-sync screen (DESIGN §12). The canvas paints its own sky; the strip sits over the planet. */
+.root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--dl-uplink-night);
+  animation: enter 240ms var(--dl-ease) both;
+}
+
+.canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hud {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: min(560px, 100% - 2 * var(--mantine-spacing-xl));
+  padding-bottom: 2.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-sm);
+}
+
+.title {
+  margin: 0 0 var(--mantine-spacing-xs);
+  font-size: var(--mantine-h1-font-size);
+  line-height: var(--mantine-h1-line-height);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--dl-text);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--mantine-spacing-md);
+}
+
+.phase {
+  font-size: var(--mantine-font-size-lg);
+  font-weight: 600;
+  color: var(--dl-text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.count {
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-sm);
+  color: var(--dl-text-2);
+  white-space: nowrap;
+}
+
+.bar {
+  height: 3px;
+  border-radius: var(--mantine-radius-xs);
+  background: var(--dl-outline-badge);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  background: var(--dl-accent);
+  transform-origin: left center;
+  transition: transform 160ms linear;
+}
+
+.hint {
+  margin: var(--mantine-spacing-xs) 0 0;
+  font-size: var(--mantine-font-size-sm);
+  color: var(--dl-text-2);
+}
+
+@keyframes enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root { animation-name: fade; }
+  .fill { transition: none; }
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

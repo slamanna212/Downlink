@@ -276,3 +276,22 @@ stack traces in the UI; those go to diagnostics. All copy through `t()`.
 | 14 | Copy rules (§10). | review + i18n keys |
 | 15 | Logo fallback deterministic. | unit test on hash |
 | 16 | New pattern → add token/component + story first, then use it. | PR template checkbox |
+
+## 12. First sync (Uplink scene)
+After **Save** on Add source, the form gives way to a full-bleed scene while `add_source` runs the first
+sync, then the screen hands off to Live TV. It is the app icon brought to life: a ground station on a
+cratered, banded planet tracks a satellite across the night sky, and the orbit fills in as the progress bar.
+- Implementation: `features/sources/FirstSync.tsx` (component), `uplinkScene.ts` (canvas 2D drawing),
+  `syncProgress.ts` (folds `task://progress` into phase, counts and a monotonic 0–1 progress).
+- Status strip at the bottom: title, phase line (`sync.*` keys) with a mono count, a 3 px Iris bar, one hint.
+  The scene is a progress indicator, so its Iris use is within rule 7.
+- Tokens, used by this scene only: `--dl-uplink-night` (icon background), `--dl-uplink-mount`,
+  `--dl-uplink-crater` (darker Iris shades for the dish mount and craters), `--dl-sparkle-cyan`,
+  `--dl-sparkle-blue` (the icon's sparkles). Stars follow the icon: four-point sparkles in cyan/blue, round
+  dots in text/accent-hover/cyan/blue.
+- Motion: the dish hunts while connecting, then tracks the satellite with an eased lag (no overshoot); the
+  satellite eases toward the reported progress so stalls don't jump. Packets light the feed as they land.
+  Reduced motion: a still scene; only the text and bar change.
+- Timing: on screen at least 1.2 s, "Ready" holds 600 ms, then the 240 ms route fade. On failure the form
+  returns with every field filled in and the error shown. On the first source the rail and status banner stay
+  hidden (`ui.firstSync`).

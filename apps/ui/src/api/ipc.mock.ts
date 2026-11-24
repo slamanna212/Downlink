@@ -483,8 +483,23 @@ export function createMockBackend(): Backend {
       return { channels: 544, groups: 9, programmes: 15098, serverVersion: input.kind === 'dispatcharr' ? '0.32.0' : null, user: 'demo' };
     },
     add_source: async (input) => {
-      await wait(300);
       const id = Math.max(0, ...sources.map((s) => s.id)) + 1;
+      // The first sync's progress, in the core's shape: a marker per phase, then counts.
+      emit('task://progress', { sourceId: id, phase: 'connect', done: 0, total: 4 });
+      await wait(700);
+      emit('task://progress', { sourceId: id, phase: 'channels', done: 1, total: 4 });
+      for (let n = 100; n <= 544; n += 111) {
+        await wait(350);
+        emit('task://progress', { sourceId: id, phase: 'channels', done: Math.min(n, 544), total: 544 });
+      }
+      emit('task://progress', { sourceId: id, phase: 'guide', done: 2, total: 4 });
+      for (let n = 2000; n <= 15098; n += 2600) {
+        await wait(450);
+        emit('task://progress', { sourceId: id, phase: 'guide', done: n, total: 0 });
+      }
+      emit('task://progress', { sourceId: id, phase: 'state', done: 3, total: 4 });
+      await wait(500);
+      emit('task://progress', { sourceId: id, phase: 'done', done: 4, total: 4 });
       const src: Source = {
         id, uuid: `mock-source-${id}`, kind: input.kind, name: input.name || 'New source', host: 'demo.invalid',
         caps: Cap.Live | Cap.Epg | Cap.Favourites | (input.kind === 'dispatcharr' ? Cap.Catchup | Cap.Vod | Cap.Dvr : 0),

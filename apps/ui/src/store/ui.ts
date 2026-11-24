@@ -56,6 +56,9 @@ interface UiState {
   /** Last non-video route the user was on: names the player's back pill ("Guide", "Home"…). */
   lastAppPath: string | null;
   setLastAppPath: (p: string) => void;
+  /** The first-sync screen is up (DESIGN §12): the shell keeps the rail and status banner out of it. */
+  firstSync: boolean;
+  setFirstSync: (on: boolean) => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -83,4 +86,6 @@ export const useUiStore = create<UiState>((set) => ({
   setVideoHole: (videoHole) => set({ videoHole }),
   lastAppPath: null,
   setLastAppPath: (lastAppPath) => set({ lastAppPath }),
+  firstSync: false,
+  setFirstSync: (firstSync) => set({ firstSync }),
 }));

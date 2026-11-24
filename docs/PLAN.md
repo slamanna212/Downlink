@@ -1007,7 +1007,9 @@ delete).
 
 **Add source.** One screen, three tabs (Dispatcharr: URL + API key, with "use username/password"
 link; Xtream: server/user/pass; M3U: URL or file + optional XMLTV URL). A **Test** button reports
-channel and guide counts before saving. Then land on Live TV with the first channel focused. No tour.
+channel and guide counts before saving. Saving shows the first-sync screen (the Uplink scene, DESIGN
+§12) with live phase and counts while the first download runs, then lands on Live TV with the first
+channel focused. No tour.
 
 ### 8.3 10-foot mode
 

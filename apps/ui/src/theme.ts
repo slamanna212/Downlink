@@ -153,6 +153,12 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-focus-ring-video': focusRingVideo,
     // third-party brand: Plex mark only (DESIGN §2)
     '--dl-plex': '#E5A00D',
+    // first-sync Uplink scene only (DESIGN §12): the app icon's night sky, sparkles and planet shades
+    '--dl-uplink-night': '#120A33',
+    '--dl-uplink-mount': '#5442B8',
+    '--dl-uplink-crater': '#6C57E0',
+    '--dl-sparkle-cyan': '#7FE3E0',
+    '--dl-sparkle-blue': '#9CC8FF',
     // video
     '--dl-on-video': '#F3F6F9',
     '--dl-scrim': 'linear-gradient(to top, rgb(5 6 7 / 0.92), rgb(5 6 7 / 0.6) 55%, rgb(5 6 7 / 0))',

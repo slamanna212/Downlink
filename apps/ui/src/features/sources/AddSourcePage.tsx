@@ -1,16 +1,24 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Collapse, PasswordInput, Stack, Switch, Tabs, TextInput } from '@mantine/core';
 import { IconAlertTriangle, IconArrowRight, IconCircleCheck } from '@tabler/icons-react';
-import { toAppError, invoke } from '../../api/ipc';
-import { useCaps } from '../../api/queries';
+import { toAppError, invoke, listen } from '../../api/ipc';
+import { useCaps, useSources } from '../../api/queries';
 import type { AddSourceInput, AppError, SourceKind, TestSourceResult } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { Icon } from '../../components/Icon/Icon';
 import logoUrl from '../../assets/logo.svg';
 import { t } from '../../lib/i18n';
+import { useUiStore } from '../../store/ui';
+import { FirstSync } from './FirstSync';
+import { finishSync, reduceSync, SYNC_START, type SyncView } from './syncProgress';
 import classes from './AddSource.module.css';
+
+/** The first-sync screen stays up at least this long, so a fast server doesn't make it flash. */
+const MIN_SYNC_MS = 1200;
+/** "Ready" holds this long before the route fade to Live TV. */
+const READY_MS = 600;
 
 export interface AddForm {
   url: string;
@@ -62,6 +70,35 @@ export function AddSourcePage() {
   const [advanced, setAdvanced] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [saveError, setSaveError] = useState<AppError | null>(null);
+  const { data: sources } = useSources();
+  const setFirstSync = useUiStore((s) => s.setFirstSync);
+  // First sync (DESIGN §12): non-null while the Uplink screen is up.
+  const [sync, setSync] = useState<SyncView | null>(null);
+  // Which source's progress to follow. Its id only comes back when add_source returns, so follow the
+  // first source that isn't one we already had (another source's background sync may interleave).
+  const track = useRef<{ armed: boolean; known: Set<number>; id: number | null }>({ armed: false, known: new Set(), id: null });
+  const startedAt = useRef(0);
+  const leaveTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let gone = false;
+    void listen('task://progress', (p) => {
+      const tr = track.current;
+      if (!tr.armed || tr.known.has(p.sourceId)) return;
+      tr.id ??= p.sourceId;
+      if (p.sourceId === tr.id) setSync((v) => (v ? reduceSync(v, p) : v));
+    }).then((u) => {
+      if (gone) u();
+      else off = u;
+    });
+    return () => {
+      gone = true;
+      off?.();
+      window.clearTimeout(leaveTimer.current);
+      setFirstSync(false);
+    };
+  }, [setFirstSync]);
 
   const set = <K extends keyof AddForm>(k: K, v: AddForm[K]) => {
     setForm((f) => ({ ...f, [k]: v }));
@@ -84,14 +121,33 @@ export function AddSourcePage() {
   const save = useMutation({
     mutationFn: () => invoke('add_source', buildInput(kind, form)),
     onSuccess: async () => {
+      track.current.armed = false;
+      setSync((v) => finishSync(v ?? SYNC_START));
       await qc.invalidateQueries({ queryKey: ['catalog'] });
-      void navigate('/channels', { state: { focusFirst: true } });
+      const hold = Math.max(0, MIN_SYNC_MS - (performance.now() - startedAt.current)) + READY_MS;
+      leaveTimer.current = window.setTimeout(() => void navigate('/channels', { state: { focusFirst: true } }), hold);
     },
-    onError: (e) => setSaveError(toAppError(e)),
+    onError: (e) => {
+      // Back to the form, every field still filled in, with the reason.
+      track.current.armed = false;
+      setSync(null);
+      setFirstSync(false);
+      setSaveError(toAppError(e));
+    },
   });
+
+  const startSave = () => {
+    track.current = { armed: true, known: new Set((sources ?? []).map((s) => s.id)), id: null };
+    startedAt.current = performance.now();
+    setSync(SYNC_START);
+    if (!hasSource) setFirstSync(true);
+    save.mutate();
+  };
 
   const tested = test.state === 'ok';
   const err = test.state === 'error' ? test.message : saveError?.message;
+
+  if (sync) return <FirstSync view={sync} sourceName={buildInput(kind, form).name} />;
 
   return (
     <div className={classes.page}>
@@ -99,7 +155,7 @@ export function AddSourcePage() {
         className={classes.column}
         onSubmit={(e) => {
           e.preventDefault();
-          if (tested) save.mutate();
+          if (tested) startSave();
           else void runTest();
         }}
       >
