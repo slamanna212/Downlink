@@ -379,6 +379,9 @@ pub struct PlayerSnapshot {
     pub seek_range: Option<(f64, f64)>,
     /// Live sessions: media time ↔ wall clock (see [`crate::timeshift`]).
     pub live_anchor: Option<crate::timeshift::LiveAnchor>,
+    /// Live sessions: seconds behind the cache end playback joined at (see
+    /// [`crate::timeshift::join_lag`]). Being this far behind still counts as live.
+    pub join_lag_secs: Option<f64>,
 }
 
 #[derive(Debug, Clone)]
@@ -506,6 +509,7 @@ struct Stats {
     dropped: Option<i64>,
     seek_range: Option<(f64, f64)>,
     live_anchor: Option<crate::timeshift::LiveAnchor>,
+    join_lag: Option<f64>,
 }
 
 struct Shared {
@@ -517,6 +521,8 @@ struct Shared {
     load_started: Option<Instant>,
     retry_at: Option<Instant>,
     first_frame_ms: Option<u64>,
+    /// Live: the join latency is still being measured until then (first frame + a few seconds).
+    join_lag_until: Option<Instant>,
     error: Option<String>,
     cache_buffering: bool,
     paused: bool,
@@ -676,6 +682,7 @@ impl Player {
                 load_started: None,
                 retry_at: None,
                 first_frame_ms: None,
+                join_lag_until: None,
                 error: None,
                 cache_buffering: false,
                 paused: false,
@@ -883,8 +890,14 @@ impl Player {
             PlayerCommand::Pause => e.set_property("pause", "yes"),
             PlayerCommand::Resume => e.set_property("pause", "no"),
             PlayerCommand::TogglePause => e.command(&["cycle", "pause"]),
-            PlayerCommand::SeekRelative { secs } => seek(e, secs, "relative"),
-            PlayerCommand::SeekAbsolute { secs } => seek(e, secs, "absolute"),
+            PlayerCommand::SeekRelative { secs } => {
+                self.lock().join_lag_until = None;
+                seek(e, secs, "relative")
+            }
+            PlayerCommand::SeekAbsolute { secs } => {
+                self.lock().join_lag_until = None;
+                seek(e, secs, "absolute")
+            }
             PlayerCommand::Volume { percent } => {
                 e.set_property("volume", &percent.min(130).to_string())
             }
@@ -972,6 +985,28 @@ impl Player {
     }
 }
 
+/// How long after the first frame the join latency keeps being measured.
+const JOIN_LAG_WINDOW: Duration = Duration::from_secs(5);
+
+/// Inside the measuring window, while live and actually playing (a pause, an underrun or a user
+/// seek would be counted as latency), fold the current gap to the cache end into the join latency.
+fn update_join_lag(s: &mut Shared) {
+    let Some(until) = s.join_lag_until else {
+        return;
+    };
+    if Instant::now() > until {
+        s.join_lag_until = None;
+        return;
+    }
+    let live = s.request.as_ref().is_some_and(|r| r.profile.is_live());
+    if !live || s.sm.state() != SessionState::Playing {
+        return;
+    }
+    if let (Some(pos), Some((_, end))) = (s.stats.position, s.stats.seek_range) {
+        s.stats.join_lag = Some(crate::timeshift::join_lag(s.stats.join_lag, end, pos));
+    }
+}
+
 fn seek(e: &Engine, secs: f64, mode: &str) -> Result<(), PlayerError> {
     if !secs.is_finite() {
         return Err(PlayerError::InvalidArgument("seek position".into()));
@@ -1053,6 +1088,7 @@ fn snapshot(s: &Shared) -> PlayerSnapshot {
         ),
         seek_range: s.stats.seek_range,
         live_anchor: s.stats.live_anchor,
+        join_lag_secs: s.stats.join_lag,
     }
 }
 
@@ -1091,6 +1127,8 @@ fn load_current(inner: &Inner, s: &mut Shared) -> Result<(), PlayerError> {
     // A new file starts a new timeline and a new cache.
     s.stats.seek_range = None;
     s.stats.live_anchor = None;
+    s.stats.join_lag = None;
+    s.join_lag_until = None;
     s.audio_pick_pending = s.audio_pick.is_some();
     // The new file's size is unknown until its video params arrive; the profile may differ.
     s.video_size = (0, 0);
@@ -1212,6 +1250,7 @@ fn handle_event(inner: &Inner, ev: EngineEvent) {
             {
                 if let Some(t) = s.load_started.take() {
                     s.first_frame_ms = Some(t.elapsed().as_millis() as u64);
+                    s.join_lag_until = Some(Instant::now() + JOIN_LAG_WINDOW);
                 }
                 s.policy.on_playing();
                 let target = if s.paused {
@@ -1220,6 +1259,7 @@ fn handle_event(inner: &Inner, ev: EngineEvent) {
                     SessionState::Playing
                 };
                 go(inner, &mut s, target, Some("first frame".into()));
+                update_join_lag(&mut s);
             }
         }
         EngineEvent::EndFile { reason, error } => match reason {
@@ -1337,6 +1377,7 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
         }
         ("time-pos", PropValue::Double(v)) => {
             s.stats.position = Some(v);
+            update_join_lag(s);
             s.throttle.mark_dirty();
         }
         ("duration", v) => {
@@ -1370,6 +1411,7 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
                     unix_ms(),
                 ));
             }
+            update_join_lag(s);
             s.throttle.mark_dirty();
         }
         ("volume", PropValue::Double(v)) => {
