@@ -15,18 +15,22 @@ export interface ChannelLogoProps {
   density?: keyof typeof dl.density;
   /** Drop the background plate behind a loaded image (initials fallback keeps its colour). */
   bare?: boolean;
+  /** Fit the image to the space reserved by the parent. */
+  fill?: boolean;
 }
 
-export function ChannelLogo({ channelId, name, src, density, bare }: ChannelLogoProps) {
+export function ChannelLogo({ channelId, name, src, density, bare, fill }: ChannelLogoProps) {
   const current = useUiStore((s) => s.density);
   const [w, h] = dl.density[density ?? current].logo;
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const showImage = !!src && failedSrc !== src;
 
+  const size = fill && showImage ? { width: '100%', height: '100%' } : { width: w, height: h };
+
   return (
     <div
       className={classes.plate}
-      style={showImage ? { width: w, height: h } : { width: w, height: h, background: logoColor(channelId) }}
+      style={showImage ? size : { ...size, background: logoColor(channelId) }}
       data-fallback={showImage ? undefined : 'true'}
       data-bare={bare && showImage ? 'true' : undefined}
     >

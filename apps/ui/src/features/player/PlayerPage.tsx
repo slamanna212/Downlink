@@ -175,7 +175,7 @@ function InfoPanel({ player, sourceName, channel, onClose }: { player: PlayerSta
 function UpNext({ next, channelId }: { next: Programme; channelId: number }) {
   return (
     <div className={classes.upNext}>
-      <ProgrammeArt programmeId={next.id} channelId={channelId} className={classes.upNextArt} />
+      <ProgrammeArt programmeId={next.id} channelId={channelId} className={classes.upNextArt} hideFallback />
       <div className={classes.upNextText}>
         <span className={classes.upNextWhen}>{t('player.upNext', { time: formatClock(next.startUtc) })}</span>
         <span className={classes.upNextTitle}>
@@ -697,7 +697,7 @@ export function PlayerPage() {
             <div className={classes.nowRow}>
               {channel && (
                 <span className={classes.logoTile}>
-                  <ChannelLogo channelId={channel.id} name={channel.name} src={channel.logo} density="compact" bare />
+                  <ChannelLogo channelId={channel.id} name={channel.name} src={channel.logo} density="compact" bare fill />
                 </span>
               )}
               <div className={classes.nowText}>

@@ -629,8 +629,11 @@ impl Service {
         if let Some(u) = x.images.first() {
             return Some(u.clone());
         }
-        let t = self.tmdb_lookup(&airing_lookup(a, &x)).await.title?;
-        t.backdrop.or(t.poster)
+        let found = self.tmdb_lookup(&airing_lookup(a, &x)).await;
+        found.episode.and_then(|e| e.still).or_else(|| {
+            let t = found.title?;
+            t.backdrop.or(t.poster)
+        })
     }
 
     async fn recording_details(&self, id: i64) -> Result<MediaDetailsDto> {

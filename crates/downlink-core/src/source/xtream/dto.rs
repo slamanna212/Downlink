@@ -147,6 +147,7 @@ pub struct EpisodeDto {
     pub episode: i64,
     pub container_extension: Option<String>,
     pub duration_secs: Option<i64>,
+    pub poster: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -182,6 +183,11 @@ impl SeriesInfoDto {
                     .unwrap_or(0),
                 episode: e.get("episode_num").and_then(flex_i64).unwrap_or(0),
                 container_extension: e.get("container_extension").and_then(flex_string),
+                poster: e
+                    .get("info")
+                    .and_then(|i| i.get("movie_image"))
+                    .and_then(flex_string)
+                    .filter(|url| url.starts_with("https://") || url.starts_with("http://")),
                 duration_secs: e
                     .get("info")
                     .and_then(|i| i.get("duration_secs"))
