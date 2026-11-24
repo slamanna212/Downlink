@@ -7,7 +7,7 @@ export const en = {
   'nav.channels': 'Channels',
   'nav.guide': 'Guide',
   'nav.movies': 'Movies',
-  'nav.series': 'Series',
+  'nav.series': 'TV shows',
   'nav.recordings': 'Recordings',
   'nav.settings': 'Settings',
   'nav.updateWaiting': 'Update available',
