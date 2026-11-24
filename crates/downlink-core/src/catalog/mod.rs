@@ -198,6 +198,7 @@ pub struct GroupRow {
     pub id: i64,
     pub source_id: i64,
     pub name: String,
+    pub position: i64,
     /// Visible channels in the group under the same filter.
     pub channel_count: i64,
 }
@@ -206,7 +207,7 @@ pub struct GroupRow {
 pub async fn list_groups(store: &Store, f: &ChannelFilter) -> Result<Vec<GroupRow>> {
     let vis = visibility_sql(f);
     let sql = format!(
-        "SELECT g.id, g.source_id, g.name, count(c.id) AS channel_count
+        "SELECT g.id, g.source_id, g.name, g.position, count(c.id) AS channel_count
          FROM channel_group g JOIN channel c ON c.group_id = g.id AND {vis}
          WHERE (?1 IS NULL OR g.source_id = ?1)
          GROUP BY g.id ORDER BY g.name COLLATE NOCASE"

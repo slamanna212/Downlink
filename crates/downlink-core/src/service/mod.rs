@@ -1418,6 +1418,7 @@ impl Service {
                 id: g.id,
                 source_id: g.source_id,
                 name: g.name,
+                position: g.position,
                 channel_count: g.channel_count,
                 count: g.channel_count,
             })

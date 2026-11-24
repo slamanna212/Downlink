@@ -57,6 +57,7 @@ export interface Group {
   id: number;
   sourceId: number;
   name: string;
+  position: number;
   /** Channels in the group (computed by Rust). */
   count: number;
 }

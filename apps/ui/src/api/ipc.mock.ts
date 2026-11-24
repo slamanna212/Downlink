@@ -76,7 +76,7 @@ export function mockSources(empty: boolean, status: Source['status'] = 'connecte
 }
 
 export function mockGroups(): Group[] {
-  return GROUP_NAMES.map((name, i) => ({ id: i + 1, sourceId: 1, name, count: 0 }));
+  return GROUP_NAMES.map((name, i) => ({ id: i + 1, sourceId: 1, name, position: i, count: 0 }));
 }
 
 /** Inline SVG stand-in for a `dlimg://` logo so the real-logo plate renders in the browser. */
