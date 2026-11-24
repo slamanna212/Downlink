@@ -1,6 +1,6 @@
 {
   "name": "downlink",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "description": "Workspace root. The `version` field is the single source of truth for releases (docs/release.md); CI injects it into tauri.conf.json, Cargo.toml and apps/ui/package.json at build time."
 }
