@@ -20,7 +20,9 @@ I wanted a desktop IPTV player that could take advantage of all Dispatcharr offe
 
 While not required, this app is best used with [Dispatcharr](https://github.com/dispatcharr/dispatcharr).
 
-[Getting Ready Animation](.github/screenshots/first-sync.gif)
+![Getting Ready Animation](.github/screenshots/first-sync.gif)
+
+<img src=".github/screenshots/first-sync.gif" alt="demo">
 
 ## Features
 
