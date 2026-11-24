@@ -357,6 +357,15 @@ pub struct ContinueItemDto {
 pub struct OnNowItemDto {
     pub channel: ChannelDto,
     pub now: Option<ProgrammeDto>,
+    pub next: Option<ProgrammeDto>,
+}
+
+/// Zapping targets around a channel (list order, wrapping).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelNeighboursDto {
+    pub prev: Option<ChannelDto>,
+    pub next: Option<ChannelDto>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -569,6 +578,19 @@ pub struct RecordingDto {
     pub rule_label: Option<String>,
     pub size_bytes: Option<i64>,
     pub error: Option<String>,
+    /// Channel logo URL (same as `ChannelDto::logo`).
+    pub channel_logo: Option<String>,
+    /// Guide programme id (`ProgrammeDto::id`) while the guide still has the airing; used for
+    /// artwork and to start a series rule.
+    pub programme_id: Option<String>,
+    /// Saved watch position, when it is worth resuming.
+    pub position_secs: Option<i64>,
+    /// Length used for "time left": the player's reported duration, else the scheduled length.
+    pub duration_secs: i64,
+    /// Watched to (nearly) the end.
+    pub watched: bool,
+    /// There is something to play: running, completed, or failed with a partial file.
+    pub playable: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

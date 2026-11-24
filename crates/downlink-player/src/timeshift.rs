@@ -60,6 +60,19 @@ pub fn advance_anchor(prev: Option<LiveAnchor>, cache_end: f64, now_ms: i64) -> 
     a
 }
 
+/// Longest join latency accepted as "live": anything beyond this is not the server's join burst.
+pub const MAX_JOIN_LAG_SECS: f64 = 30.0;
+
+/// Join latency: how far behind the cache end playback runs right after a live tune. The server
+/// sends its back-buffer as a burst and mpv starts at the oldest byte of it, so the playhead begins
+/// this far behind the newest data even though nothing was missed. Measured over a short window
+/// after the first frame and only ever grows (the burst may still be landing), capped at
+/// [`MAX_JOIN_LAG_SECS`].
+pub fn join_lag(prev: Option<f64>, cache_end: f64, position: f64) -> f64 {
+    let lag = (cache_end - position).clamp(0.0, MAX_JOIN_LAG_SECS);
+    prev.map_or(lag, |p| p.max(lag))
+}
+
 /// Wall-clock UTC seconds of media time `t`.
 pub fn media_to_utc(a: LiveAnchor, t: f64) -> f64 {
     a.utc_ms as f64 / 1000.0 - (a.media_secs - t)
@@ -108,6 +121,17 @@ mod tests {
         assert_eq!(advance_anchor(Some(a), 15.0, 1_005_000), a);
         // Stall: 10 s later, no new media.
         assert_eq!(advance_anchor(Some(a), 15.0, 1_010_000), a);
+    }
+
+    #[test]
+    fn join_lag_grows_and_is_capped() {
+        assert_eq!(join_lag(None, 14.0, 0.0), 14.0);
+        // Burst still landing: grows.
+        assert_eq!(join_lag(Some(14.0), 20.0, 2.0), 18.0);
+        // Never shrinks inside the window.
+        assert_eq!(join_lag(Some(18.0), 21.0, 5.0), 18.0);
+        assert_eq!(join_lag(None, 100.0, 0.0), MAX_JOIN_LAG_SECS);
+        assert_eq!(join_lag(None, 1.0, 3.0), 0.0);
     }
 
     #[test]

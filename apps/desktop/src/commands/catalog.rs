@@ -150,6 +150,15 @@ pub async fn find_channel_number(
     state.svc().await?.find_channel_number(number).await
 }
 
+/// Previous/next channel in list order for zapping (wraps). Catalog only, never plays.
+#[tauri::command]
+pub async fn channel_neighbours(
+    state: State<'_, AppState>,
+    channel_id: i64,
+) -> CmdResult<downlink_core::service::ChannelNeighboursDto> {
+    state.svc().await?.channel_neighbours(channel_id).await
+}
+
 #[tauri::command]
 pub async fn get_programme_window(
     state: State<'_, AppState>,

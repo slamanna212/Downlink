@@ -24,6 +24,8 @@ const MAX_NESTING: usize = 64;
 const MAX_XML_NAME_BYTES: usize = 1024;
 const MAX_CHANNEL_METADATA: usize = 32 * 1024 * 1024;
 const MAX_PROGRAMMES: u64 = 2_000_000;
+/// Longer icon URLs are dropped (they would only bloat the database).
+const MAX_ICON_URL: usize = 2048;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct XmltvChannel {
@@ -42,6 +44,8 @@ pub struct XmltvProgramme {
     pub season: Option<i64>,
     pub episode: Option<i64>,
     pub flags: i64,
+    /// First http(s) `<icon src>` of the programme.
+    pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -379,6 +383,14 @@ fn try_parse_programmes(
                         }
                         _ => {}
                     },
+                    "icon" => {
+                        if let Some(c) = cur.as_mut().filter(|c| c.icon.is_none()) {
+                            c.icon = attr(e, "src")
+                                .map(|s| s.trim().to_owned())
+                                .filter(|s| s.starts_with("https://") || s.starts_with("http://"))
+                                .filter(|s| s.len() <= MAX_ICON_URL);
+                        }
+                    }
                     "new" => {
                         if let Some(c) = cur.as_mut() {
                             c.flags |= flags::NEW;

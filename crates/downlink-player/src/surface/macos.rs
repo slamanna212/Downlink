@@ -16,9 +16,12 @@
 //! - `attach(parent)`: `parent` is the `NSWindow*`. Find the `WKWebView` among the content view's
 //!   subviews and insert an `NSOpenGLView` (core 3.2, best-resolution surface) below it.
 //! - Rendering is driven by mpv's update callback: hop to the main thread, make the slot's context
-//!   current, `mpv_render_context_render` into the bound FBO, `flushBuffer`. While more than one
-//!   surface is attached, renders do not block for the frame's target time (one blocking render
-//!   on the main thread starves the other tiles).
+//!   current, `mpv_render_context_render` into the bound FBO, `flushBuffer`. The main thread also
+//!   runs the webview and IPC, so a draw must never wait there: callbacks are coalesced (at most
+//!   one draw queued per slot), a draw only renders when mpv has a new frame, renders never block
+//!   for the frame's target time, and the context has no swap interval (the view is layer-backed,
+//!   so Core Animation composites it tear-free). Blocking there can back up mpv's video output,
+//!   which in turn stops the demuxer reading the network (live TS dropped, HLS stalled on macOS).
 //! - `set_bounds`: physical pixels -> points (`scale`), y flipped for AppKit's bottom-left origin.
 //! - Screen change / resize: `NSWindowDidChangeScreenNotification` (this window) and
 //!   `NSViewFrameDidChangeNotification` (this slot's view) call `-[NSOpenGLContext update]` and
@@ -31,7 +34,7 @@ use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
 use std::ptr::NonNull;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use block2::RcBlock;
 use libloading::Library;
@@ -82,14 +85,6 @@ struct State {
     observers: Vec<Retained<AnyObject>>,
 }
 
-/// More than one surface is attached (multiview). Renders then must not block for the frame's
-/// target time: all surfaces render on the main thread, and one blocking render starves the rest.
-static SURFACES: AtomicU64 = AtomicU64::new(0);
-
-fn multi_active() -> bool {
-    SURFACES.load(Ordering::Relaxed) > 1
-}
-
 thread_local! {
     static STATE: RefCell<HashMap<u32, State>> = RefCell::new(HashMap::new());
 }
@@ -108,6 +103,8 @@ pub struct MacSurface {
     engine: Arc<Engine>,
     dispatch: MainThreadDispatch,
     frames: Arc<AtomicU64>,
+    /// A draw for this slot is queued on the main thread (coalesces mpv's update callbacks).
+    pending: Arc<AtomicBool>,
     slot: u32,
 }
 
@@ -123,6 +120,7 @@ impl MacSurface {
             engine,
             dispatch,
             frames: Arc::new(AtomicU64::new(0)),
+            pending: Arc::new(AtomicBool::new(false)),
             slot,
         }
     }
@@ -149,6 +147,7 @@ fn create_render(
     loader: &GlLoader,
     dispatch: &MainThreadDispatch,
     frames: &Arc<AtomicU64>,
+    pending: &Arc<AtomicBool>,
     slot: u32,
 ) -> Result<RenderContext, PlayerError> {
     // SAFETY: the caller made the slot's GL context current; `loader` lives in the slot's `State`
@@ -163,30 +162,44 @@ fn create_render(
     };
     let dispatch = dispatch.clone();
     let frames = frames.clone();
+    let pending = pending.clone();
     rc.set_update_callback(move || {
+        // One queued draw per slot: it reads mpv's newest state when it runs, so further
+        // callbacks before then add nothing but main-thread work.
+        if pending.swap(true, Ordering::AcqRel) {
+            return;
+        }
         let frames = frames.clone();
-        dispatch(Box::new(move || draw(slot, &frames)));
+        let pending = pending.clone();
+        dispatch(Box::new(move || {
+            // Cleared before rendering: a callback during this draw queues the next one.
+            pending.store(false, Ordering::Release);
+            draw(slot, &frames, false);
+        }));
     });
     Ok(rc)
 }
 
-/// Draw one frame for `slot`. Main thread only.
-fn draw(slot: u32, frames: &AtomicU64) {
+/// Draw `slot` if mpv has a new frame, or unconditionally with `force` (resize, screen change,
+/// new render context). Never waits: see the module docs. Main thread only.
+fn draw(slot: u32, frames: &AtomicU64, force: bool) {
     with_slot_state(slot, |st| {
         let render = st.render.borrow();
         let Some(rc) = render.as_ref() else { return };
+        if !rc.update() && !force {
+            return;
+        }
         // SAFETY: Objective-C messages to live objects retained in `State`, on the main thread.
         unsafe {
             let _: () = msg_send![&*st.gl_context, makeCurrentContext];
             let bounds: NSRect = msg_send![&*st.gl_view, bounds];
             let backing: NSRect = msg_send![&*st.gl_view, convertRectToBacking: bounds];
             let (w, h) = (backing.size.width as i32, backing.size.height as i32);
-            rc.update();
             let mut fbo: i32 = 0;
             if let Some(f) = st.gl_get {
                 f(GL_FRAMEBUFFER_BINDING, &mut fbo);
             }
-            if let Err(e) = rc.render(fbo, w, h, true, !multi_active()) {
+            if let Err(e) = rc.render(fbo, w, h, true, false) {
                 tracing::warn!("mpv render failed: {e}");
             }
             rc.report_swap();
@@ -194,6 +207,38 @@ fn draw(slot: u32, frames: &AtomicU64) {
         }
         frames.fetch_add(1, Ordering::Relaxed);
     });
+}
+
+/// Depth-first search for the webview under `view` (inclusive). wry wraps it: the window's
+/// content view is a `WryWebViewParent` holding a `WryWebView` (a `WKWebView` subclass), so match
+/// by `isKindOfClass:` rather than by class name, at any depth. Main thread only.
+///
+/// # Safety
+/// `view` must be a live `NSView`.
+unsafe fn find_webview(
+    view: &AnyObject,
+    wk_class: &AnyClass,
+    depth: u32,
+) -> Option<Retained<AnyObject>> {
+    // SAFETY: messages to live NSViews on the main thread (caller contract).
+    unsafe {
+        let is_wk: Bool = msg_send![view, isKindOfClass: wk_class];
+        if is_wk.as_bool() {
+            return Retained::retain((view as *const AnyObject).cast_mut());
+        }
+        if depth >= 8 {
+            return None;
+        }
+        let subviews: Retained<AnyObject> = msg_send![view, subviews];
+        let count: usize = msg_send![&*subviews, count];
+        for i in 0..count {
+            let v: Retained<AnyObject> = msg_send![&*subviews, objectAtIndex: i];
+            if let Some(found) = find_webview(&v, wk_class, depth + 1) {
+                return Some(found);
+            }
+        }
+        None
+    }
 }
 
 fn update_context(slot: u32) {
@@ -220,19 +265,11 @@ impl VideoSurface for MacSurface {
             let content: Option<Retained<AnyObject>> = msg_send![window, contentView];
             let content =
                 content.ok_or_else(|| PlayerError::Surface("window has no content view".into()))?;
-            let subviews: Retained<AnyObject> = msg_send![&*content, subviews];
-            let count: usize = msg_send![&*subviews, count];
-            let mut webview: Option<Retained<AnyObject>> = None;
-            for i in 0..count {
-                let v: Retained<AnyObject> = msg_send![&*subviews, objectAtIndex: i];
-                let cls_name: Retained<NSString> = msg_send![&*v, className];
-                if cls_name.to_string().contains("WKWebView") {
-                    webview = Some(v);
-                    break;
-                }
-            }
-            let webview =
-                webview.ok_or_else(|| PlayerError::Surface("no WKWebView found".into()))?;
+            let wk_class = class(c"WKWebView")?;
+            let webview = find_webview(&content, wk_class, 0).ok_or_else(|| {
+                let cls: Retained<NSString> = msg_send![&*content, className];
+                PlayerError::Surface(format!("no WKWebView found under {cls}"))
+            })?;
 
             // Core 3.2, double buffered, accelerated.
             let attrs: [u32; 7] = [99, 0x3200, 5, 73, 0, 0, 0];
@@ -251,7 +288,8 @@ impl VideoSurface for MacSurface {
             let _: () = msg_send![&*gl_view, setPostsFrameChangedNotifications: Bool::YES];
             let gl_context: Retained<AnyObject> = msg_send![&*gl_view, openGLContext];
             let _: () = msg_send![&*gl_context, makeCurrentContext];
-            let swap_interval: i32 = 1;
+            // No vsync wait in `flushBuffer` on the main thread (module docs).
+            let swap_interval: i32 = 0;
             let _: () = msg_send![&*gl_context, setValues: &swap_interval, forParameter: 222isize];
 
             // Below the webview, same container. Tiles never overlap each other.
@@ -271,8 +309,14 @@ impl VideoSurface for MacSurface {
                 }
             };
             let loader = Box::new(GlLoader { lib });
-            let rc = match create_render(&self.engine, &loader, &self.dispatch, &self.frames, slot)
-            {
+            let rc = match create_render(
+                &self.engine,
+                &loader,
+                &self.dispatch,
+                &self.frames,
+                &self.pending,
+                slot,
+            ) {
                 Ok(rc) => rc,
                 Err(e) => {
                     let _: () = msg_send![&*gl_view, removeFromSuperview];
@@ -299,7 +343,7 @@ impl VideoSurface for MacSurface {
                 let frames = self.frames.clone();
                 let block = RcBlock::new(move |_n: *mut AnyObject| {
                     update_context(slot);
-                    draw(slot, &frames);
+                    draw(slot, &frames, true);
                 });
                 let obs: Retained<AnyObject> = msg_send![
                     &*center,
@@ -311,7 +355,6 @@ impl VideoSurface for MacSurface {
                 observers.push(obs);
             }
 
-            SURFACES.fetch_add(1, Ordering::Relaxed);
             STATE.with(|s| {
                 s.borrow_mut().insert(
                     slot,
@@ -336,6 +379,7 @@ impl VideoSurface for MacSurface {
         let slot = self.slot;
         let dispatch = self.dispatch.clone();
         let frames = self.frames.clone();
+        let pending = self.pending.clone();
         (self.dispatch)(Box::new(move || {
             with_slot_state(slot, |st| {
                 // SAFETY: message to the retained NSOpenGLContext on the main thread.
@@ -344,12 +388,12 @@ impl VideoSurface for MacSurface {
                 }
                 // Dropping frees the old render context with the GL context current.
                 *st.render.borrow_mut() = None;
-                match create_render(&engine, &st.loader, &dispatch, &frames, slot) {
+                match create_render(&engine, &st.loader, &dispatch, &frames, &pending, slot) {
                     Ok(rc) => *st.render.borrow_mut() = Some(rc),
                     Err(e) => tracing::error!("mpv_render_context_create failed: {e}"),
                 }
             });
-            draw(slot, &frames);
+            draw(slot, &frames, true);
         }));
     }
 
@@ -389,7 +433,6 @@ impl VideoSurface for MacSurface {
         let Some(st) = STATE.with(|s| s.borrow_mut().remove(&self.slot)) else {
             return;
         };
-        SURFACES.fetch_sub(1, Ordering::Relaxed);
         // SAFETY: main-thread messages to retained objects; the render context is freed with the
         // GL context current, then the view leaves the hierarchy.
         unsafe {

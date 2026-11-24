@@ -175,7 +175,14 @@ pub fn timeline(snap: &PlayerSnapshot, info: &SessionInfo, now: f64) -> Option<T
                         .seek_range
                         .filter(|_| info.timeshift)
                         .map(|(s, _)| media_to_utc(a, s.min(p)));
-                    (media_to_utc(a, p), media_to_utc(a, edge), start)
+                    // The live edge sits where the stream joined, not at the cache end: the server's
+                    // join burst puts playback that far behind the newest data from the first frame,
+                    // and that is "live". Go live lands `LIVE_CUSHION_SECS` before this edge, so the
+                    // edge is the join point plus the cushion.
+                    let join = (snap.join_lag_secs.unwrap_or(0.0) - LIVE_CUSHION_SECS).max(0.0);
+                    let playhead = media_to_utc(a, p);
+                    let edge = (media_to_utc(a, edge) - join).max(playhead);
+                    (playhead, edge, start)
                 }
                 _ => (now, now, None),
             };
@@ -231,8 +238,8 @@ pub fn seek_route(
 ) -> SeekRoute {
     if utc >= tl.live_edge_utc - LIVE_CUSHION_SECS {
         return match (info.mode, snap.live_anchor, snap.seek_range) {
-            (Some(PlayMode::Live), Some(a), Some((_, end))) if info.timeshift => {
-                let target = utc_to_media(a, media_to_utc(a, end) - LIVE_CUSHION_SECS);
+            (Some(PlayMode::Live), Some(a), Some(_)) if info.timeshift => {
+                let target = utc_to_media(a, tl.live_edge_utc - LIVE_CUSHION_SECS);
                 // Already inside the cushion: stay put rather than jump back.
                 match snap.position_secs {
                     Some(p) if p >= target => SeekRoute::Media(p),
@@ -453,6 +460,43 @@ mod tests {
         assert_eq!(tl.buffer_start_utc, Some(NOW - 600.0));
         assert_eq!(tl.archive_start_utc, None);
         assert_eq!(tl.source, "buffer");
+    }
+
+    #[test]
+    fn join_burst_counts_as_live() {
+        // Just tuned: the server's 14 s back-buffer burst put playback 14 s behind the cache end.
+        let snap = PlayerSnapshot {
+            mode: Some(PlayMode::Live),
+            position_secs: Some(0.0),
+            seek_range: Some((0.0, 14.0)),
+            live_anchor: Some(LiveAnchor {
+                media_secs: 14.0,
+                utc_ms: (NOW * 1000.0) as i64,
+            }),
+            join_lag_secs: Some(14.0),
+            ..PlayerSnapshot::default()
+        };
+        let info = SessionInfo {
+            channel_id: Some(1),
+            mode: Some(PlayMode::Live),
+            timeshift: true,
+            ..SessionInfo::default()
+        };
+        let tl = timeline(&snap, &info, NOW).unwrap_or_else(|| panic!("timeline"));
+        assert_eq!(tl.behind_live_secs, LIVE_CUSHION_SECS);
+        assert_eq!(tl.source, "live");
+        // Go live returns to the join point, not the bare cache end.
+        assert_eq!(
+            seek_route(&snap, &info, &tl, None, tl.live_edge_utc),
+            SeekRoute::Media(0.0)
+        );
+        // Paused 60 s later: 60 s behind live.
+        let later = PlayerSnapshot {
+            seek_range: Some((0.0, 74.0)),
+            ..snap
+        };
+        let tl = timeline(&later, &info, NOW + 60.0).unwrap_or_else(|| panic!("timeline"));
+        assert_eq!(tl.behind_live_secs, 60.0 + LIVE_CUSHION_SECS);
     }
 
     #[test]

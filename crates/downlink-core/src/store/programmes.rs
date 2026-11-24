@@ -15,6 +15,8 @@ pub struct ProgrammeRow {
     pub season: Option<i64>,
     pub episode: Option<i64>,
     pub flags: i64,
+    /// Artwork URL from the guide (XMLTV `<icon>`), if any.
+    pub icon: Option<String>,
 }
 
 impl Store {
@@ -24,7 +26,7 @@ impl Store {
         start_utc: i64,
     ) -> Result<Option<ProgrammeRow>> {
         Ok(sqlx::query_as(
-            "SELECT channel_id, start_utc, end_utc, ext_id, title, subtitle, description, season, episode, flags
+            "SELECT channel_id, start_utc, end_utc, ext_id, title, subtitle, description, season, episode, flags, icon
              FROM programme WHERE channel_id = ? AND start_utc = ?",
         )
         .bind(channel_id)
@@ -49,7 +51,7 @@ impl Store {
         for chunk in rows.chunks(90) {
             let mut query = QueryBuilder::<Sqlite>::new(
                 "INSERT INTO programme (channel_id, start_utc, end_utc, ext_id, title, subtitle,
-                                        description, season, episode, flags) ",
+                                        description, season, episode, flags, icon) ",
             );
             query.push_values(chunk, |mut b, p| {
                 b.push_bind(p.channel_id)
@@ -61,17 +63,21 @@ impl Store {
                     .push_bind(&p.description)
                     .push_bind(p.season)
                     .push_bind(p.episode)
-                    .push_bind(p.flags);
+                    .push_bind(p.flags)
+                    .push_bind(&p.icon);
             });
             query.push(
                 " ON CONFLICT(channel_id, start_utc) DO UPDATE SET
                    end_utc = excluded.end_utc, ext_id = excluded.ext_id, title = excluded.title,
                    subtitle = excluded.subtitle, description = excluded.description,
-                   season = excluded.season, episode = excluded.episode, flags = excluded.flags
+                   season = excluded.season, episode = excluded.episode, flags = excluded.flags,
+                   icon = excluded.icon
                  WHERE (programme.end_utc, programme.ext_id, programme.title, programme.subtitle,
-                        programme.description, programme.season, programme.episode, programme.flags)
+                        programme.description, programme.season, programme.episode, programme.flags,
+                        programme.icon)
                     IS NOT (excluded.end_utc, excluded.ext_id, excluded.title, excluded.subtitle,
-                            excluded.description, excluded.season, excluded.episode, excluded.flags)",
+                            excluded.description, excluded.season, excluded.episode, excluded.flags,
+                            excluded.icon)",
             );
             changed += query
                 .build()

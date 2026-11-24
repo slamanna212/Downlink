@@ -27,8 +27,7 @@ pub struct NowNext {
     pub next: Option<ProgrammeRow>,
 }
 
-const PCOLS: &str =
-    "channel_id, start_utc, end_utc, ext_id, title, subtitle, description, season, episode, flags";
+const PCOLS: &str = "channel_id, start_utc, end_utc, ext_id, title, subtitle, description, season, episode, flags, icon";
 
 /// Now/next for one channel: `start <= now < end`, and the first programme starting at/after that
 /// one ends (or after `now` when nothing is airing).
@@ -128,6 +127,7 @@ fn to_row(channel_id: i64, p: &Programme) -> ProgrammeRow {
         season: p.season,
         episode: p.episode,
         flags: p.flags,
+        icon: None,
     }
 }
 

@@ -13,8 +13,8 @@
 }
 
 .brandMark {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -73,6 +73,14 @@
   background: var(--dl-notice);
   box-shadow: 0 0 0 2px var(--dl-surface-1);
 }
+/* Recordings: the glyph's record dot turns live red while anything records (DESIGN §2, status mark). */
+.icon [data-rec-dot] { transition: fill 120ms var(--dl-ease); }
+.item[data-recording] .icon [data-rec-dot] { fill: var(--dl-live); }
+
+@media (prefers-reduced-motion: reduce) {
+  .icon [data-rec-dot] { transition: none; }
+}
+
 .item[data-active] .noticeDot { box-shadow: 0 0 0 2px var(--dl-surface-3); }
 
 /* collapsed: icon only, centred */
@@ -150,3 +158,10 @@
   color: var(--dl-text-dim);
   line-height: 1.3;
 }
+
+/* macOS: the native traffic lights sit in the rail's top-left corner (overlay title bar). Like other Mac
+   apps, the rail keeps a clear 36 px strip for them and starts below it. */
+.rail[data-mac] { padding-top: 0; }
+.macLights { height: 36px; flex: none; margin: 0 calc(var(--mantine-spacing-sm) * -1); }
+.brandGroup { min-width: 0; }
+.collapseBtn { display: inline-flex; }

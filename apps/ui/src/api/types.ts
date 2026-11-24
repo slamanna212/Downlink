@@ -485,6 +485,7 @@ export interface ContinueItem {
 export interface OnNowItem {
   channel: Channel;
   now: Programme | null;
+  next: Programme | null;
 }
 
 export interface HomeData {
@@ -605,6 +606,18 @@ export interface Recording {
   sizeBytes: number | null;
   /** Failure reason (one sentence) when status is failed. */
   error: string | null;
+  /** Channel logo URL, when the channel has one. */
+  channelLogo: string | null;
+  /** Guide programme id while the guide still has the airing (artwork, Record series). */
+  programmeId: string | null;
+  /** Saved watch position, when it is worth resuming. */
+  positionSecs: number | null;
+  /** Length for "time left": the player's duration, else the scheduled length. */
+  durationSecs: number;
+  /** Watched to (nearly) the end. */
+  watched: boolean;
+  /** Something to play: running, completed, or failed with a partial file. */
+  playable: boolean;
 }
 
 export interface RecordingsData {

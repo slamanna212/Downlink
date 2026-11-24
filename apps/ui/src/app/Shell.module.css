@@ -77,3 +77,16 @@
 @media (prefers-reduced-motion: reduce) {
   .route { transform: none; }
 }
+
+/* Content column: the title bar strip plus the routed page. */
+.content {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.content > .main { flex: 1; min-height: 0; height: auto; }
+/* A status banner on a hero route sits below the strip. */
+.content[data-under-bar] .banner { padding-top: calc(var(--mantine-spacing-sm) + 2.25rem); }

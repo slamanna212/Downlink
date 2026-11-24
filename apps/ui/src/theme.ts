@@ -35,13 +35,15 @@ const dlOther = {
     motion: { fast: 120, base: 160, route: 240, videoFade: 200, ease: 'cubic-bezier(0.2, 0, 0, 1)' },
     controlsIdleMs: 3000,
     previewDwellMs: 300,
-    layout: { railExpanded: 224, railCollapsed: 68, railTv: 96, groupSidebar: 220, settingsNav: 240, infoPanel: 380 },
+    layout: { railExpanded: 224, railCollapsed: 68, railTv: 96, groupSidebar: 220, settingsNav: 240, infoPanel: 380, titleBar: 36, windowButton: 46, macLights: 76, homeHero: 460, guideHero: 288 },
+    /** Channel-change overlay (player): fades this long after the last zap or digit. */
+    zapOverlayMs: 3000,
     density: {
       compact: { channelRow: 44, guideRow: 48, logo: [48, 24] as [number, number], control: 32 },
       comfortable: { channelRow: 64, guideRow: 64, logo: [72, 36] as [number, number], control: 36 },
       tv: { channelRow: 88, guideRow: 96, logo: [112, 56] as [number, number], control: 56, typeScale: 1.25, focusRing: 3 },
     },
-    guide: { channelColumn: 180, headerHeight: 40, tickMinutes: 30 },
+    guide: { channelColumn: 200, headerHeight: 40, tickMinutes: 30 },
     multiview: { maxTiles: 4, maxTilesCapable: 9, tileGap: 4, layouts: ['2-up', '2x2', '1+3', '3x3'] as const },
     buttonSizes: {
       xs: { h: 28, fz: 12, px: 10, icon: 14, gap: 6, r: 4 },
@@ -151,6 +153,12 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-focus-ring-video': focusRingVideo,
     // third-party brand: Plex mark only (DESIGN §2)
     '--dl-plex': '#E5A00D',
+    // first-sync Uplink scene only (DESIGN §12): the app icon's night sky, sparkles and planet shades
+    '--dl-uplink-night': '#120A33',
+    '--dl-uplink-mount': '#5442B8',
+    '--dl-uplink-crater': '#6C57E0',
+    '--dl-sparkle-cyan': '#7FE3E0',
+    '--dl-sparkle-blue': '#9CC8FF',
     // video
     '--dl-on-video': '#F3F6F9',
     '--dl-scrim': 'linear-gradient(to top, rgb(5 6 7 / 0.92), rgb(5 6 7 / 0.6) 55%, rgb(5 6 7 / 0))',
@@ -162,6 +170,15 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-tile-btn': 'rgb(12 14 17 / 0.78)',          // multiview tile actions: solid enough to read on any picture
     '--dl-tile-btn-hover': 'rgb(32 37 43 / 0.9)',
     '--dl-tile-btn-pressed': 'rgb(44 50 58 / 0.92)',
+    // player overlay (DESIGN §8): heavier bottom scrim, light top scrim under the title bar
+    '--dl-player-scrim': 'linear-gradient(to top, rgb(5 6 7 / 0.94), rgb(5 6 7 / 0.8) 45%, rgb(5 6 7 / 0))',
+    '--dl-player-top-scrim': 'linear-gradient(to bottom, rgb(5 6 7 / 0.7), rgb(5 6 7 / 0))',
+    '--dl-tile-scrim': 'linear-gradient(to top, rgb(5 6 7 / 0.85), rgb(5 6 7 / 0))', // guide mini player controls
+    // window chrome
+    '--dl-titlebar-close': '#E5484D', // close button hover only
+    '--dl-on-titlebar-close': '#FFFFFF',
+    '--dl-scrollbar-thumb': 'rgb(232 236 241 / 0.22)',
+    '--dl-scrollbar-thumb-hover': 'rgb(232 236 241 / 0.36)',
     '--dl-ease': 'cubic-bezier(0.2, 0, 0, 1)',
   },
   light: {},
@@ -185,6 +202,9 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-guide-past': '#161A1F',
     '--dl-guide-now': '#222830',
     '--dl-guide-future': '#191D22',
+    '--dl-guide-focus': '#2A3140', // focused guide block (no ring)
+    // heroes (home, guide): fade programme art into surface-0 from the left, bottom and top
+    '--dl-hero-scrim': 'linear-gradient(90deg, #0C0E11 0%, rgb(12 14 17 / 0.85) 35%, rgb(12 14 17 / 0) 70%), linear-gradient(0deg, #0C0E11 0%, rgb(12 14 17 / 0) 45%), linear-gradient(180deg, rgb(12 14 17 / 0.55) 0%, rgb(12 14 17 / 0) 18%)',
     '--dl-letterbox': '#08090B',
     '--dl-multiview-canvas': '#050607',
   },

@@ -87,6 +87,7 @@ async fn world() -> World {
             season: Some(2),
             episode: Some(5),
             flags: 0,
+            icon: None,
         }])
         .await
         .unwrap();
@@ -309,4 +310,50 @@ async fn a_rejected_key_is_not_saved() {
         .unwrap_err();
     assert!(!e.message.contains("wrongkey"));
     assert!(!w.svc.tmdb_status().await.unwrap().configured);
+}
+
+#[tokio::test]
+async fn programme_art_prefers_the_guide_icon_then_the_server_and_caches_the_pick() {
+    let w = world().await;
+    let id = format!("{}:{START}", w.channel_id);
+    // No guide icon: the server's programme detail supplies the picture (fetched once, cached).
+    let first = w.svc.programme_art(&id).await.unwrap();
+    assert!(first.as_deref().unwrap().starts_with("dlimg://"));
+    let again = w.svc.programme_art(&id).await.unwrap();
+    assert_eq!(first, again, "second view answered from the cache");
+
+    // A guide icon wins without any lookup.
+    w.store
+        .upsert_programmes(&[ProgrammeRow {
+            channel_id: w.channel_id,
+            start_utc: START + 3600,
+            end_utc: START + 7200,
+            ext_id: None,
+            title: Some("Synthetic Late Show".into()),
+            subtitle: None,
+            description: None,
+            season: None,
+            episode: None,
+            flags: 0,
+            icon: Some("https://img.example.test/late.jpg".into()),
+        }])
+        .await
+        .unwrap();
+    let icon = w
+        .svc
+        .programme_art(&format!("{}:{}", w.channel_id, START + 3600))
+        .await
+        .unwrap();
+    assert!(icon.as_deref().unwrap().starts_with("dlimg://"));
+    assert_ne!(icon, first);
+
+    // Unknown programme: no art, no error.
+    assert_eq!(
+        w.svc
+            .programme_art(&format!("{}:1", w.channel_id))
+            .await
+            .unwrap(),
+        None
+    );
+    let _ = w.source_id;
 }

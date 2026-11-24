@@ -338,6 +338,7 @@ async fn m3u_catchup_template_path_has_no_session_and_uses_the_programme_row() {
             season: None,
             episode: None,
             flags: 0,
+            icon: None,
         }])
         .await
         .unwrap();
@@ -465,6 +466,7 @@ async fn xtream_add_sync_play_and_timeshift_catchup() {
             season: None,
             episode: None,
             flags: 0,
+            icon: None,
         }])
         .await
         .unwrap();
@@ -747,6 +749,7 @@ async fn credentialed_playlist_is_templated_in_sqlite_and_resolved_from_the_keyc
             season: None,
             episode: None,
             flags: 0,
+            icon: None,
         }])
         .await
         .unwrap();
@@ -929,6 +932,7 @@ http://iptv.test/live/testuser/testpass/4.ts\n";
                 season: None,
                 episode: None,
                 flags: 0,
+                icon: None,
             }])
             .await
             .unwrap();

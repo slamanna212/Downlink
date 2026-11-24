@@ -323,11 +323,15 @@ export function createMockBackend(): Backend {
       return impl.play_catchup({ programmeId: nn.id });
     },
     schedule_recording: ({ programmeId, kind }) => {
+      if (kind === 'series' && vod.seriesFromRecording(nowSec(), programmeId)) {
+        emit('catalog://updated', { scope: 'recordings', sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
+        return null;
+      }
       scheduled.add(programmeId);
       const [cid] = programmeId.split(':').map(Number);
       const p = genProgrammes(cid ?? 0, 0, 4e9, scheduled).find((x) => x.id === programmeId);
       const ch = channels.find((c) => c.id === cid);
-      if (p && ch) vod.addRecording(nowSec(), { title: p.title ?? ch.name, subtitle: p.subtitle, description: p.description, season: p.season, episode: p.episode, channelId: ch.id, channelName: ch.name, startUtc: p.startUtc, endUtc: p.endUtc }, kind === 'series');
+      if (p && ch) vod.addRecording(nowSec(), { title: p.title ?? ch.name, subtitle: p.subtitle, description: p.description, season: p.season, episode: p.episode, channelId: ch.id, channelName: ch.name, programmeId: p.id, startUtc: p.startUtc, endUtc: p.endUtc }, kind === 'series');
       emit('catalog://updated', { scope: 'recordings', sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
       return null;
     },
@@ -343,7 +347,7 @@ export function createMockBackend(): Backend {
           ...(cu ? [{ kind: 'catchup' as const, id: `catchup:${nnOf(cu).now?.id ?? `${cu.id}:${nowSec() - 3600}`}`, channel: cu, programme: null, title: 'Fieldwork S2 E3', subtitle: `${cu.name} · Yesterday 21:00`, art: null, progress: 0.5, remainingSecs: 1800 }] : []),
         ],
         favourites: favs,
-        onNow: favs.map((c) => ({ channel: c, now: nnOf(c).now })),
+        onNow: favs.map((c) => ({ channel: c, now: nnOf(c).now, next: nnOf(c).next })),
         recents: channels.slice(1, 6),
       };
     },
@@ -423,9 +427,10 @@ export function createMockBackend(): Backend {
     play_recording: ({ id }) => {
       const r = vod.getRecording(id);
       if (!r) throw appError('stream', 'That recording is gone. It may have been deleted.');
+      if (!r.playable) throw appError('stream', 'There is nothing to watch for that recording yet.');
       const live = r.status === 'recording';
       const dur = (live ? nowSec() : r.endUtc) - r.startUtc;
-      setPlayer({ state: 'Resolving', mode: 'recording', channelId: r.channelId, programme: null, title: r.title, mediaId: id, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: null, error: null });
+      setPlayer({ state: 'Resolving', mode: 'recording', channelId: r.channelId, programme: null, title: r.title, mediaId: id, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: r.positionSecs, error: null });
       seekableTicker('recording');
       return null;
     },
@@ -483,8 +488,23 @@ export function createMockBackend(): Backend {
       return { channels: 544, groups: 9, programmes: 15098, serverVersion: input.kind === 'dispatcharr' ? '0.32.0' : null, user: 'demo' };
     },
     add_source: async (input) => {
-      await wait(300);
       const id = Math.max(0, ...sources.map((s) => s.id)) + 1;
+      // The first sync's progress, in the core's shape: a marker per phase, then counts.
+      emit('task://progress', { sourceId: id, phase: 'connect', done: 0, total: 4 });
+      await wait(700);
+      emit('task://progress', { sourceId: id, phase: 'channels', done: 1, total: 4 });
+      for (let n = 100; n <= 544; n += 111) {
+        await wait(350);
+        emit('task://progress', { sourceId: id, phase: 'channels', done: Math.min(n, 544), total: 544 });
+      }
+      emit('task://progress', { sourceId: id, phase: 'guide', done: 2, total: 4 });
+      for (let n = 2000; n <= 15098; n += 2600) {
+        await wait(450);
+        emit('task://progress', { sourceId: id, phase: 'guide', done: n, total: 0 });
+      }
+      emit('task://progress', { sourceId: id, phase: 'state', done: 3, total: 4 });
+      await wait(500);
+      emit('task://progress', { sourceId: id, phase: 'done', done: 4, total: 4 });
       const src: Source = {
         id, uuid: `mock-source-${id}`, kind: input.kind, name: input.name || 'New source', host: 'demo.invalid',
         caps: Cap.Live | Cap.Epg | Cap.Favourites | (input.kind === 'dispatcharr' ? Cap.Catchup | Cap.Vod | Cap.Dvr : 0),
@@ -664,6 +684,14 @@ export function createMockBackend(): Backend {
         : null;
     },
     media_server_open: () => null,
+    // The mock guide has no artwork: every hero and card shows its gradient fallback.
+    programme_art: () => null,
+    channel_neighbours: ({ channelId }) => {
+      const i = channels.findIndex((c) => c.id === channelId);
+      const n = channels.length;
+      if (i < 0 || n < 2) return { prev: null, next: null };
+      return { prev: channels[(i + n - 1) % n] ?? null, next: channels[(i + 1) % n] ?? null };
+    },
     media_details: async ({ target }) => {
       await wait(250);
       if (target.kind === 'programme') {

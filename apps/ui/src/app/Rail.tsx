@@ -2,14 +2,14 @@ import { Link, useLocation, useNavigate } from 'react-router';
 import { Box, Group, NavLink, Stack, Text, Tooltip } from '@mantine/core';
 import { IconArrowBarLeft } from '@tabler/icons-react';
 import { FocusContext } from '@noriginmedia/norigin-spatial-navigation';
-import { useCaps, useSources, useUpdateWaiting } from '../api/queries';
+import { useCaps, useRecordingsNow, useSources, useUpdateWaiting } from '../api/queries';
 import type { Source, SourceStatus } from '../api/types';
 import { openPalette } from '../lib/palette';
 import { Icon } from '../components/Icon/Icon';
 import { DLIconButton } from '../components/DLIconButton/DLIconButton';
 import { useDLFocusable } from '../lib/spatial';
 import { t } from '../lib/i18n';
-import { modKeyLabel } from '../lib/platform';
+import { isMac, modKeyLabel } from '../lib/platform';
 import { SETTINGS_NAV, visibleNav, type NavEntry } from './nav';
 import classes from './Rail.module.css';
 import logoUrl from '../assets/logo.svg';
@@ -29,14 +29,17 @@ const DOT_CLASS: Record<SourceStatus | 'none', string | undefined> = {
 /**
  * `notice`: a dot on the icon plus a different target, e.g. Settings → Updates while an update waits.
  * The dot is a status dot, so it also changes the accessible name.
+ * `status`: a state carried by the glyph itself (Recordings' record dot turns live red); it only changes
+ * the accessible name and tooltip, not the target.
  */
-function RailItem({ entry, mode, notice }: { entry: NavEntry; mode: RailMode; notice?: { to: string; label: string } }) {
+function RailItem({ entry, mode, notice, status }: { entry: NavEntry; mode: RailMode; notice?: { to: string; label: string }; status?: string }) {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const active = entry.to === '/' ? pathname === '/' : pathname === entry.to || pathname.startsWith(`${entry.to}/`);
   const to = notice?.to ?? entry.to;
   const { ref, focusProps } = useDLFocusable({ onEnterPress: () => (entry.id === 'search' ? openPalette() : void navigate(to)) });
-  const label = notice ? `${t(entry.label)} · ${notice.label}` : t(entry.label);
+  const extra = notice?.label ?? status;
+  const label = extra ? `${t(entry.label)} · ${extra}` : t(entry.label);
   const hint = entry.hint === '#mod' ? modKeyLabel() : entry.hint;
 
   const link = (
@@ -47,7 +50,8 @@ function RailItem({ entry, mode, notice }: { entry: NavEntry; mode: RailMode; no
       active={active}
       onClick={entry.id === 'search' ? (e: React.MouseEvent) => (e.preventDefault(), openPalette()) : undefined}
       aria-current={active ? 'page' : undefined}
-      aria-label={mode === 'collapsed' || notice ? label : undefined}
+      aria-label={mode === 'collapsed' || extra ? label : undefined}
+      data-recording={entry.id === 'recordings' && status ? true : undefined}
       className={classes.item}
       classNames={{ body: classes.itemInner, label: classes.itemLabel, section: classes.section }}
       leftSection={
@@ -98,10 +102,12 @@ function SourceStatus({ source, mode }: { source: Source | undefined; mode: Rail
   );
 }
 
-export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void }) {
+export function Rail({ mode, onToggle, mac = isMac() }: { mode: RailMode; onToggle: () => void; /** macOS layout (Storybook override). */ mac?: boolean }) {
   const { caps } = useCaps();
   const { data: sources } = useSources();
   const updateWaiting = useUpdateWaiting();
+  const recordingNow = useRecordingsNow(caps.dvr);
+  const recStatus = recordingNow > 1 ? t('nav.recordingNowCount', { n: recordingNow }) : recordingNow === 1 ? t('nav.recordingNow') : undefined;
   const { ref, focusKey } = useDLFocusable<object, HTMLDivElement>({ focusKey: 'RAIL', trackChildren: true, saveLastFocusedChild: true });
 
   return (
@@ -111,10 +117,14 @@ export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void 
         aria-label={t('nav.primary')}
         ref={ref}
         className={`${classes.rail} ${mode === 'collapsed' ? classes.collapsed : ''} ${mode === 'tv' ? classes.tv : ''}`}
+        data-mac={mac || undefined}
         h="100%"
       >
-        <Group className={classes.brand} gap="sm" wrap="nowrap" justify={mode === 'expanded' ? 'space-between' : 'center'}>
-          <Group gap="sm" wrap="nowrap">
+        {/* macOS: a clear strip for the traffic lights (overlay title bar), draggable like a title bar. */}
+        {mac && <div className={classes.macLights} data-tauri-drag-region />}
+        {/* Drag region: the window also moves from the brand row. */}
+        <Group className={classes.brand} gap="sm" wrap="nowrap" justify={mode === 'expanded' ? 'space-between' : 'center'} data-tauri-drag-region>
+          <Group gap="sm" wrap="nowrap" className={classes.brandGroup} data-tauri-drag-region>
             <span
               className={classes.brandMark}
               role={mode === 'collapsed' ? 'button' : undefined}
@@ -123,16 +133,18 @@ export function Rail({ mode, onToggle }: { mode: RailMode; onToggle: () => void 
               onClick={mode === 'collapsed' ? onToggle : undefined}
               onKeyDown={mode === 'collapsed' ? (e) => (e.key === 'Enter' || e.key === ' ') && onToggle() : undefined}
             >
-              <img src={logoUrl} alt="" width={24} height={24} draggable={false} />
+              <img src={logoUrl} alt="" width={28} height={28} draggable={false} />
             </span>
             {mode === 'expanded' && <span className={classes.brandName}>{t('app.name')}</span>}
           </Group>
           {mode === 'expanded' && (
-            <DLIconButton label={t('nav.collapse')} icon={IconArrowBarLeft} size="sm" onClick={onToggle} />
+            <span className={classes.collapseBtn}>
+              <DLIconButton label={t('nav.collapse')} icon={IconArrowBarLeft} size="sm" onClick={onToggle} />
+            </span>
           )}
         </Group>
         {visibleNav(caps).map((e) => (
-          <RailItem key={e.id} entry={e} mode={mode} />
+          <RailItem key={e.id} entry={e} mode={mode} status={e.id === 'recordings' ? recStatus : undefined} />
         ))}
         <div className={classes.spacer} />
         <RailItem

@@ -33,14 +33,19 @@ export function freshGuideView(saved: GuideView | null, now: Epoch): GuideView |
 interface ViewState {
   guide: GuideView | null;
   channels: ChannelsView | null;
+  /** Recordings page: the selected show key, or `upcoming` for Coming up. */
+  recordings: string | null;
   saveGuide: (v: GuideView) => void;
   saveChannels: (v: ChannelsView) => void;
+  saveRecordings: (selected: string) => void;
 }
 
 /** Per-page position memory for the session (in memory only): scroll, focus and filters. */
 export const useViewStateStore = create<ViewState>((set) => ({
   guide: null,
   channels: null,
+  recordings: null,
   saveGuide: (guide) => set({ guide }),
   saveChannels: (channels) => set({ channels }),
+  saveRecordings: (recordings) => set({ recordings }),
 }));

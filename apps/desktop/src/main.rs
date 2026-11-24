@@ -185,6 +185,8 @@ macro_rules! handlers {
             commands::mediaserver::media_server_match,
             commands::mediaserver::media_server_open,
             commands::metadata::media_details,
+            commands::metadata::programme_art,
+            commands::catalog::channel_neighbours,
             commands::metadata::tmdb_status,
             commands::metadata::tmdb_set_key,
             commands::metadata::tmdb_clear_key,

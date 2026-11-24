@@ -49,7 +49,7 @@ pub fn resume_key(channel_ext_id: &str, start_utc: i64) -> String {
 
 async fn programme_row(store: &Store, channel_id: i64, start_utc: i64) -> Result<ProgrammeRow> {
     sqlx::query_as(
-        "SELECT channel_id, start_utc, end_utc, ext_id, title, subtitle, description, season, episode, flags
+        "SELECT channel_id, start_utc, end_utc, ext_id, title, subtitle, description, season, episode, flags, icon
          FROM programme WHERE channel_id = ? AND start_utc = ?",
     )
     .bind(channel_id)

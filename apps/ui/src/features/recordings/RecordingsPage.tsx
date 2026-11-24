@@ -1,128 +1,90 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Menu, UnstyledButton } from '@mantine/core';
-import { IconChevronDown, IconRepeat } from '@tabler/icons-react';
+import { TextInput, UnstyledButton } from '@mantine/core';
+import { IconCalendarTime, IconSearch } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
-import { invalidateRecordings, useCaps, useOffline } from '../../api/queries';
-import type { Recording, RecordingRule } from '../../api/types';
-import { DLButton } from '../../components/DLButton/DLButton';
+import { invalidateRecordings, useCaps, useOffline, useRecordings } from '../../api/queries';
+import type { Recording } from '../../api/types';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
+import { Icon } from '../../components/Icon/Icon';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
-import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
 import { EmptySource } from '../../pages/EmptySource';
-import { dayLabel, formatClock, formatRange } from '../../lib/time';
 import { useNowEpoch } from '../../lib/useNow';
+import { useDLFocusable } from '../../lib/spatial';
 import { t } from '../../lib/i18n';
+import { useViewStateStore } from '../../store/viewState';
 import { playRecording } from '../player/actions';
-import { openInfo } from '../../store/info';
-import { episodeLine } from '../../lib/episode';
+import { ChannelStack } from './ChannelMark';
+import { ShowDetail } from './ShowDetail';
+import { UpcomingView } from './UpcomingView';
+import { UPCOMING, groupShows, initialSelection, type Show } from './shows';
 import classes from './Recordings.module.css';
 
-type Tab = 'upcoming' | 'inProgress' | 'completed' | 'rules';
+function listSub(show: Show): string {
+  if (show.recordingNow) return t('rec.list.recordingNow');
+  const n = show.recordings.length;
+  const list = n === 0 ? t('rec.list.none') : n === 1 ? t('rec.list.one') : t('rec.list.many', { n });
+  return show.upcoming.length ? t('rec.list.upcoming', { list, n: show.upcoming.length }) : list;
+}
 
-const initials = (name: string) =>
-  name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('');
+export interface ListItemProps {
+  active: boolean;
+  onSelect: () => void;
+  focusKey: string;
+  /** Storybook: forced state props. */
+  demo?: Record<string, unknown>;
+}
 
-export function RecordingRow({ r, now, tab, run, busy, demo }: { r: Recording; now: number; tab: Exclude<Tab, 'rules'>; run: (fn: () => Promise<unknown>) => void; busy: boolean; demo?: Record<string, unknown> }) {
-  const navigate = useNavigate();
-  const [confirming, setConfirming] = useState(false);
-  const watch = () => run(async () => {
-    const err = await playRecording(r.id);
-    if (!err) void navigate('/player');
-  });
+/** One show in the list: channel marks, title, state line, recording dot and new count. */
+export function ShowItem({ show, active, onSelect, focusKey, demo }: ListItemProps & { show: Show }) {
+  const { ref, focusProps } = useDLFocusable<object, HTMLButtonElement>({ focusKey, onEnterPress: onSelect });
   return (
-    <div className={classes.row} role="listitem" {...demo}>
-      <span className={classes.day}>{dayLabel(r.startUtc, now)}</span>
-      <span className={classes.ini} aria-hidden>{initials(r.channelName)}</span>
-      <span className={classes.main}>
-        <UnstyledButton className={classes.titleLink} onClick={() => openInfo({ kind: 'recording', recording: r })}>
-          <span className={classes.title}>{r.title}</span>
-        </UnstyledButton>
-        {episodeLine(r) && <span className={classes.ep}>{episodeLine(r)}</span>}
-        <span className={classes.sub}>{r.channelName}</span>
-        {r.status === 'failed' && r.error && <span className={classes.err}>{r.error}</span>}
+    <UnstyledButton ref={ref} className={classes.item} data-active={active || undefined} aria-current={active ? 'true' : undefined} onClick={onSelect} {...focusProps} {...demo}>
+      <span className={classes.itemLead}>{show.channels.length > 0 && <ChannelStack channels={show.channels} size="sm" />}</span>
+      <span className={classes.itemMain}>
+        <span className={classes.itemTitle}>{show.title}</span>
+        <span className={classes.itemSub}>{listSub(show)}</span>
       </span>
-      <span className={classes.time}>
-        {tab === 'inProgress' ? t('rec.recordingUntil', { time: formatClock(r.endUtc) }) : formatRange(r.startUtc, r.endUtc)}
-      </span>
-      <span className={classes.rule}>
-        {r.ruleLabel ? <><IconRepeat size={14} aria-hidden />{r.ruleLabel}</> : t('rec.once')}
-      </span>
-      <span className={classes.actions}>
-        {tab === 'upcoming' && <DLButton variant="default" size="sm" disabled={busy} onClick={() => run(() => invoke('cancel_recording', { id: r.id }))}>{t('rec.cancel')}</DLButton>}
-        {tab === 'inProgress' && (
-          <>
-            <StatusBadge kind="rec" />
-            <DLButton variant="filled" size="sm" onClick={watch}>{t('rec.watch')}</DLButton>
-            <Menu position="bottom-end">
-              <Menu.Target>
-                <DLButton variant="default" size="sm" disabled={busy}>{t('rec.extend')} <IconChevronDown size={14} /></DLButton>
-              </Menu.Target>
-              <Menu.Dropdown>
-                {[15, 30, 60].map((m) => (
-                  <Menu.Item key={m} onClick={() => run(() => invoke('extend_recording', { id: r.id, minutes: m }))}>
-                    {t(m === 15 ? 'rec.extend15' : m === 30 ? 'rec.extend30' : 'rec.extend60')}
-                  </Menu.Item>
-                ))}
-              </Menu.Dropdown>
-            </Menu>
-            <DLButton variant="danger" size="sm" disabled={busy} onClick={() => run(() => invoke('stop_recording', { id: r.id }))}>{t('rec.stop')}</DLButton>
-          </>
-        )}
-        {tab === 'completed' &&
-          (confirming ? (
-            <>
-              <span className={classes.confirm}>{t('rec.confirmDelete', { title: r.title })}</span>
-              <DLButton variant="danger" size="sm" disabled={busy} onClick={() => run(() => invoke('delete_recording', { id: r.id }))}>{t('rec.confirmYes')}</DLButton>
-              <DLButton variant="default" size="sm" onClick={() => setConfirming(false)}>{t('rec.confirmNo')}</DLButton>
-            </>
-          ) : (
-            <>
-              {r.status === 'failed' && <StatusBadge kind="drm" />}
-              <DLButton variant="filled" size="sm" onClick={watch}>{t('rec.play')}</DLButton>
-              <DLButton variant="default" size="sm" disabled={busy} onClick={() => setConfirming(true)}>{t('rec.delete')}</DLButton>
-            </>
-          ))}
-      </span>
-    </div>
+      {show.recordingNow && <span className={classes.recDot} role="img" aria-label={t('rec.list.recordingNow')} />}
+      {show.newCount > 0 && (
+        <span className={classes.newChip} aria-label={t('rec.newCount', { n: show.newCount })}>
+          {show.newCount}
+        </span>
+      )}
+    </UnstyledButton>
   );
 }
 
-function RuleRow({ r, run, busy }: { r: RecordingRule; run: (fn: () => Promise<unknown>) => void; busy: boolean }) {
+/** The "Coming up" entry at the top of the list. */
+export function ComingUpItem({ count, active, onSelect, focusKey, demo }: ListItemProps & { count: number }) {
+  const { ref, focusProps } = useDLFocusable<object, HTMLButtonElement>({ focusKey, onEnterPress: onSelect });
   return (
-    <div className={`${classes.row} ${classes.rowRules}`} role="listitem">
-      <span className={classes.main}>
-        <span className={classes.title}>{r.title}</span>
-        <span className={classes.sub}>{r.channelName}</span>
+    <UnstyledButton ref={ref} className={classes.item} data-active={active || undefined} aria-current={active ? 'true' : undefined} onClick={onSelect} {...focusProps} {...demo}>
+      <span className={classes.itemLead}>
+        <span className={classes.upIcon}>
+          <Icon icon={IconCalendarTime} size={20} />
+        </span>
       </span>
-      <span className={classes.rule}><IconRepeat size={14} aria-hidden />{r.kind === 'series' ? t('rec.rule.series') : t('rec.rule.recurring')}</span>
-      <span className={classes.time}>{r.schedule}</span>
-      <span className={classes.actions}>
-        <DLButton variant="default" size="sm" disabled={busy} onClick={() => run(() => invoke('delete_recording_rule', { id: r.id }))}>{t('rec.deleteRule')}</DLButton>
+      <span className={classes.itemMain}>
+        <span className={classes.itemTitle}>{t('rec.comingUp')}</span>
+        <span className={classes.itemSub}>{t('rec.scheduled', { n: count })}</span>
       </span>
-    </div>
-  );
-}
-
-type ListSection = Exclude<Tab, 'rules'>;
-
-function SectionHead({ id, title, count }: { id: string; title: string; count: number }) {
-  return (
-    <h2 className={classes.h2} id={id}>
-      {title}
-      <span className={classes.count}>{count}</span>
-    </h2>
+    </UnstyledButton>
   );
 }
 
 export function RecordingsPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { loaded, hasSource } = useCaps();
   const offline = useOffline();
   const now = useNowEpoch(30_000);
   const [failure, setFailure] = useState<string | null>(null);
-  const recs = useQuery({ queryKey: ['catalog', 'recordings'], queryFn: () => invoke('list_recordings', {}), refetchInterval: 30_000 });
+  const [query, setQuery] = useState('');
+  const saved = useViewStateStore((s) => s.recordings);
+  const save = useViewStateStore((s) => s.saveRecordings);
+  const recs = useRecordings();
   const rules = useQuery({ queryKey: ['catalog', 'recordingRules'], queryFn: () => invoke('list_recording_rules', {}) });
   const act = useMutation({
     mutationFn: (fn: () => Promise<unknown>) => fn(),
@@ -134,55 +96,69 @@ export function RecordingsPage() {
   });
   const run = (fn: () => Promise<unknown>) => act.mutate(fn);
   const busy = act.isPending || offline;
+  const onPlay = (r: Recording) =>
+    run(async () => {
+      const err = await playRecording(r.id);
+      if (!err) void navigate('/player');
+    });
 
+  const shows = useMemo(() => (recs.data ? groupShows(recs.data, rules.data ?? []) : []), [recs.data, rules.data]);
   if (loaded && !hasSource) return <EmptySource />;
-  const d = recs.data;
-  // Everything on one page, most time-sensitive first.
-  const sections: ListSection[] = ['inProgress', 'upcoming', 'completed'];
+
+  const selected = initialSelection(shows, saved);
+  const q = query.trim().toLowerCase();
+  const visible = q ? shows.filter((s) => s.title.toLowerCase().includes(q)) : shows;
+  const show = shows.find((s) => s.key === selected);
+  const savedCount = shows.reduce((n, s) => n + s.recordings.length, 0);
+  const upcomingCount = shows.reduce((n, s) => n + s.upcoming.length, 0);
 
   return (
     <div className={classes.page}>
-      <header className={classes.head}>
-        <h1 className={classes.h1}>{t('rec.title')}</h1>
-      </header>
-      {offline && <div className={classes.toast} role="status">{t('offline.recording')}</div>}
-      {failure && <div className={classes.toast} role="alert">{failure}</div>}
-      <div className={classes.list}>
+      <aside className={classes.aside}>
+        <div className={classes.asideHead}>
+          <div className={classes.titleRow}>
+            <h1 className={classes.h1}>{t('rec.title')}</h1>
+            {recs.data && <span className={classes.sub}>{t('rec.saved', { n: savedCount })}</span>}
+          </div>
+          <TextInput
+            value={query}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            placeholder={t('rec.filter')}
+            aria-label={t('rec.filter')}
+            leftSection={<Icon icon={IconSearch} size={16} />}
+          />
+        </div>
+        <nav className={classes.list} aria-label={t('rec.shows')}>
+          {recs.data && (
+            <>
+              <ComingUpItem focusKey="REC_UPCOMING" count={upcomingCount} active={selected === UPCOMING} onSelect={() => save(UPCOMING)} />
+              <div className={classes.label}>{t('rec.shows')}</div>
+              {visible.map((s) => (
+                <ShowItem key={s.key} focusKey={`REC_${s.key}`} show={s} active={s.key === selected} onSelect={() => save(s.key)} />
+              ))}
+              {q && visible.length === 0 && <p className={classes.msg}>{t('rec.noMatch', { q: query.trim() })}</p>}
+              {!q && shows.length === 0 && <p className={classes.msg}>{t('rec.empty.all')}</p>}
+            </>
+          )}
+        </nav>
+      </aside>
+      <main className={classes.main}>
+        {offline && <div className={classes.toast} role="status">{t('offline.recording')}</div>}
+        {failure && <div className={classes.toast} role="alert">{failure}</div>}
         {recs.isLoading ? (
-          <SkeletonList rows={5} label={t('loading.generic')} />
-        ) : recs.isError || !d ? (
-          <ErrorState message={t('rec.error')} onRetry={() => void recs.refetch()} />
+          <div className={classes.detail}>
+            <SkeletonList rows={5} label={t('loading.generic')} />
+          </div>
+        ) : recs.isError || !recs.data ? (
+          <div className={classes.detail}>
+            <ErrorState message={t('rec.error')} onRetry={() => void recs.refetch()} />
+          </div>
+        ) : show ? (
+          <ShowDetail key={show.key} show={show} now={now} run={run} busy={busy} onPlay={onPlay} />
         ) : (
-          sections.map((k) => (
-            <section key={k} className={classes.section} aria-labelledby={`rec-${k}`}>
-              <SectionHead id={`rec-${k}`} title={t(`rec.tab.${k}`)} count={d[k].length} />
-              {d[k].length === 0 ? (
-                <p className={classes.msg}>{t(`rec.empty.${k}`)}</p>
-              ) : (
-                <div role="list" aria-labelledby={`rec-${k}`}>
-                  {d[k].map((r) => <RecordingRow key={r.id} r={r} now={now} tab={k} run={run} busy={busy} />)}
-                </div>
-              )}
-            </section>
-          ))
+          <UpcomingView shows={shows} now={now} run={run} busy={busy} />
         )}
-        {!recs.isLoading && (
-          <section className={classes.section} aria-labelledby="rec-rules">
-            <SectionHead id="rec-rules" title={t('rec.tab.rules')} count={rules.data?.length ?? 0} />
-            {rules.isLoading ? (
-              <SkeletonList rows={2} label={t('loading.generic')} />
-            ) : rules.isError ? (
-              <ErrorState message={t('rec.error')} onRetry={() => void rules.refetch()} />
-            ) : !rules.data || rules.data.length === 0 ? (
-              <p className={classes.msg}>{t('rec.empty.rules')}</p>
-            ) : (
-              <div role="list" aria-labelledby="rec-rules">
-                {rules.data.map((r) => <RuleRow key={r.id} r={r} run={run} busy={busy} />)}
-              </div>
-            )}
-          </section>
-        )}
-      </div>
+      </main>
     </div>
   );
 }

@@ -1,14 +1,19 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Menu } from '@mantine/core';
-import { IconChevronDown, IconStar } from '@tabler/icons-react';
-import { inTauri } from '../../api/ipc';
+import { IconArrowsMaximize, IconHistory, IconInfoCircle, IconListDetails, IconPictureInPicture, IconPlayerPlay, IconStar, IconVolume, IconVolumeOff } from '@tabler/icons-react';
+import { inTauri, invoke } from '../../api/ipc';
+import { useNowNextWindow } from '../../api/queries';
+import { ProgrammeArt } from '../../components/ProgrammeArt/ProgrammeArt';
+import { useNowEpoch } from '../../lib/useNow';
+import { setFullscreen } from '../player/fullscreen';
+import { setMiniPlayer } from '../player/mini';
 import type { Channel, Programme } from '../../api/types';
 import { dl } from '../../theme';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { StatusBadge } from '../../components/StatusBadge/StatusBadge';
-import { dayLabel, formatRange } from '../../lib/time';
+import { dayLabel, formatRange, progress } from '../../lib/time';
 import { t } from '../../lib/i18n';
 import { episodeLine } from '../../lib/episode';
 import { useVideoBounds } from '../../lib/useVideoBounds';
@@ -22,31 +27,41 @@ export interface PreviewProps {
   programme: Programme | null;
   channel: Channel | undefined;
   state: BlockState | null;
-  canRecord: boolean;
-  /** Source offline: record items stay visible but disabled, with the reason shown. */
-  offline?: boolean;
-  canCatchup: boolean;
-  recordOpen: boolean;
-  onRecordOpen: (open: boolean) => void;
-  onRecord: (kind: 'once' | 'series') => void;
   onPrimary: () => void;
-  onFromStart: () => void;
   onDetails: () => void;
-  /** Opens the details modal for the programme. */
+  /** Opens the details modal for the programme (record from there or the right-click menu). */
   onInfo: () => void;
   onFavourite: () => void;
 }
 
+/** Opens the full player; `fullscreen` also puts the window in OS fullscreen. */
+function useOpenPlayer() {
+  const navigate = useNavigate();
+  return useCallback(
+    (mode: 'player' | 'fullscreen' | 'mini') => {
+      if (mode === 'fullscreen') setFullscreen(true);
+      void navigate('/player');
+      if (mode === 'mini') void setMiniPlayer(true);
+    },
+    [navigate],
+  );
+}
+
 /**
- * Mini player in the preview box: what's playing keeps playing when the user backs out of the player into
- * the guide. It holds the playback session while mounted (leaving the guide for anything but the player
- * stops it, CLAUDE rule 6), clears the shell so the libmpv surface shows through, and opens the full
- * player on click.
+ * Mini player in the hero: what's playing keeps playing when the user backs out of the player into the
+ * guide. It holds the playback session while mounted (leaving the guide for anything but the player stops
+ * it, CLAUDE rule 6), clears the shell so the libmpv surface shows through its rect (the hero art is
+ * masked around it), and opens the full player on click. Its own controls: mute, mini window, fullscreen.
  */
 function MiniPlayer() {
-  const navigate = useNavigate();
-  const ref = useRef<HTMLButtonElement | null>(null);
+  const open = useOpenPlayer();
+  const ref = useRef<HTMLDivElement | null>(null);
   useVideoBounds(ref);
+  const player = usePlayerStore((s) => s.player);
+  const ids = useMemo(() => (player.channelId != null ? [player.channelId] : []), [player.channelId]);
+  const nn = useNowNextWindow(ids, `mini|${player.channelId}`);
+  const now = useNowEpoch(30_000);
+  const prog = player.mode === 'live' || player.mode === null ? (nn.data?.[0]?.now ?? null) : null;
   // Layout effect: the shell must be clear on the first painted frame, or coming back from the player shows
   // one opaque frame over the video.
   useLayoutEffect(() => {
@@ -57,22 +72,32 @@ function MiniPlayer() {
       releaseSession();
     };
   }, []);
+  const mute = () => void invoke('player_command', { command: { kind: 'setMuted', muted: !player.muted } });
   return (
-    <button ref={ref} type="button" className={classes.mini} aria-label={t('guide.openPlayer')} onClick={() => void navigate('/player')}>
+    <div ref={ref} className={classes.mini}>
       {!inTauri() && (
         <span className={classes.miniDev} aria-hidden>
           mini player (libmpv)
         </span>
       )}
-    </button>
+      <button type="button" className={classes.miniOpen} aria-label={t('guide.openPlayer')} onClick={() => open('player')} />
+      {(player.mode === 'live' || player.mode === null) && (
+        <span className={classes.miniBadge}>
+          <StatusBadge kind="live" />
+        </span>
+      )}
+      <div className={classes.miniControls}>
+        <DLIconButton label={player.muted ? t('player.unmute') : t('player.mute')} icon={player.muted ? IconVolumeOff : IconVolume} variant="overlay" size="sm" onClick={mute} />
+        <span className={classes.miniSpacer} />
+        <DLIconButton label={t('player.miniPlayer')} icon={IconPictureInPicture} variant="overlay" size="sm" onClick={() => open('mini')} />
+        <DLIconButton label={t('player.fullscreen')} icon={IconArrowsMaximize} variant="overlay" size="sm" onClick={() => open('fullscreen')} />
+      </div>
+      {prog && <span className={classes.miniBar} style={{ width: `${progress(prog.startUtc, prog.endUtc, now) * 100}%` }} aria-hidden />}
+    </div>
   );
 }
 
-/**
- * Preview pane. It follows focus after a 300 ms dwell. Everything shown is already in memory:
- * dwelling never calls a play command or touches a stream endpoint (CLAUDE rule 4).
- */
-/** Record items for the focused guide programme (preview menu and guide right-click menu). */
+/** Record items for a guide programme (guide right-click menu). */
 export function GuideRecordItems({ offline, onRecord }: { offline: boolean; onRecord: (kind: 'once' | 'series') => void }) {
   return (
     <>
@@ -83,20 +108,41 @@ export function GuideRecordItems({ offline, onRecord }: { offline: boolean; onRe
   );
 }
 
-export const GuidePreview = memo(function GuidePreview({ programme, channel, state, canRecord, offline, canCatchup, recordOpen, onRecordOpen, onRecord, onPrimary, onFromStart, onDetails, onInfo, onFavourite }: PreviewProps) {
+/**
+ * Guide hero. It follows focus after a 300 ms dwell. The text is already in memory; the artwork comes from
+ * `programme_art` (guide icon first; server/TMDB fallback looked up once and cached in core). Nothing here
+ * touches a stream endpoint (CLAUDE rule 4).
+ */
+export const GuidePreview = memo(function GuidePreview({ programme, channel, state, onPrimary, onDetails, onInfo, onFavourite }: PreviewProps) {
   const [shown, setShown] = useState<{ p: Programme | null; ch: Channel | undefined; state: BlockState | null }>({ p: programme, ch: channel, state });
   useEffect(() => {
     const id = setTimeout(() => setShown({ p: programme, ch: channel, state }), dl.previewDwellMs);
     return () => clearTimeout(id);
   }, [programme, channel, state]);
+  const open = useOpenPlayer();
 
   const playing = usePlayerStore((s) => ACTIVE_PHASES.has(s.player.state));
+  const playingChannel = usePlayerStore((s) => s.player.channelId);
   const { p, ch, state: st } = shown;
   const action = st ? enterAction(st) : 'none';
-  const primaryLabel = action === 'play-live' ? t('guide.watchLive') : action === 'play-catchup' ? t('guide.playFromStart') : action === 'details' ? t('guide.moreInfo') : null;
+  // Previewing what the mini player already plays: the primary goes full screen instead of re-tuning.
+  const previewing = playing && st === 'now' && ch?.id === playingChannel;
+  const primary = previewing
+    ? { label: t('guide.fullScreen'), icon: IconArrowsMaximize, run: () => open('fullscreen') }
+    : action === 'play-live'
+      ? { label: t('guide.watchLive'), icon: IconPlayerPlay, filled: true, run: onPrimary }
+      : action === 'play-catchup'
+        ? { label: t('guide.playFromStart'), icon: IconHistory, run: onPrimary }
+        : action === 'details'
+          ? { label: t('guide.moreInfo'), icon: IconInfoCircle, run: onInfo }
+          : null;
   const epLine = p ? episodeLine(p) : null;
   return (
-    <div className={classes.preview} data-mini={playing || undefined}>
+    <section className={classes.preview} data-mini={playing || undefined}>
+      <div className={classes.heroBack} aria-hidden>
+        <ProgrammeArt programmeId={p?.id} channelId={ch?.id} fit="backdrop" className={classes.heroArt} />
+        <div className={classes.heroScrim} />
+      </div>
       <div className={classes.info}>
         {p && ch ? (
           <>
@@ -115,49 +161,26 @@ export const GuidePreview = memo(function GuidePreview({ programme, channel, sta
                 {p.isNew && <StatusBadge kind="new" />}
               </div>
             )}
-            <p className={classes.desc}>{p.description}</p>
+            {p.description && <p className={classes.desc}>{p.description}</p>}
             <div className={classes.actions}>
-              {primaryLabel && (
-                <DLButton variant="filled" size="md" onClick={action === 'details' ? onInfo : onPrimary}>
-                  {primaryLabel}
+              {primary && (
+                <DLButton variant="filled" size="md" icon={primary.icon} filledGlyph={'filled' in primary} onClick={primary.run}>
+                  {primary.label}
                 </DLButton>
               )}
-              {action === 'details' ? (
-                <DLButton variant="default" size="md" onClick={onDetails}>
-                  {t('guide.channelDetails')}
-                </DLButton>
+              {action === 'details' && !previewing ? (
+                <DLIconButton label={t('guide.channelDetails')} icon={IconListDetails} size="md" variant="default" onClick={onDetails} />
               ) : (
-                <DLButton variant="default" size="md" onClick={onInfo}>
-                  {t('guide.moreInfo')}
-                </DLButton>
+                <DLIconButton label={t('guide.moreInfo')} icon={IconInfoCircle} size="md" variant="default" onClick={onInfo} />
               )}
               <DLIconButton label={t(ch.isFavourite ? 'channels.favourite.remove' : 'channels.favourite.add')} icon={IconStar} size="md" variant="default" pressed={ch.isFavourite} filledGlyph={ch.isFavourite} onClick={onFavourite} />
-              {((canRecord && st !== 'past-archive' && st !== 'past-none') || (st === 'now' && canCatchup)) && (
-                <Menu opened={recordOpen} onChange={onRecordOpen} position="bottom-start">
-                  <Menu.Target>
-                    <DLButton variant="default" size="md">
-                      {t('guide.record')} <IconChevronDown size={14} />
-                    </DLButton>
-                  </Menu.Target>
-                  <Menu.Dropdown>
-                    {st === 'now' && canCatchup && <Menu.Item onClick={onFromStart}>{t('guide.fromStart')}</Menu.Item>}
-                    {canRecord && <GuideRecordItems offline={!!offline} onRecord={onRecord} />}
-                  </Menu.Dropdown>
-                </Menu>
-              )}
             </div>
           </>
         ) : (
           <div className={classes.metaRow}>{t('guide.noSelection')}</div>
         )}
       </div>
-      {playing ? (
-        <MiniPlayer />
-      ) : (
-        <div className={classes.art} aria-hidden>
-          programme art
-        </div>
-      )}
-    </div>
+      {playing && <MiniPlayer />}
+    </section>
   );
 });

@@ -199,6 +199,7 @@ async fn programmes_upsert_window_prune() {
         season: Some(1),
         episode: None,
         flags: 0,
+        icon: None,
     };
     store
         .upsert_programmes(&[mk(100, 200, "A"), mk(200, 300, "B")])

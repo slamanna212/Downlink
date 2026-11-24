@@ -34,6 +34,16 @@ function invalidateCatalog(qc: QueryClient, keys?: string[]) {
 export const invalidateFavourites = (qc: QueryClient) => invalidateCatalog(qc, FAVOURITE_QUERIES);
 export const invalidateRecordings = (qc: QueryClient) => invalidateCatalog(qc, RECORDING_QUERIES);
 
+/** DVR list (upcoming / recording / recorded). Polled every 30 s so "recording now" stays current. */
+export function useRecordings(enabled = true) {
+  return useQuery({ queryKey: ['catalog', 'recordings'], queryFn: () => invoke('list_recordings', {}), refetchInterval: 30_000, enabled });
+}
+
+/** How many recordings are running now (the rail's red record dot). Shares the list query above. */
+export function useRecordingsNow(enabled: boolean): number {
+  return useRecordings(enabled).data?.inProgress.length ?? 0;
+}
+
 const CATALOG_CHANGES: Record<NonNullable<CatalogUpdated['scope']>, string[] | undefined> = {
   status: ['sources'],
   channels: CHANNEL_QUERIES,
@@ -156,6 +166,21 @@ export function useOffline(): boolean {
 
 export function useMediaServerStatus() {
   return useQuery({ queryKey: ['mediaServer', 'status'], queryFn: () => invoke('media_server_status', {}) });
+}
+
+/**
+ * Artwork for a guide programme. Core picks and caches the source (guide icon, server, TMDB), so
+ * this is cheap after the first view; null means "show the gradient".
+ */
+export function useProgrammeArt(programmeId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['programmeArt', programmeId],
+    queryFn: () => invoke('programme_art', { id: programmeId as string }),
+    enabled: !!programmeId,
+    staleTime: Infinity,
+    gcTime: 30 * 60_000,
+    retry: false,
+  });
 }
 
 /** The playing title on the user's media server; idle until a server is chosen. Failures just hide the button. */

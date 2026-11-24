@@ -49,3 +49,20 @@ a:hover { color: var(--dl-accent-hover); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-property: opacity !important; animation: none !important; }
 }
+
+/* Overlay-style scrollbars on every OS (DESIGN §7): no track or arrows; a 6 px rounded thumb inset 3 px
+   from the edge that grows to 10 px and brightens on hover. */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; }
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--mantine-radius-md);
+  background-color: var(--dl-scrollbar-thumb);
+}
+::-webkit-scrollbar-thumb:hover {
+  border-width: 1px;
+  background-color: var(--dl-scrollbar-thumb-hover);
+}

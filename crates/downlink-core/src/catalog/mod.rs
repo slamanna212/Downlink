@@ -266,7 +266,7 @@ pub async fn search_programmes(
     let vis = visibility_sql(f);
     let sql = format!(
         "SELECT p.channel_id, p.start_utc, p.end_utc, p.ext_id, p.title, p.subtitle, p.description,
-                p.season, p.episode, p.flags
+                p.season, p.episode, p.flags, p.icon
          FROM (SELECT rowid FROM (
              SELECT candidate.rowid, candidate.start_utc, candidate.channel_id FROM programme_fts
              CROSS JOIN programme candidate ON candidate.rowid = programme_fts.rowid

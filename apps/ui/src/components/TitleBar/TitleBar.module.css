@@ -1,0 +1,49 @@
+/* Drag strip across the top of the content area. Sits above page content; the buttons keep their own
+   hit area, everything else in the strip drags the window. */
+.bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: flex-end;
+  user-select: none;
+}
+
+.buttons {
+  display: flex;
+  height: 100%;
+}
+
+.btn {
+  width: 46px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dl-text-2);
+  cursor: default;
+  transition: background-color 120ms var(--dl-ease), color 120ms var(--dl-ease);
+
+  &:hover { background: var(--dl-pressed); color: var(--dl-text); }
+  &:active { background: var(--dl-hover); }
+}
+.bar[data-on-video] .btn { color: var(--dl-text); }
+.bar[data-on-video] .btn:hover { background: var(--dl-video-btn-hover); }
+
+.btn.close:hover,
+.bar[data-on-video] .btn.close:hover {
+  background: var(--dl-titlebar-close);
+  color: var(--dl-on-titlebar-close);
+}
+.bar[data-passive] { pointer-events: none; }
+.bar[data-passive] .buttons { pointer-events: auto; }
+.bar[data-in-flow] {
+  position: relative;
+  flex: none;
+  background: var(--dl-surface-0);
+}
