@@ -728,12 +728,37 @@ impl Service {
         &self,
         r: &RecordingRow,
         rules: &[crate::store::RuleRow],
+        resumes: &HashMap<String, ResumeRow>,
     ) -> Result<RecordingDto> {
-        let channel_name = match r.channel_id {
-            Some(c) => self.store.channel(c).await?.map(|c| c.name),
+        let channel = match r.channel_id {
+            Some(c) if self.store.channel(c).await?.is_some() => self.get_channel(c).await.ok(),
+            _ => None,
+        };
+        let channel_name = channel
+            .as_ref()
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| "Unknown channel".into());
+        let channel_logo = channel.and_then(|c| c.logo);
+        let programme_id = match r.channel_id {
+            Some(c) => self
+                .store
+                .programme_row(c, r.start_utc)
+                .await?
+                .map(|p| format!("{}:{}", p.channel_id, p.start_utc)),
             None => None,
-        }
-        .unwrap_or_else(|| "Unknown channel".into());
+        };
+        let resume = resumes.get(&r.ext_id);
+        let duration_secs = resume
+            .and_then(|x| x.duration_ms)
+            .filter(|d| *d > 0)
+            .map_or(r.end_utc - r.start_utc, |d| d / 1000)
+            .max(0);
+        let status = r.status();
+        let playable = match status {
+            RecStatus::Recording | RecStatus::Completed => true,
+            RecStatus::Failed => r.file_url.as_deref().is_some_and(|u| !u.is_empty()),
+            RecStatus::Scheduled => false,
+        };
         let title = r.title.clone().unwrap_or_else(|| "Recording".into());
         // Link to the rule that made it: recurring recordings are tagged with the rule id; series
         // recordings carry no tag, so they match by title + tvg_id (`"<tvg>|<title>"`).
@@ -768,11 +793,19 @@ impl Service {
             channel_name,
             start_utc: r.start_utc,
             end_utc: r.end_utc,
-            status: r.status().as_str(),
+            status: status.as_str(),
             rule_id,
             rule_label,
             size_bytes: r.size_bytes,
             error: r.error.clone(),
+            channel_logo,
+            programme_id,
+            position_secs: resume
+                .filter(|x| x.resumable())
+                .map(|x| x.position_ms / 1000),
+            duration_secs,
+            watched: resume.is_some_and(ResumeRow::finished),
+            playable,
         })
     }
 
@@ -781,8 +814,16 @@ impl Service {
         for src in self.caps_sources(Caps::DVR).await? {
             let rows = self.refresh_recordings(src.id).await?;
             let rules = self.store.rule_rows(src.id).await?;
+            let resumes: HashMap<String, ResumeRow> = self
+                .store
+                .all_resume()
+                .await?
+                .into_iter()
+                .filter(|x| x.source_id == src.id && x.kind == "recording")
+                .map(|x| (x.item_key.clone(), x))
+                .collect();
             for r in &rows {
-                let dto = self.recording_dto(r, &rules).await?;
+                let dto = self.recording_dto(r, &rules, &resumes).await?;
                 match r.status() {
                     RecStatus::Scheduled => out.upcoming.push(dto),
                     RecStatus::Recording => out.in_progress.push(dto),
@@ -976,7 +1017,9 @@ impl Service {
     /// Plan for a recording: HLS while it runs, the file when complete. Saved positions resume.
     pub async fn play_recording(&self, id: i64) -> Result<RecordingPlay> {
         let (r, c) = self.recording_target(id).await?;
-        if r.status() == RecStatus::Scheduled || r.status() == RecStatus::Failed {
+        // A failed recording still plays when the server kept a partial file.
+        let partial = r.file_url.as_deref().is_some_and(|u| !u.is_empty());
+        if r.status() == RecStatus::Scheduled || (r.status() == RecStatus::Failed && !partial) {
             return Err(AppError::stream(
                 "There is nothing to watch for that recording yet.",
             ));

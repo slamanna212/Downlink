@@ -73,6 +73,14 @@
   background: var(--dl-notice);
   box-shadow: 0 0 0 2px var(--dl-surface-1);
 }
+/* Recordings: the glyph's record dot turns live red while anything records (DESIGN §2, status mark). */
+.icon [data-rec-dot] { transition: fill 120ms var(--dl-ease); }
+.item[data-recording] .icon [data-rec-dot] { fill: var(--dl-live); }
+
+@media (prefers-reduced-motion: reduce) {
+  .icon [data-rec-dot] { transition: none; }
+}
+
 .item[data-active] .noticeDot { box-shadow: 0 0 0 2px var(--dl-surface-3); }
 
 /* collapsed: icon only, centred */

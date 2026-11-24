@@ -323,11 +323,15 @@ export function createMockBackend(): Backend {
       return impl.play_catchup({ programmeId: nn.id });
     },
     schedule_recording: ({ programmeId, kind }) => {
+      if (kind === 'series' && vod.seriesFromRecording(nowSec(), programmeId)) {
+        emit('catalog://updated', { scope: 'recordings', sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
+        return null;
+      }
       scheduled.add(programmeId);
       const [cid] = programmeId.split(':').map(Number);
       const p = genProgrammes(cid ?? 0, 0, 4e9, scheduled).find((x) => x.id === programmeId);
       const ch = channels.find((c) => c.id === cid);
-      if (p && ch) vod.addRecording(nowSec(), { title: p.title ?? ch.name, subtitle: p.subtitle, description: p.description, season: p.season, episode: p.episode, channelId: ch.id, channelName: ch.name, startUtc: p.startUtc, endUtc: p.endUtc }, kind === 'series');
+      if (p && ch) vod.addRecording(nowSec(), { title: p.title ?? ch.name, subtitle: p.subtitle, description: p.description, season: p.season, episode: p.episode, channelId: ch.id, channelName: ch.name, programmeId: p.id, startUtc: p.startUtc, endUtc: p.endUtc }, kind === 'series');
       emit('catalog://updated', { scope: 'recordings', sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
       return null;
     },
@@ -423,9 +427,10 @@ export function createMockBackend(): Backend {
     play_recording: ({ id }) => {
       const r = vod.getRecording(id);
       if (!r) throw appError('stream', 'That recording is gone. It may have been deleted.');
+      if (!r.playable) throw appError('stream', 'There is nothing to watch for that recording yet.');
       const live = r.status === 'recording';
       const dur = (live ? nowSec() : r.endUtc) - r.startUtc;
-      setPlayer({ state: 'Resolving', mode: 'recording', channelId: r.channelId, programme: null, title: r.title, mediaId: id, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: null, error: null });
+      setPlayer({ state: 'Resolving', mode: 'recording', channelId: r.channelId, programme: null, title: r.title, mediaId: id, position: 0, duration: dur, buffered: 0, seekable: true, resumeAt: r.positionSecs, error: null });
       seekableTicker('recording');
       return null;
     },

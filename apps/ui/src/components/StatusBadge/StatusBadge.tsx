@@ -4,7 +4,7 @@ import { t, type MessageKey } from '../../lib/i18n';
 import { Icon } from '../Icon/Icon';
 import classes from './StatusBadge.module.css';
 
-export type StatusBadgeKind = 'live' | 'rec' | 'catchup' | 'new' | 'hd' | '4k' | 'radio' | 'drm' | 'premiere' | 'finale' | 'repeat' | 'cert';
+export type StatusBadgeKind = 'live' | 'rec' | 'catchup' | 'new' | 'hd' | '4k' | 'radio' | 'drm' | 'premiere' | 'finale' | 'repeat' | 'interrupted' | 'cert';
 
 const LABEL: Record<StatusBadgeKind, MessageKey> = {
   live: 'badge.live',
@@ -18,6 +18,7 @@ const LABEL: Record<StatusBadgeKind, MessageKey> = {
   premiere: 'badge.premiere',
   finale: 'badge.finale',
   repeat: 'badge.repeat',
+  interrupted: 'badge.interrupted',
   cert: 'badge.hd', // always replaced by `label`
 };
 
@@ -33,6 +34,7 @@ const TONE: Record<StatusBadgeKind, string> = {
   premiere: classes.outline ?? '',
   finale: classes.outline ?? '',
   repeat: classes.drm ?? '',
+  interrupted: classes.warn ?? '',
   cert: classes.outline ?? '',
 };
 

@@ -76,6 +76,15 @@ export function formatDuration(totalSeconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
 }
 
+/** Compact span for lists: "3h 10m", "2h", "55m" (rounded to the minute, at least 1m). */
+export function formatSpan(totalSeconds: number): string {
+  const mins = Math.max(1, Math.round(totalSeconds / 60));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m}m`;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 /** Progress 0..1 of `now` within a programme; clamped. */
 export function progress(start: Epoch, end: Epoch, now: Epoch = nowEpoch()): number {
   if (end <= start) return 0;

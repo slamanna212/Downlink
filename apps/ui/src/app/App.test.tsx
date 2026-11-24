@@ -14,6 +14,24 @@ beforeEach(() => {
 });
 
 describe('app shell', () => {
+  it('turns the Recordings record dot live while something records, and names it', async () => {
+    render(<App router={createTestRouter(['/settings'])} client={createQueryClient()} />);
+    const link = await screen.findByRole('link', { name: 'Recordings · Recording now' });
+    expect(link).toHaveAttribute('data-recording');
+    expect(link.querySelector('[data-rec-dot]')).not.toBeNull();
+  });
+
+  it('opens Recordings on the show recording now, then switches to Coming up and filters shows', async () => {
+    const user = userEvent.setup();
+    render(<App router={createTestRouter(['/recordings'])} client={createQueryClient()} />);
+    expect(await screen.findByRole('heading', { level: 2, name: 'Coastline Cup' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Watch live' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Coming up/ }));
+    expect(await screen.findByRole('heading', { level: 2, name: 'Coming up' })).toBeInTheDocument();
+    await user.type(screen.getByRole('textbox', { name: 'Filter shows' }), 'zzz');
+    expect(screen.getByText('No shows match “zzz”.')).toBeInTheDocument();
+  });
+
   it('renders rail entries from caps and a page title', async () => {
     render(<App router={createTestRouter(['/settings'])} client={createQueryClient()} />);
     expect(await screen.findByRole('heading', { name: 'Settings' })).toBeInTheDocument();

@@ -34,6 +34,16 @@ function invalidateCatalog(qc: QueryClient, keys?: string[]) {
 export const invalidateFavourites = (qc: QueryClient) => invalidateCatalog(qc, FAVOURITE_QUERIES);
 export const invalidateRecordings = (qc: QueryClient) => invalidateCatalog(qc, RECORDING_QUERIES);
 
+/** DVR list (upcoming / recording / recorded). Polled every 30 s so "recording now" stays current. */
+export function useRecordings(enabled = true) {
+  return useQuery({ queryKey: ['catalog', 'recordings'], queryFn: () => invoke('list_recordings', {}), refetchInterval: 30_000, enabled });
+}
+
+/** How many recordings are running now (the rail's red record dot). Shares the list query above. */
+export function useRecordingsNow(enabled: boolean): number {
+  return useRecordings(enabled).data?.inProgress.length ?? 0;
+}
+
 const CATALOG_CHANGES: Record<NonNullable<CatalogUpdated['scope']>, string[] | undefined> = {
   status: ['sources'],
   channels: CHANNEL_QUERIES,

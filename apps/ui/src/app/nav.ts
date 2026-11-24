@@ -6,8 +6,8 @@ import {
   IconSearch,
   IconSettings,
   IconDeviceTv,
-  IconCircle,
 } from '@tabler/icons-react';
+import { IconRecordings } from '../components/Icon/IconRecordings';
 import type { Caps } from '../api/types';
 import type { TablerIcon } from '../components/Icon/Icon';
 import type { MessageKey } from '../lib/i18n';
@@ -30,7 +30,7 @@ export const PRIMARY_NAV: NavEntry[] = [
   { id: 'channels', to: '/channels', label: 'nav.channels', icon: IconListDetails, hint: 'L' },
   { id: 'movies', to: '/movies', label: 'nav.movies', icon: IconMovie, requires: (c) => c.vod },
   { id: 'series', to: '/series', label: 'nav.series', icon: IconDeviceTv, requires: (c) => c.vod },
-  { id: 'recordings', to: '/recordings', label: 'nav.recordings', icon: IconCircle, requires: (c) => c.dvr },
+  { id: 'recordings', to: '/recordings', label: 'nav.recordings', icon: IconRecordings, requires: (c) => c.dvr },
 ];
 
 export const SETTINGS_NAV: NavEntry = { id: 'settings', to: '/settings', label: 'nav.settings', icon: IconSettings };

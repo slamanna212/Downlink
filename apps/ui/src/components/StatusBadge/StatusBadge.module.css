@@ -35,6 +35,12 @@
   color: var(--dl-text-2);
 }
 
+/* INTERRUPTED (a recording that stopped early): warn tint 10% + warn text. */
+.warn {
+  background: var(--dl-warn-tint);
+  color: var(--dl-warn);
+}
+
 /* DRM: surface-3 + lock, text-dim */
 .drm {
   background: var(--dl-surface-3);

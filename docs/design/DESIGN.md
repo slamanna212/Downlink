@@ -70,7 +70,7 @@ catch-up, playing row, links) · `--dl-on-accent #120A33` (text on accent fill, 
 - `--dl-titlebar-close` (`#E5484D`) + `--dl-on-titlebar-close`: the title bar's close button on hover only.
 - `--dl-scrollbar-thumb` (ink 22%) / `--dl-scrollbar-thumb-hover` (36%): overlay scrollbars (global.css).
 - `--dl-guide-focus` (`#2A3140`): the focused guide block (no ring).
-- `--dl-hero-scrim`: fades hero art into surface-0 (left, bottom, top). Home and Guide heroes only.
+- `--dl-hero-scrim`: fades hero art into surface-0 (left, bottom, top). Home, Guide and Recordings heroes only.
 - `--dl-player-scrim` / `--dl-player-top-scrim`: the player overlay's bottom and top scrims.
   `--dl-tile-scrim`: the guide mini player's control strip.
 - Programme art fallback (no picture): a radial + linear gradient tinted with the channel's logo palette
@@ -141,7 +141,8 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 
 ## 7. Other components
 - **Badges** (20 px, 11/700 caps, radius 4): LIVE/REC = live tint + dot · CATCH-UP = accent tint +
-  IconHistory · NEW/HD/4K/RADIO/PREMIERE/FINALE = outline (hairline 18%) text-2 · content rating (`cert`, text as
+  IconHistory · NEW/HD/4K/RADIO/PREMIERE/FINALE = outline (hairline 18%) text-2 · INTERRUPTED (recording stopped early) = warn
+  tint 10% + warn text · content rating (`cert`, text as
   broadcast, e.g. TV-14) = outline · DRM/REPEAT = surface-3, text-dim.
 - **Episode labels** (`lib/episode.ts`): `S2 E5`, and `S2 E5 · Episode title` wherever a programme, recording or
   episode is listed (guide block time line, preview, channel rows, channel drawer, search, recordings, home, player).
@@ -180,7 +181,18 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   then TMDB (backdrop before poster). The pick is cached per title in core; images in the image cache.
 - **Rail** 224 expanded / 68 collapsed / 96 10-foot. Same size on every route for a given density; it collapses only when the user toggles it. Order:
   Search ⌘K, Home, Guide, Channels, Movies, Series, Recordings · Settings · source status dot.
-  Hide Movies/Series/Recordings when no source has the cap.
+  Hide Movies/Series/Recordings when no source has the cap. Recordings uses a custom Tabler-rules glyph
+  (`IconRecordings`: screen on a stand + filled record dot); the dot turns `--dl-live` (120 ms, instant under
+  reduced motion) while anything records, on every route, and the accessible name/tooltip becomes
+  "Recordings · Recording now" (or "· n recording now").
+- **Recordings**: 320 px show list (28/650 title + "n saved", filter input, *Coming up* entry, SHOWS caps label,
+  rows of stacked channel marks · title · state line · live dot when recording · accent-tint new count) beside a
+  detail pane (max 1040). A show: 208 px hero (programme art under `--dl-hero-scrim`, else surface stripes;
+  channels, 28/650 title, repeat icon + rule line, one primary: Watch live / Resume / Play latest, then Edit rule
+  menu or Record series), *Episodes* (112×63 thumb with REC and 3 px progress, episode line + NEW/INTERRUPTED,
+  channel · day · length · watched/left, Play/Resume/Play partial + delete with inline confirm; running ones get
+  Stop + an Extend menu), *Coming up* (Skip under a rule, else Cancel). *Coming up* view: all scheduled by day.
+  Selection is remembered for the session (`store/viewState`).
 - **Channels**: group sidebar 220 + virtualised rows (logo 72×36 · number · name + badges · now + 2 px
   progress · next · catch-up days + fav). Playing row: accent wash, accent-text name, speaker icon.
 - **Guide**: 288 px hero (programme art under `--dl-hero-scrim`, follows focus after a 300 ms dwell): meta

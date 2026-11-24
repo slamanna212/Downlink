@@ -22,8 +22,6 @@ While not required, this app is best used with [Dispatcharr](https://github.com/
 
 ![Getting Ready Animation](.github/screenshots/first-sync.gif)
 
-<img src=".github/screenshots/first-sync.gif" alt="demo">
-
 ## Features
 
 - TV guide with now/next, local search of program titles and descriptions.

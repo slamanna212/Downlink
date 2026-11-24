@@ -484,6 +484,22 @@ async fn recordings_list_groups_by_state_and_flags_scheduled_programmes() {
         )
     );
     assert_eq!(r.in_progress[0].rule_label.as_deref(), Some("Series"));
+    for k in [
+        "channelLogo",
+        "programmeId",
+        "positionSecs",
+        "durationSecs",
+        "watched",
+        "playable",
+    ] {
+        assert!(up.get(k).is_some(), "missing {k}");
+    }
+    assert_eq!(
+        r.upcoming[0].programme_id,
+        Some(format!("{}:{start}", ch.id)),
+        "the guide still has this airing"
+    );
+    assert!(!r.upcoming[0].playable && r.in_progress[0].playable);
     let failed = r.completed.iter().find(|c| c.status == "failed").unwrap();
     assert_eq!(
         failed.error.as_deref(),
@@ -690,6 +706,8 @@ async fn play_recording_in_progress_hls_and_completed_file_with_resume() {
         {"id": 61, "start_time": iso(now - 600), "end_time": iso(now + 600), "channel": c, "custom_properties": {"status": "recording", "file_url": "/api/channels/recordings/61/hls/index.m3u8", "program": {"title": "Running"}}},
         {"id": 62, "start_time": iso(now - 9000), "end_time": iso(now - 5400), "channel": c, "custom_properties": {"status": "completed", "program": {"title": "Done"}}},
         {"id": 63, "start_time": iso(now + 9000), "end_time": iso(now + 12000), "channel": c, "custom_properties": {"status": "scheduled"}},
+        {"id": 64, "start_time": iso(now - 30000), "end_time": iso(now - 26400), "channel": c, "custom_properties": {"status": "failed", "file_url": "/api/channels/recordings/64/file/", "program": {"title": "Cut short"}}},
+        {"id": 65, "start_time": iso(now - 40000), "end_time": iso(now - 36400), "channel": c, "custom_properties": {"status": "failed", "program": {"title": "Nothing kept"}}},
     ])).await;
     get(&server, "/api/channels/recurring-rules/", json!([])).await;
     get(&server, "/api/channels/series-rules/", json!({"rules": []})).await;
@@ -712,6 +730,38 @@ async fn play_recording_in_progress_hls_and_completed_file_with_resume() {
         svc.play_recording(done_id).await.unwrap().resume_secs,
         Some(900)
     );
+    let listed = svc.list_recordings().await.unwrap();
+    let done_dto = listed.completed.iter().find(|x| x.id == done_id).unwrap();
+    assert_eq!(
+        (
+            done_dto.position_secs,
+            done_dto.duration_secs,
+            done_dto.watched
+        ),
+        (Some(900), 3600, false)
+    );
+    svc.report_recording_position(done_id, 3590, None)
+        .await
+        .unwrap();
+    let listed = svc.list_recordings().await.unwrap();
+    let done_dto = listed.completed.iter().find(|x| x.id == done_id).unwrap();
+    assert_eq!((done_dto.position_secs, done_dto.watched), (None, true));
+    svc.report_recording_position(done_id, 900, None)
+        .await
+        .unwrap();
+    let by_title = |t: &str| listed.completed.iter().find(|x| x.title == t).unwrap();
+    let (partial, empty) = (by_title("Cut short"), by_title("Nothing kept"));
+    assert!(partial.playable && !empty.playable);
+    assert!(
+        svc.play_recording(partial.id)
+            .await
+            .unwrap()
+            .plan
+            .url
+            .ends_with("/api/channels/recordings/64/file/"),
+        "a failed recording with a file plays what was kept"
+    );
+    assert!(svc.play_recording(empty.id).await.is_err());
     assert!(
         svc.play_recording(r.upcoming[0].id).await.is_err(),
         "nothing to watch yet"

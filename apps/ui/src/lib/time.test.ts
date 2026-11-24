@@ -7,6 +7,7 @@ import {
   formatDay,
   formatDuration,
   formatRange,
+  formatSpan,
   isLiveNow,
   minutesLeft,
   progress,
@@ -50,6 +51,13 @@ describe('time', () => {
     expect(formatDuration(309)).toBe('5:09');
     expect(formatDuration(3909)).toBe('1:05:09');
     expect(formatDuration(-4)).toBe('0:00');
+  });
+
+  it('formats compact spans', () => {
+    expect(formatSpan(55 * 60)).toBe('55m');
+    expect(formatSpan(7200)).toBe('2h');
+    expect(formatSpan(3 * 3600 + 600)).toBe('3h 10m');
+    expect(formatSpan(10)).toBe('1m');
   });
 
   it('computes progress, clamped', () => {

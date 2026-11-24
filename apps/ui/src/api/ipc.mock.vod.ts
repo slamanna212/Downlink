@@ -97,24 +97,51 @@ let recs: Recording[] | null = null;
 let rules: RecordingRule[] | null = null;
 let nextRec = 100;
 
+const CHANNEL_NAMES = ['Harbor News 24', 'Meridian One', 'Cobalt Sports', 'Lantern Cinema', 'Orchard Kids', 'Northwind Docs'];
+
 function seed(now: number): void {
   if (recs) return;
-  const mk = (i: number, status: Recording['status'], off: number, dur: number, extra: Partial<Recording> = {}): Recording => ({
-    id: i, title: title(i * 3), subtitle: i % 2 ? ['Low Tide', 'Second Light', 'Paper Boats', 'Signal and Noise', 'The Lantern Keeper'][i % 5]! : null,
-    description: 'Synthetic recording description from the guide.', season: i % 2 ? 1 + (i % 3) : null, episode: i % 2 ? i : null,
-    channelId: 100 + (i % 6), channelName: ['Harbor News 24', 'Meridian One', 'Cobalt Sports', 'Lantern Cinema', 'Orchard Kids', 'Northwind Docs'][i % 6]!,
-    startUtc: now + off, endUtc: now + off + dur, status, ruleId: null, ruleLabel: null, sizeBytes: status === 'completed' ? 800_000_000 + i * 90_000_000 : null, error: null, ...extra,
-  });
+  let id = 0;
+  const day = 86400;
+  // Shows with several episodes, across channels, at every stage: recording now, unwatched, part-watched,
+  // watched, interrupted (with and without a partial file), upcoming, and a rule with nothing under it yet.
+  const mk = (show: string, ch: number, status: Recording['status'], off: number, dur: number, extra: Partial<Recording> = {}): Recording => {
+    id += 1;
+    return {
+      id, title: show, subtitle: null, description: 'Synthetic recording description from the guide.', season: null, episode: null,
+      channelId: 100 + ch, channelName: CHANNEL_NAMES[ch]!, channelLogo: null,
+      startUtc: now + off, endUtc: now + off + dur, status, ruleId: null, ruleLabel: null,
+      sizeBytes: status === 'completed' ? 800_000_000 + id * 90_000_000 : null, error: null,
+      programmeId: status === 'scheduled' ? `rec-prog-${id}` : null,
+      positionSecs: null, durationSecs: dur, watched: false, playable: status !== 'scheduled', ...extra,
+    };
+  };
+  const cup = { ruleId: 1, ruleLabel: 'Recurring' };
+  const rally = { ruleId: 2, ruleLabel: 'Series' };
+  const quiz = { ruleId: 3, ruleLabel: 'Series' };
   recs = [
-    mk(1, 'scheduled', 3600, 3600, { ruleId: 1, ruleLabel: 'Series' }), mk(2, 'scheduled', 86400, 1800), mk(3, 'scheduled', 90000, 3600, { ruleId: 1, ruleLabel: 'Series' }),
-    mk(4, 'scheduled', 2 * 86400, 5400, { ruleId: 2, ruleLabel: 'Weekdays 19:00' }),
-    mk(5, 'recording', -1500, 3600),
-    mk(6, 'completed', -86400, 3600), mk(7, 'completed', -2 * 86400, 1800, { ruleId: 1, ruleLabel: 'Series' }), mk(8, 'completed', -3 * 86400, 5400),
-    mk(9, 'failed', -4 * 86400, 3600, { error: 'The channel stopped sending video, so this recording is incomplete.', sizeBytes: 120_000_000 }),
+    mk('Coastline Cup', 2, 'recording', -2 * 3600, 7.5 * 3600, { ...cup, subtitle: 'Day 1' }),
+    mk('Coastline Cup', 2, 'scheduled', day - 2 * 3600, 7.5 * 3600, { ...cup, subtitle: 'Day 2' }),
+    mk('Coastline Cup', 2, 'scheduled', 2 * day - 2 * 3600, 7.5 * 3600, { ...cup, subtitle: 'Day 3' }),
+    mk('Ridgeline Rally', 1, 'completed', -2 * day, 3 * 3600 + 600, { ...rally, subtitle: 'Valley stage · Race' }),
+    mk('Ridgeline Rally', 2, 'completed', -3 * day, 6900, { ...rally, subtitle: 'Valley stage · Qualifying', positionSecs: 2760 }),
+    mk('Ridgeline Rally', 2, 'completed', -4 * day, 3300, { ...rally, subtitle: 'Valley stage · Practice 3', watched: true }),
+    mk('Ridgeline Rally', 2, 'scheduled', 3 * day, 3600, { ...rally, subtitle: 'Coast stage · Practice 1' }),
+    mk('Ridgeline Rally', 1, 'scheduled', 4 * day, 9000, { ...rally, subtitle: 'Coast stage · Race 1' }),
+    mk('Night Quiz', 0, 'completed', -6 * day, 1800, { ...quiz, season: 10, episode: 8, watched: true }),
+    mk('Night Quiz', 0, 'completed', -13 * day, 1800, { ...quiz, season: 10, episode: 7, watched: true }),
+    mk('Night Quiz', 0, 'scheduled', 3 * 3600, 1800, { ...quiz, season: 10, episode: 9 }),
+    mk('Paper Kites', 5, 'completed', -6 * day, 1800, { season: 17, episode: 4, positionSecs: 480 }),
+    mk('Paper Kites', 5, 'scheduled', 4 * 3600, 1800, { season: 17, episode: 5 }),
+    mk('Garden Hours', 5, 'completed', -5 * day, 3480, { season: 36, episode: 32 }),
+    mk('Harbor Derby', 3, 'failed', -9 * day, 7200, { subtitle: 'North v South', error: 'The stream dropped after 1 h 12 min, so this recording is incomplete.', sizeBytes: 120_000_000 }),
+    mk('Lantern Shorts', 3, 'failed', -10 * day, 3600, { error: 'The provider refused the connection.', playable: false }),
   ];
   rules = [
-    { id: 1, title: title(3), channelName: 'Harbor News 24', kind: 'series', schedule: 'New episodes' },
-    { id: 2, title: title(12), channelName: 'Northwind Docs', kind: 'recurring', schedule: 'Weekdays 19:00' },
+    { id: 1, title: 'Coastline Cup', channelName: 'Cobalt Sports', kind: 'recurring', schedule: 'Every day 10:30' },
+    { id: 2, title: 'Ridgeline Rally', channelName: '', kind: 'series', schedule: 'All episodes' },
+    { id: 3, title: 'Night Quiz', channelName: 'Harbor News 24', kind: 'series', schedule: 'New episodes' },
+    { id: 4, title: 'Morning Tides', channelName: 'Harbor News 24', kind: 'series', schedule: 'New episodes' },
   ];
 }
 
@@ -127,14 +154,32 @@ export function listRecordings(now: number): RecordingsData {
     completed: r.filter((x) => x.status === 'completed' || x.status === 'failed').sort((a, b) => b.startUtc - a.startUtc),
   };
 }
-export function addRecording(now: number, r: Omit<Recording, 'id' | 'status' | 'sizeBytes' | 'error' | 'ruleId' | 'ruleLabel'>, series: boolean): void {
+export function addRecording(
+  now: number,
+  r: Omit<Recording, 'id' | 'status' | 'sizeBytes' | 'error' | 'ruleId' | 'ruleLabel' | 'channelLogo' | 'positionSecs' | 'durationSecs' | 'watched' | 'playable'>,
+  series: boolean,
+): void {
   seed(now);
   let ruleId: number | null = null;
   if (series) {
     ruleId = Math.max(0, ...rules!.map((x) => x.id)) + 1;
     rules!.push({ id: ruleId, title: r.title, channelName: r.channelName, kind: 'series', schedule: 'New episodes' });
+    // A series rule adopts the show's existing recordings, like the server's title match.
+    recs = recs!.map((x) => (x.title === r.title ? { ...x, ruleId, ruleLabel: 'Series' } : x));
   }
-  recs!.push({ ...r, id: ++nextRec, status: 'scheduled', sizeBytes: null, error: null, ruleId, ruleLabel: series ? 'Series' : null });
+  if (recs!.some((x) => x.programmeId === r.programmeId || (x.channelId === r.channelId && x.startUtc === r.startUtc))) return;
+  recs!.push({
+    ...r, id: ++nextRec, status: 'scheduled', sizeBytes: null, error: null, ruleId, ruleLabel: series ? 'Series' : null,
+    channelLogo: null, positionSecs: null, durationSecs: r.endUtc - r.startUtc, watched: false, playable: false,
+  });
+}
+/** Start a series rule from an upcoming recording's programme (mock ids are `rec-prog-*`). */
+export function seriesFromRecording(now: number, programmeId: string): boolean {
+  seed(now);
+  const r = recs!.find((x) => x.programmeId === programmeId);
+  if (!r) return false;
+  addRecording(now, r, true);
+  return true;
 }
 export function updateRecording(id: number, f: (r: Recording) => Recording | null): void {
   recs = (recs ?? []).flatMap((r) => (r.id === id ? (f(r) ? [f(r)!] : []) : [r]));
@@ -143,5 +188,7 @@ export const getRecording = (id: number) => recs?.find((r) => r.id === id);
 export const listRules = (now: number) => (seed(now), rules!);
 export function deleteRule(id: number): void {
   rules = (rules ?? []).filter((r) => r.id !== id);
-  recs = (recs ?? []).filter((r) => !(r.ruleId === id && r.status === 'scheduled'));
+  recs = (recs ?? [])
+    .filter((r) => !(r.ruleId === id && r.status === 'scheduled'))
+    .map((r) => (r.ruleId === id ? { ...r, ruleId: null, ruleLabel: null } : r));
 }
