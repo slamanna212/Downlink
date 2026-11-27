@@ -734,7 +734,7 @@ export function PlayerPage() {
                   programmes={tlProgs.data ?? []}
                   pendingUtc={pendingUtc}
                   disabled={!player.seekable}
-                  playing={player.state === 'Playing'}
+                  playing={player.state === 'Playing' && !barHidden}
                   onSeekTo={(utc) => seekTo(utc)}
                 />
                 <span aria-label={behindNow ? t('player.behindLive', { time: formatDuration(behindLive) }) : undefined}>

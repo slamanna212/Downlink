@@ -335,6 +335,9 @@ export const en = {
   'settings.hwdec.autoSafe': 'Auto (safe)',
   'settings.hwdec.auto': 'Auto',
   'settings.hwdec.no': 'Off (software)',
+  'settings.performanceMode': 'Performance mode',
+  'settings.performanceMode.help':
+    'For slower computers that stutter or drop frames. Uses simpler video scaling and faster decoding, so the picture is slightly softer. If interlaced channels still stutter, try turning deinterlacing off.',
   'settings.buffer': 'Live buffer',
   'settings.buffer.help': 'Larger buffers survive network hiccups but zap slower.',
   'settings.timeshift': 'Pause and rewind live TV',

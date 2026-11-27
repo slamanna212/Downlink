@@ -1,18 +1,23 @@
-//! HDR video surface for Linux on Wayland.
+//! Video surface for Linux on Wayland.
 //!
-//! GTK3 cannot tag its own surface with a colour space, so the video gets its **own** `wl_surface`:
-//! a subsurface of the window placed *below* it, seen through the webview's transparent video rect.
-//! A render thread draws mpv into it through EGL (10-bit, OpenGL render API) and tags it with
-//! `wp_color_management_v1`:
+//! The video gets its **own** `wl_surface`: a subsurface of the window placed *below* it, seen
+//! through the webview's transparent video rect. A render thread draws mpv into it through EGL
+//! (OpenGL render API), so video frames never go through GTK: the compositor shows them directly
+//! and neither the GTK main thread nor WebKit repaints per frame. That is much cheaper than a
+//! GtkGLArea, whose every frame makes GTK recomposite the window (webview included) on the main
+//! thread.
+//!
+//! When the compositor has `wp_color_management_v1` with what HDR needs and a 10-bit EGL config
+//! exists, the surface is 10-bit and tagged:
 //!
 //! - HDR content (PQ/HLG) on an output in HDR mode: mpv renders BT.2020 PQ tone-mapped to the
 //!   output's peak, and the surface carries a matching PQ image description.
 //! - Anything else: mpv renders SDR as usual and the surface carries no description (sRGB).
 //!
 //! The output's mode is tracked live (`image_description_changed`), so toggling HDR in the desktop
-//! settings switches the video without a restart. When the compositor lacks the protocol (or the
-//! features we need), or no 10-bit EGL config exists, [`HdrSurface::new`] returns `None` and the
-//! caller keeps the GtkGLArea path.
+//! settings switches the video without a restart. Without colour management (or a 10-bit config)
+//! the surface is a plain 8-bit SDR surface. [`SubsurfaceVideo::new`] returns `None` only when no
+//! subsurface can be made at all; the caller then uses the GtkGLArea path.
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void};
@@ -47,6 +52,7 @@ const REFERENCE_WHITE_NITS: u32 = 203;
 /// Display peak assumed when the compositor does not report one.
 const DEFAULT_PEAK_NITS: u32 = 1000;
 const GL_RGB10_A2: c_int = 0x8059;
+const GL_RGBA8: c_int = 0x8058;
 
 // ---------------------------------------------------------------------------------------------
 // EGL / wayland-egl, loaded at run time (GTK has already loaded both on Wayland).
@@ -355,7 +361,7 @@ impl Dispatch<WpImageDescriptionInfoV1, OutputKey> for WlState {
             Event::Done => {
                 if let Some(done) = st.pending_info.remove(&key.0) {
                     tracing::info!(
-                        "HDR surface: output mode hdr={} peak={} nits",
+                        "video surface: output mode hdr={} peak={} nits",
                         done.hdr,
                         done.peak
                     );
@@ -375,20 +381,29 @@ struct Wl {
     queue: EventQueue<WlState>,
     qh: QueueHandle<WlState>,
     state: WlState,
-    manager: WpColorManagerV1,
+    /// Colour management, when the compositor has what HDR needs; `None` = plain SDR surface.
+    cm: Option<ColorManagement>,
     surface: WlSurface,
     subsurface: WlSubsurface,
-    cm_surface: WpColorManagementSurfaceV1,
-    /// Per-output colour-management objects, kept alive for `image_description_changed`.
-    cm_outputs: Vec<(WlOutput, WpColorManagementOutputV1)>,
+    /// Our `wl_output` proxies (released on teardown).
+    outputs: Vec<WlOutput>,
+}
+
+struct ColorManagement {
+    manager: WpColorManagerV1,
+    surface: WpColorManagementSurfaceV1,
+    /// Per-output colour-management objects (same order as `Wl::outputs`), kept alive for
+    /// `image_description_changed`.
+    outputs: Vec<(ObjectId, WpColorManagementOutputV1)>,
 }
 
 impl Wl {
     fn query_output(&mut self, id: &ObjectId) {
-        let Some((_, cm)) = self.cm_outputs.iter().find(|(o, _)| &o.id() == id) else {
+        let Some(cm) = &self.cm else { return };
+        let Some((_, out)) = cm.outputs.iter().find(|(o, _)| o == id) else {
             return;
         };
-        cm.get_image_description(&self.qh, Some(OutputKey(id.clone())));
+        out.get_image_description(&self.qh, Some(OutputKey(id.clone())));
     }
 }
 
@@ -432,17 +447,17 @@ impl Sync {
     }
 }
 
-/// Main-thread handle to one HDR video subsurface and its render thread.
-pub(crate) struct HdrSurface {
+/// Main-thread handle to one video subsurface and its render thread.
+pub(crate) struct SubsurfaceVideo {
     sync: Arc<Sync>,
     thread: Option<JoinHandle<()>>,
     subsurface: WlSubsurface,
 }
 
-impl HdrSurface {
+impl SubsurfaceVideo {
     /// Set up the subsurface under `parent` (the window's `wl_surface`) on GTK's `wl_display`.
-    /// Returns `None` (after logging why) when HDR output is not possible here; the caller then
-    /// uses the GtkGLArea path.
+    /// Returns `None` (after logging why) when no subsurface can be made; the caller then uses the
+    /// GtkGLArea path.
     ///
     /// # Safety
     /// `wl_display` and `parent` must be GTK's live `wl_display` / toplevel `wl_surface`, and stay
@@ -457,7 +472,7 @@ impl HdrSurface {
         match unsafe { Self::try_new(wl_display, parent, engine, frames) } {
             Ok(s) => Some(s),
             Err(e) => {
-                tracing::info!("HDR video surface not used: {e}");
+                tracing::info!("Wayland video subsurface not used: {e}");
                 None
             }
         }
@@ -475,9 +490,7 @@ impl HdrSurface {
         let (globals, mut queue) =
             registry_queue_init::<WlState>(&conn).map_err(|e| format!("registry: {e}"))?;
         let qh = queue.handle();
-        let manager: WpColorManagerV1 = globals
-            .bind(&qh, 1..=1, ())
-            .map_err(|_| "compositor has no wp_color_manager_v1".to_owned())?;
+        let manager: Option<WpColorManagerV1> = globals.bind(&qh, 1..=1, ()).ok();
         let compositor: WlCompositor = globals
             .bind(&qh, 4..=4, ())
             .map_err(|e| format!("wl_compositor: {e}"))?;
@@ -498,12 +511,25 @@ impl HdrSurface {
         queue
             .roundtrip(&mut state)
             .map_err(|e| format!("roundtrip: {e}"))?;
-        if !state.caps.usable() {
-            return Err(format!(
-                "colour management lacks what HDR needs (parametric={} pq={} bt2020={} perceptual={})",
-                state.caps.parametric, state.caps.pq, state.caps.bt2020, state.caps.perceptual
-            ));
-        }
+        let manager = match manager {
+            Some(m) if state.caps.usable() => Some(m),
+            Some(m) => {
+                tracing::info!(
+                    "video surface: SDR only, colour management lacks what HDR needs \
+                     (parametric={} pq={} bt2020={} perceptual={})",
+                    state.caps.parametric,
+                    state.caps.pq,
+                    state.caps.bt2020,
+                    state.caps.perceptual
+                );
+                m.destroy();
+                None
+            }
+            None => {
+                tracing::info!("video surface: SDR only, compositor has no wp_color_manager_v1");
+                None
+            }
+        };
 
         // SAFETY: `parent` is GTK's live toplevel wl_surface (caller contract).
         let parent_id = unsafe { ObjectId::from_ptr(WlSurface::interface(), parent.cast()) }
@@ -517,26 +543,32 @@ impl HdrSurface {
         let subsurface = subcompositor.get_subsurface(&surface, &parent, &qh, ());
         subsurface.place_below(&parent);
         subsurface.set_desync();
-        let cm_surface = manager.get_surface(&surface, &qh, ());
 
-        let mut cm_outputs = Vec::new();
-        for o in outputs {
-            state.outputs.insert(o.id(), OutputInfo::default());
-            let cm = manager.get_output(&o, &qh, OutputKey(o.id()));
-            cm_outputs.push((o, cm));
-        }
+        let cm = manager.map(|manager| {
+            let cm_surface = manager.get_surface(&surface, &qh, ());
+            let mut cm_outputs = Vec::new();
+            for o in &outputs {
+                state.outputs.insert(o.id(), OutputInfo::default());
+                let out = manager.get_output(o, &qh, OutputKey(o.id()));
+                cm_outputs.push((o.id(), out));
+            }
+            ColorManagement {
+                manager,
+                surface: cm_surface,
+                outputs: cm_outputs,
+            }
+        });
         let mut wl = Wl {
             conn,
             queue,
             qh,
             state,
-            manager,
+            cm,
             surface,
             subsurface: subsurface.clone(),
-            cm_surface,
-            cm_outputs,
+            outputs,
         };
-        let ids: Vec<ObjectId> = wl.cm_outputs.iter().map(|(o, _)| o.id()).collect();
+        let ids: Vec<ObjectId> = wl.outputs.iter().map(Proxy::id).collect();
         for id in &ids {
             wl.query_output(id);
         }
@@ -557,7 +589,7 @@ impl HdrSurface {
         let thread = {
             let sync = sync.clone();
             std::thread::Builder::new()
-                .name("hdr-video".into())
+                .name("video-surface".into())
                 .spawn(move || render_thread(wl, display_addr, sync, frames, ready_tx))
                 .map_err(|e| e.to_string())?
         };
@@ -602,7 +634,7 @@ impl HdrSurface {
     }
 }
 
-impl Drop for HdrSurface {
+impl Drop for SubsurfaceVideo {
     fn drop(&mut self) {
         self.sync.poke(|s| s.quit = true);
         if let Some(t) = self.thread.take() {
@@ -643,7 +675,7 @@ fn choose_mode(user_auto: bool, output: Option<OutputInfo>, content_hdr: bool) -
 fn apply_mode(engine: &Engine, mode: Mode) {
     let set = |k: &str, v: &str| {
         if let Err(e) = engine.set_property(k, v) {
-            tracing::warn!("HDR surface: {k}={v} not applied: {e}");
+            tracing::warn!("video surface: {k}={v} not applied: {e}");
         }
     };
     match mode {
@@ -664,7 +696,11 @@ fn apply_mode(engine: &Engine, mode: Mode) {
 
 /// Create our PQ image description for an output peaking at `peak` nits and wait until it is ready.
 fn create_pq_description(wl: &mut Wl, peak: u32) -> Option<WpImageDescriptionV1> {
-    let creator = wl.manager.create_parametric_creator(&wl.qh, ());
+    let creator = wl
+        .cm
+        .as_ref()?
+        .manager
+        .create_parametric_creator(&wl.qh, ());
     creator.set_tf_named(TransferFunction::St2084Pq);
     creator.set_primaries_named(Primaries::Bt2020);
     if wl.state.caps.luminances {
@@ -683,7 +719,7 @@ fn create_pq_description(wl: &mut Wl, peak: u32) -> Option<WpImageDescriptionV1>
                 return Some(desc);
             }
             desc.destroy();
-            tracing::warn!("HDR surface: compositor rejected the PQ image description");
+            tracing::warn!("video surface: compositor rejected the PQ image description");
             return None;
         }
         if wl.queue.roundtrip(&mut wl.state).is_err() {
@@ -700,10 +736,17 @@ struct Gl {
     surf: EglSurface,
     window: *mut c_void,
     size: (i32, i32),
+    /// The framebuffer has 10 bits per channel (else 8).
+    ten_bit: bool,
 }
 
 impl Gl {
-    unsafe fn new(wl_display: *mut c_void, surface: *mut c_void) -> Result<Self, String> {
+    /// `want_ten_bit`: try a 10-bit config first (HDR needs it); falls back to 8-bit.
+    unsafe fn new(
+        wl_display: *mut c_void,
+        surface: *mut c_void,
+        want_ten_bit: bool,
+    ) -> Result<Self, String> {
         let egl = Box::new(Egl::load()?);
         // SAFETY: all calls below follow the EGL 1.4 / wayland-egl contracts with valid handles;
         // `wl_display`/`surface` are live (GTK's display, our wl_surface).
@@ -719,36 +762,42 @@ impl Gl {
             if (egl.bind_api)(EGL_OPENGL_API) == 0 {
                 return Err("eglBindAPI(OpenGL) failed".into());
             }
-            let attrs = [
-                EGL_SURFACE_TYPE,
-                EGL_WINDOW_BIT,
-                EGL_RENDERABLE_TYPE,
-                EGL_OPENGL_BIT,
-                EGL_RED_SIZE,
-                10,
-                EGL_GREEN_SIZE,
-                10,
-                EGL_BLUE_SIZE,
-                10,
-                EGL_ALPHA_SIZE,
-                0,
-                EGL_NONE,
-            ];
-            let mut configs = [std::ptr::null_mut(); 32];
-            let mut n = 0;
-            if (egl.choose_config)(dpy, attrs.as_ptr(), configs.as_mut_ptr(), 32, &mut n) == 0 {
-                return Err("eglChooseConfig failed".into());
-            }
-            // Exactly 10 bits per channel (the list also holds deeper/float configs).
-            let config = configs[..n.max(0) as usize]
-                .iter()
-                .copied()
-                .find(|&c| {
-                    let mut r = 0;
-                    (egl.get_config_attrib)(dpy, c, EGL_RED_SIZE, &mut r);
-                    r == 10
-                })
-                .ok_or("no 10-bit EGL window config")?;
+            // Exactly `bits` per channel (the list also holds deeper/float configs).
+            let pick = |bits: i32| -> Option<EglConfig> {
+                let attrs = [
+                    EGL_SURFACE_TYPE,
+                    EGL_WINDOW_BIT,
+                    EGL_RENDERABLE_TYPE,
+                    EGL_OPENGL_BIT,
+                    EGL_RED_SIZE,
+                    bits,
+                    EGL_GREEN_SIZE,
+                    bits,
+                    EGL_BLUE_SIZE,
+                    bits,
+                    EGL_ALPHA_SIZE,
+                    0,
+                    EGL_NONE,
+                ];
+                let mut configs = [std::ptr::null_mut(); 32];
+                let mut n = 0;
+                if (egl.choose_config)(dpy, attrs.as_ptr(), configs.as_mut_ptr(), 32, &mut n) == 0 {
+                    return None;
+                }
+                configs[..n.clamp(0, 32) as usize]
+                    .iter()
+                    .copied()
+                    .find(|&c| {
+                        let mut r = 0;
+                        (egl.get_config_attrib)(dpy, c, EGL_RED_SIZE, &mut r);
+                        r == bits
+                    })
+            };
+            let ten = if want_ten_bit { pick(10) } else { None };
+            let ten_bit = ten.is_some();
+            let config = ten
+                .or_else(|| pick(8))
+                .ok_or("no 8-bit or 10-bit EGL window config")?;
             let ctx = (egl.create_context)(dpy, config, std::ptr::null_mut(), [EGL_NONE].as_ptr());
             if ctx.is_null() {
                 return Err("eglCreateContext failed".into());
@@ -780,6 +829,7 @@ impl Gl {
                 surf,
                 window,
                 size: (1, 1),
+                ten_bit,
             })
         }
     }
@@ -833,7 +883,7 @@ fn make_render_context(
             Some(rc)
         }
         Err(e) => {
-            tracing::error!("HDR surface: mpv_render_context_create failed: {e}");
+            tracing::error!("video surface: mpv_render_context_create failed: {e}");
             None
         }
     }
@@ -849,7 +899,7 @@ fn render_thread(
     let wl_display = wl_display as *mut c_void;
     let surface_ptr = wl.surface.id().as_ptr().cast::<c_void>();
     // SAFETY: GTK's display and our surface are live for the whole thread.
-    let mut gl = match unsafe { Gl::new(wl_display, surface_ptr) } {
+    let mut gl = match unsafe { Gl::new(wl_display, surface_ptr, wl.cm.is_some()) } {
         Ok(gl) => gl,
         Err(e) => {
             let _ = ready.send(Err(e));
@@ -865,12 +915,22 @@ fn render_thread(
         teardown(&wl);
         return;
     }
-    tracing::info!("HDR video surface active (Wayland subsurface, 10-bit EGL)");
+    // HDR needs both colour management and a 10-bit framebuffer.
+    let hdr_capable = wl.cm.is_some() && gl.ten_bit;
+    let format = if gl.ten_bit { GL_RGB10_A2 } else { GL_RGBA8 };
+    tracing::info!(
+        hdr_capable,
+        ten_bit = gl.ten_bit,
+        "video surface active (Wayland subsurface)"
+    );
     let _ = ready.send(Ok(()));
 
     let mut mode = Mode::Sdr;
     let mut tagged: Option<(u32, WpImageDescriptionV1)> = None;
     let mut shown = true;
+    // What the last presented frame was drawn at; a wake-up with no new mpv frame and nothing
+    // changed skips the render and swap.
+    let mut drawn: Option<((i32, i32), Mode)> = None;
     loop {
         let (geometry, visible, eng, quit) = {
             let mut s = sync.lock();
@@ -899,6 +959,7 @@ fn render_thread(
             engine = eng;
             rc = make_render_context(&gl, &engine, wl_display, &sync);
             mode = Mode::Sdr;
+            drawn = None;
         }
         let Some(ctx) = rc.as_ref() else { continue };
 
@@ -911,17 +972,19 @@ fn render_thread(
                 shown = false;
             }
             ctx.update();
+            drawn = None;
             continue;
         }
         shown = true;
 
         let want = choose_mode(
-            super::hdr_output_auto(),
+            hdr_capable && super::hdr_output_auto(),
             wl.state.current_output(),
-            content_is_hdr(&engine),
+            // Only asked when HDR is possible: reading the property costs a round trip into mpv.
+            hdr_capable && content_is_hdr(&engine),
         );
         if want != mode {
-            tracing::info!("HDR surface: rendering {want:?}");
+            tracing::info!("video surface: rendering {want:?}");
             apply_mode(&engine, want);
             mode = want;
         }
@@ -932,13 +995,17 @@ fn render_thread(
                     old.destroy();
                 }
                 if let Some(desc) = create_pq_description(&mut wl, peak) {
-                    wl.cm_surface
-                        .set_image_description(&desc, RenderIntent::Perceptual);
+                    if let Some(cm) = &wl.cm {
+                        cm.surface
+                            .set_image_description(&desc, RenderIntent::Perceptual);
+                    }
                     tagged = Some((peak, desc));
                 }
             }
             Mode::Sdr if tagged.is_some() => {
-                wl.cm_surface.unset_image_description();
+                if let Some(cm) = &wl.cm {
+                    cm.surface.unset_image_description();
+                }
                 if let Some((_, old)) = tagged.take() {
                     old.destroy();
                 }
@@ -948,14 +1015,20 @@ fn render_thread(
 
         let scale = geometry.scale.max(1);
         let (pw, ph) = (geometry.w.max(1) * scale, geometry.h.max(1) * scale);
+        // `update()` runs on every wake-up to consume mpv's flags; the 100 ms timeout and pokes
+        // that change nothing visible then cost no render or swap.
+        let fresh = ctx.update();
+        if !fresh && drawn == Some(((pw, ph), mode)) {
+            continue;
+        }
         gl.resize(pw, ph);
         wl.surface.set_buffer_scale(scale);
-        ctx.update();
-        if let Err(e) = ctx.render_with_format(0, pw, ph, GL_RGB10_A2, true, true) {
-            tracing::warn!("HDR surface: mpv render failed: {e}");
+        if let Err(e) = ctx.render_with_format(0, pw, ph, format, true, true) {
+            tracing::warn!("video surface: mpv render failed: {e}");
         }
         gl.swap();
         ctx.report_swap();
+        drawn = Some(((pw, ph), mode));
         frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
@@ -972,18 +1045,22 @@ fn render_thread(
 }
 
 fn teardown(wl: &Wl) {
-    for (_, cm) in &wl.cm_outputs {
-        cm.destroy();
+    if let Some(cm) = &wl.cm {
+        for (_, out) in &cm.outputs {
+            out.destroy();
+        }
+        cm.surface.destroy();
     }
-    for (o, _) in &wl.cm_outputs {
+    for o in &wl.outputs {
         if o.version() >= 3 {
             o.release();
         }
     }
-    wl.cm_surface.destroy();
     wl.subsurface.destroy();
     wl.surface.destroy();
-    wl.manager.destroy();
+    if let Some(cm) = &wl.cm {
+        cm.manager.destroy();
+    }
     let _ = wl.conn.flush();
 }
 

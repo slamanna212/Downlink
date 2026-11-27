@@ -237,6 +237,9 @@ pub struct Preferences {
     pub rtx_super_resolution: bool,
     /// NVIDIA RTX Video HDR: SDR shown as HDR (Windows, RTX cards, needs `hdr_output` Auto).
     pub rtx_hdr: bool,
+    /// Performance mode for slow machines: cheapest scaling and rendering, faster software
+    /// decoding (see [`PERFORMANCE_OPTIONS`]).
+    pub performance_mode: bool,
 }
 
 /// Lowest live buffer: never run the cache thinner than this.
@@ -265,6 +268,7 @@ impl Default for Preferences {
             timeshift_dir: String::new(),
             rtx_super_resolution: false,
             rtx_hdr: false,
+            performance_mode: false,
         }
     }
 }
@@ -290,6 +294,22 @@ impl Preferences {
         }
     }
 
+    /// The `hwdec` value handed to mpv. The automatic settings also list their copy-back
+    /// variants: mpv walks the list and moves on when a zero-copy decoder has no way to hand frames
+    /// to the renderer (VAAPI under GLX on X11, for example), so the machine falls back to
+    /// copy-back hardware decoding instead of software decoding. Explicit choices are passed as is.
+    pub fn hwdec_mpv_value(&self) -> &'static str {
+        match self.hwdec_effective() {
+            "auto-safe" => "auto-safe,auto-copy-safe",
+            "auto" => "auto,auto-copy",
+            other => HWDEC_ALLOWED
+                .iter()
+                .copied()
+                .find(|v| *v == other)
+                .unwrap_or("auto-safe,auto-copy-safe"),
+        }
+    }
+
     pub fn audio_mode_effective(&self) -> AudioMode {
         effective_audio_mode(self.audio_mode, self.audio_device.as_deref())
     }
@@ -297,7 +317,7 @@ impl Preferences {
     /// The options that can be changed on a running instance (everything but `vo` etc.).
     pub fn live_options(&self) -> Opts {
         let mut o = vec![
-            kv("hwdec", self.hwdec_effective()),
+            kv("hwdec", self.hwdec_mpv_value()),
             kv("deinterlace", self.deinterlace.mpv_value()),
             kv("alang", self.alang.clone()),
             kv("slang", self.slang.clone()),
@@ -310,6 +330,11 @@ impl Preferences {
         ];
         o.extend(audio_mode_options(self.audio_mode_effective()));
         o.extend(subtitle_options(&self.subtitle));
+        // Turning the mode off restores mpv's defaults for these keys (the player reads them from
+        // mpv, so they are never hard-coded here).
+        if self.performance_mode {
+            o.extend(performance_options());
+        }
         if cfg!(target_os = "windows") {
             o.push(colorspace_hint(self.hdr_output));
         } else {
@@ -318,6 +343,33 @@ impl Preferences {
         }
         o
     }
+}
+
+/// Performance mode (mpv's built-in `fast` profile plus faster software decoding), for machines
+/// that drop frames:
+///
+/// - bilinear scaling everywhere, no dithering, no linear/sigmoid light, no correct downscaling:
+///   the renderer's shaders are the main GPU cost on weak integrated graphics, more so when
+///   scaling up to a large display;
+/// - no HDR peak detection when tone-mapping (a compute pass every frame);
+/// - software decoding (only used when hardware decoding is unavailable for the stream) takes
+///   FFmpeg's non-bit-exact shortcuts and skips the H.264 loop filter on non-key frames, at some
+///   cost in picture quality. Both are ignored by hardware decoders.
+pub const PERFORMANCE_OPTIONS: &[(&str, &str)] = &[
+    ("scale", "bilinear"),
+    ("dscale", "bilinear"),
+    ("cscale", "bilinear"),
+    ("dither-depth", "no"),
+    ("correct-downscaling", "no"),
+    ("linear-downscaling", "no"),
+    ("sigmoid-upscaling", "no"),
+    ("hdr-compute-peak", "no"),
+    ("vd-lavc-fast", "yes"),
+    ("vd-lavc-skiploopfilter", "nonkey"),
+];
+
+fn performance_options() -> Opts {
+    PERFORMANCE_OPTIONS.iter().map(|(k, v)| kv(k, *v)).collect()
 }
 
 /// Label of the RTX Video filter in mpv's `vf` chain.
@@ -445,7 +497,7 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
             o.push(colorspace_hint(prefs.hdr_output));
         }
     }
-    o.push(kv("hwdec", prefs.hwdec_effective()));
+    o.push(kv("hwdec", prefs.hwdec_mpv_value()));
     o.push(kv("ao", AUDIO_OUTPUTS));
     o.push(kv("video-sync", "audio"));
     o.push(kv("keep-open", "no"));
@@ -476,6 +528,9 @@ pub fn base_options(prefs: &Preferences, backend: RenderBackend) -> Opts {
     }
     if !prefs.slang.is_empty() {
         o.push(kv("slang", prefs.slang.clone()));
+    }
+    if prefs.performance_mode {
+        o.extend(performance_options());
     }
     o
 }
@@ -743,7 +798,7 @@ mod tests {
     fn base_render_api() {
         let o = base_options(&Preferences::default(), RenderBackend::RenderApi);
         assert!(has(&o, "vo", "libmpv"));
-        assert!(has(&o, "hwdec", "auto-safe"));
+        assert!(has(&o, "hwdec", "auto-safe,auto-copy-safe"));
         assert!(has(&o, "video-sync", "audio"));
         assert!(has(&o, "idle", "yes"));
         assert!(has(&o, "keep-open", "no"));
@@ -1030,6 +1085,42 @@ mod tests {
             ..Preferences::default()
         };
         assert_eq!(bad.hwdec_effective(), "auto-safe");
+        assert_eq!(bad.hwdec_mpv_value(), "auto-safe,auto-copy-safe");
+    }
+
+    #[test]
+    fn automatic_hwdec_falls_back_to_copy_back_modes() {
+        let pick = |v: &str| {
+            Preferences {
+                hwdec: v.into(),
+                ..Preferences::default()
+            }
+            .hwdec_mpv_value()
+        };
+        assert_eq!(pick("auto-safe"), "auto-safe,auto-copy-safe");
+        assert_eq!(pick("auto"), "auto,auto-copy");
+        assert_eq!(pick("vaapi"), "vaapi");
+        assert_eq!(pick("no"), "no");
+    }
+
+    #[test]
+    fn performance_mode_adds_the_fast_options_only_when_on() {
+        let off = Preferences::default();
+        let on = Preferences {
+            performance_mode: true,
+            ..Preferences::default()
+        };
+        let base_off = base_options(&off, RenderBackend::RenderApi);
+        let base_on = base_options(&on, RenderBackend::RenderApi);
+        for (k, v) in PERFORMANCE_OPTIONS {
+            assert!(
+                !base_off.iter().any(|(key, _)| key == k),
+                "{k} set when off"
+            );
+            assert!(has(&base_on, k, v));
+            assert!(has(&on.live_options(), k, v));
+            assert!(!off.live_options().iter().any(|(key, _)| key == k));
+        }
     }
 
     #[test]

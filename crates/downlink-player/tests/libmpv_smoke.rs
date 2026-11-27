@@ -40,6 +40,36 @@ fn engine_initialises_and_reports_version() {
     assert!(diag.iter().any(|(k, _)| k == "mpv-version"));
 }
 
+/// Every option string the performance mode and the hwdec fallback hand mpv is one this libmpv
+/// accepts (`Engine::new` only logs rejected options), and each performance option has a default
+/// mpv can report, which is what turning the mode off restores.
+#[test]
+fn performance_and_hwdec_option_strings_are_accepted() {
+    let Some(loaded) = engine() else {
+        return;
+    };
+    let engine = match downlink_player::Engine::new(&loaded, &[]) {
+        Ok(e) => e,
+        Err(e) => panic!("engine init failed: {e}"),
+    };
+    let auto = Preferences::default();
+    if let Err(e) = engine.set_property("hwdec", auto.hwdec_mpv_value()) {
+        panic!("hwdec={} rejected: {e}", auto.hwdec_mpv_value());
+    }
+    for (k, v) in downlink_player::options::PERFORMANCE_OPTIONS {
+        if let Err(e) = engine.set_property(k, v) {
+            panic!("{k}={v} rejected: {e}");
+        }
+        let default = engine.get_property(&format!("option-info/{k}/default-value"));
+        let Some(default) = default else {
+            panic!("no default reported for {k}");
+        };
+        if let Err(e) = engine.set_property(k, &default) {
+            panic!("restoring {k}={default} rejected: {e}");
+        }
+    }
+}
+
 mod failover {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;

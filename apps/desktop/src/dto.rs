@@ -403,6 +403,10 @@ pub fn preferences_from_settings(v: &Value) -> Preferences {
         .and_then(Value::as_bool)
         .unwrap_or(false);
     p.rtx_hdr = v.get("rtxHdr").and_then(Value::as_bool).unwrap_or(false);
+    p.performance_mode = v
+        .get("performanceMode")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     if let Some(pct) = v.get("subtitleSize").and_then(Value::as_f64) {
         p.subtitle.size = if pct < 85.0 {
             SubtitleSize::Small
@@ -603,6 +607,15 @@ mod tests {
             &serde_json::json!({ "rtxSuperResolution": true, "rtxHdr": true }),
         );
         assert!(on.rtx_super_resolution && on.rtx_hdr);
+    }
+
+    #[test]
+    fn performance_mode_defaults_off() {
+        assert!(!preferences_from_settings(&serde_json::json!({})).performance_mode);
+        assert!(
+            preferences_from_settings(&serde_json::json!({ "performanceMode": true }))
+                .performance_mode
+        );
     }
 
     #[test]

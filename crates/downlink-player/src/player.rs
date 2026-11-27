@@ -752,10 +752,14 @@ impl Player {
     /// applies from the next `play`.
     pub fn set_preferences(&self, prefs: Preferences) {
         crate::surface::set_hdr_output(prefs.hdr_output);
+        let engine = self.inner.eng();
         for (k, v) in prefs.live_options() {
-            if let Err(e) = self.inner.eng().set_property(&k, &v) {
+            if let Err(e) = engine.set_property(&k, &v) {
                 tracing::warn!("preference `{k}` not applied: {e}");
             }
+        }
+        if !prefs.performance_mode && self.preferences().performance_mode {
+            restore_option_defaults(&engine, crate::options::PERFORMANCE_OPTIONS);
         }
         if let Ok(mut p) = self.inner.prefs.lock() {
             *p = prefs;
@@ -1707,6 +1711,20 @@ fn supervise_engine_death(inner: &Arc<Inner>) {
     );
 }
 
+/// Put the given options back to mpv's own defaults (read from `option-info`, so no default is
+/// hard-coded and a newer mpv's defaults are honoured).
+fn restore_option_defaults(engine: &Engine, options: &[(&str, &str)]) {
+    for (k, _) in options {
+        let Some(default) = engine.get_property(&format!("option-info/{k}/default-value")) else {
+            tracing::warn!("no default for mpv option `{k}`");
+            continue;
+        };
+        if let Err(e) = engine.set_property(k, &default) {
+            tracing::warn!("could not restore `{k}`: {e}");
+        }
+    }
+}
+
 fn rebuild_engine(inner: &Arc<Inner>) -> Result<(), PlayerError> {
     let (loaded, opts) = &inner.recipe;
     let engine = Arc::new(Engine::new(loaded, opts)?);
@@ -1722,6 +1740,11 @@ fn rebuild_engine(inner: &Arc<Inner>) -> Result<(), PlayerError> {
     };
     for (k, v) in prefs.live_options() {
         let _ = engine.set_property(&k, &v);
+    }
+    // The recipe holds the options from start-up, which may include a performance mode turned
+    // off since.
+    if !prefs.performance_mode {
+        restore_option_defaults(&engine, crate::options::PERFORMANCE_OPTIONS);
     }
     // The new engine has no `vf`; the replayed `loadfile` re-applies the RTX chain.
     {

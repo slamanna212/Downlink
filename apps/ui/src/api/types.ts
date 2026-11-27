@@ -299,6 +299,8 @@ export interface AppSettings {
   rtxSuperResolution?: boolean;
   /** NVIDIA RTX Video HDR, SDR shown as HDR (needs `hdrOutput` auto). Missing = off. */
   rtxHdr?: boolean;
+  /** Cheaper scaling and decoding for slow machines. Missing = off. */
+  performanceMode?: boolean;
   /** Percent, 50..150. */
   subtitleSize: number;
   subtitleBackground: boolean;

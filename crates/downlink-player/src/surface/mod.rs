@@ -11,7 +11,7 @@ pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
 #[cfg(target_os = "linux")]
-mod wayland_hdr;
+mod wayland_video;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
@@ -51,9 +51,8 @@ pub trait VideoSurface {
     fn detach(&mut self);
 }
 
-/// The user's HDR output setting, for surfaces that pick their rendering path when attached (Linux).
-/// Updated by [`crate::Player::new`] and [`crate::Player::set_preferences`]; read at attach time, so a
-/// change applies the next time a video surface is created.
+/// The user's HDR output setting, for the Linux Wayland video surface (read live on each frame).
+/// Updated by [`crate::Player::new`] and [`crate::Player::set_preferences`].
 static HDR_AUTO: AtomicBool = AtomicBool::new(true);
 
 pub(crate) fn set_hdr_output(h: HdrOutput) {

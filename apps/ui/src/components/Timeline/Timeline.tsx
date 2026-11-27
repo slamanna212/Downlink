@@ -8,6 +8,8 @@ import classes from './Timeline.module.css';
 export const TIMELINE_SPAN_SECONDS = hoursToSeconds(1);
 /** Pointer travel (px) below which a press is a click, not a drag. */
 const DRAG_THRESHOLD_PX = 4;
+/** Minimum time between glide steps while playing. */
+const GLIDE_STEP_MS = 100;
 
 export interface TimelineProgramme {
   startUtc: Epoch;
@@ -23,7 +25,10 @@ export interface TimelineProps {
   pendingUtc?: Epoch | null;
   spanSeconds?: number;
   disabled?: boolean;
-  /** Media is playing: the bar glides at real time between player updates instead of stepping. */
+  /**
+   * Media is playing and the bar is on screen: it glides at real time between player updates instead of
+   * stepping. Pass false while the bar is hidden so nothing animates under the video.
+   */
   playing?: boolean;
   label: string;
   onSeekTo: (utc: Epoch) => void;
@@ -46,6 +51,10 @@ function useGlidingTimeline(timeline: TimelineState, playing: boolean): { playhe
     let last = performance.now();
     let prev: { playhead: number; edge: number } | null = null;
     const tick = (now: number) => {
+      frame = requestAnimationFrame(tick);
+      // The bar moves well under a pixel per frame: a few steps a second look the same and spare the
+      // webview (drawn over the video) a re-render on every display refresh.
+      if (prev && now - last < GLIDE_STEP_MS) return;
       const dt = (now - last) / 1000;
       last = now;
       const { timeline: tl, at } = raw.current;
@@ -54,7 +63,6 @@ function useGlidingTimeline(timeline: TimelineState, playing: boolean): { playhe
       const edge = Math.max(playhead, smoothStep(prev?.edge ?? null, tl.liveEdgeUtc + age, dt, true));
       prev = { playhead, edge };
       setShown(prev);
-      frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);

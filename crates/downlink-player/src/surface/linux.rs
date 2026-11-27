@@ -6,9 +6,11 @@
 //! overlay; other slots add their own `GtkGLArea` to the same overlay, also under the webview. The
 //! GTK state lives in a main-thread thread-local keyed by slot.
 //!
-//! On Wayland with HDR output on Auto, a slot first tries the HDR subsurface (`wayland_hdr`): our
-//! own `wl_surface` under the window, tagged with `wp_color_management_v1`. Without the protocol (or
-//! a 10-bit EGL config) it falls back to the GtkGLArea.
+//! On Wayland a slot first tries the video subsurface (`wayland_video`): our own `wl_surface` under
+//! the window, drawn on its own thread, so video frames bypass GTK and WebKit entirely (and are
+//! tagged HDR when the compositor supports `wp_color_management_v1`). The GtkGLArea is the X11 path
+//! and the fallback when no subsurface can be made. `DOWNLINK_VIDEO_SURFACE=glarea` forces the
+//! GtkGLArea on Wayland too (troubleshooting).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -22,7 +24,7 @@ use gtk::glib::translate::ToGlibPtr;
 use gtk::prelude::*;
 use libloading::Library;
 
-use super::wayland_hdr::HdrSurface;
+use super::wayland_video::SubsurfaceVideo;
 use super::{MainThreadDispatch, SurfaceBounds, VideoSurface};
 use crate::engine::{Engine, RenderContext};
 use crate::error::PlayerError;
@@ -118,7 +120,7 @@ fn apply_bounds(st: &GtkState, b: SurfaceBounds) {
             glarea.set_size_request(w, h);
             glarea.queue_render();
         }
-        Video::Hdr { surface, toplevel } => {
+        Video::Subsurface { surface, toplevel } => {
             // Bounds are relative to the webview, which fills the overlay; the subsurface is
             // positioned in the window surface's coordinates (CSD shadow included).
             let (ox, oy) = st
@@ -147,27 +149,19 @@ fn reapply_all() {
 
 /// How this slot shows video.
 enum Video {
-    /// mpv renders into a GtkGLArea under the webview (SDR; X11, or no Wayland colour management).
+    /// mpv renders into a GtkGLArea under the webview (SDR; X11, or no Wayland subsurface).
     GlArea {
         glarea: gtk::GLArea,
         render: Rc<RefCell<Option<RenderContext>>>,
         engine_slot: Rc<RefCell<Arc<Engine>>>,
         create: CreateSlot,
     },
-    /// mpv renders into our own Wayland subsurface under the window, tagged HDR when the content
-    /// and the output are (see `wayland_hdr`).
-    Hdr {
-        surface: HdrSurface,
+    /// mpv renders into our own Wayland subsurface under the window on its own thread, tagged HDR
+    /// when the content and the output are (see `wayland_video`).
+    Subsurface {
+        surface: SubsurfaceVideo,
         toplevel: gtk::Widget,
     },
-}
-
-/// More than one surface is attached (multiview). Renders then must not block for the frame's
-/// target time: all surfaces render on the GTK main thread, and one blocking render starves the rest.
-static SURFACES: AtomicU64 = AtomicU64::new(0);
-
-fn multi_active() -> bool {
-    SURFACES.load(Ordering::Relaxed) > 1
 }
 
 thread_local! {
@@ -294,20 +288,22 @@ impl VideoSurface for LinuxSurface {
         };
 
         let (wl, x11, wayland) = display_pointers();
+        let force_glarea = std::env::var("DOWNLINK_VIDEO_SURFACE").is_ok_and(|v| v == "glarea");
         tracing::info!(
             wayland,
             hdr_auto = super::hdr_output_auto(),
+            force_glarea,
             "video surface: choosing path"
         );
-        if wayland && !wl.is_null() && super::hdr_output_auto() {
+        if wayland && !wl.is_null() && !force_glarea {
             let toplevel = vbox.toplevel();
             if let Some(parent) = toplevel.as_ref().and_then(toplevel_wl_surface) {
                 // SAFETY: GTK's wl_display and the window's wl_surface live as long as the window,
                 // and the surface is dropped (detach) before the window goes away.
-                let hdr = unsafe {
-                    HdrSurface::new(wl, parent, self.engine.clone(), self.frames.clone())
+                let sub = unsafe {
+                    SubsurfaceVideo::new(wl, parent, self.engine.clone(), self.frames.clone())
                 };
-                if let (Some(surface), Some(toplevel)) = (hdr, toplevel) {
+                if let (Some(surface), Some(toplevel)) = (sub, toplevel) {
                     if self.slot == 0 {
                         toplevel.connect_scale_factor_notify(|_| reapply_all());
                     }
@@ -319,14 +315,13 @@ impl VideoSurface for LinuxSurface {
                         vbox.pack_start(&overlay, true, true, 0);
                         overlay.show_all();
                     }
-                    SURFACES.fetch_add(1, Ordering::Relaxed);
                     let slot = self.slot;
                     STATE.with(|s| {
                         s.borrow_mut().insert(
                             slot,
                             GtkState {
                                 overlay,
-                                video: Video::Hdr { surface, toplevel },
+                                video: Video::Subsurface { surface, toplevel },
                                 bounds: std::cell::Cell::new(None),
                             },
                         );
@@ -350,6 +345,9 @@ impl VideoSurface for LinuxSurface {
         let gl_get_integerv: Rc<RefCell<Option<GlGetIntegerv>>> = Rc::new(RefCell::new(None));
         let engine_slot: Rc<RefCell<Arc<Engine>>> = Rc::new(RefCell::new(self.engine.clone()));
         let create_cell: CreateSlot = Rc::new(RefCell::new(None));
+        // Size of the last frame drawn into the area; `None` forces the next render (new context).
+        let drawn_size: Rc<std::cell::Cell<Option<(i32, i32)>>> =
+            Rc::new(std::cell::Cell::new(None));
 
         {
             let render = render.clone();
@@ -357,7 +355,9 @@ impl VideoSurface for LinuxSurface {
             let engine_slot = engine_slot.clone();
             let gl_get = gl_get_integerv.clone();
             let create_slot = create_cell.clone();
+            let drawn_size = drawn_size.clone();
             let create: Rc<dyn Fn(&gtk::GLArea)> = Rc::new(move |area: &gtk::GLArea| {
+                drawn_size.set(None);
                 let engine = engine_slot.borrow().clone();
                 area.make_current();
                 if let Some(err) = area.error() {
@@ -415,22 +415,34 @@ impl VideoSurface for LinuxSurface {
             let loader_keepalive = loader.clone();
             let gl_get = gl_get_integerv.clone();
             let frames = self.frames.clone();
+            let drawn_size = drawn_size.clone();
             glarea.connect_render(move |area, _ctx| {
                 let _keep = &loader_keepalive;
                 if let Some(rc) = render.borrow().as_ref() {
-                    rc.update();
                     let scale = area.scale_factor();
                     let (w, h) = (
                         area.allocated_width() * scale,
                         area.allocated_height() * scale,
                     );
+                    // GTK keeps the area's framebuffer between draws, so a render signal with no
+                    // new mpv frame and an unchanged size (bounds re-applied, a stray redraw) can
+                    // reuse it. `update()` must still run every time to consume mpv's flags.
+                    let fresh = rc.update();
+                    if !fresh && drawn_size.get() == Some((w, h)) {
+                        return glib::Propagation::Stop;
+                    }
+                    drawn_size.set(Some((w, h)));
                     let mut fbo: i32 = 0;
                     if let Some(f) = *gl_get.borrow() {
                         // SAFETY: GL context is current inside the render signal; `fbo` is a
                         // valid out pointer for one GLint.
                         unsafe { f(GL_FRAMEBUFFER_BINDING, &mut fbo) };
                     }
-                    if let Err(e) = rc.render(fbo, w, h, true, !multi_active()) {
+                    // Never block for the frame's target time: this runs on the GTK main thread,
+                    // which also drives the webview, IPC and input (and the other multiview tiles).
+                    // mpv has already queued the frame for its display time; GTK's frame clock
+                    // presents it on the next vsync.
+                    if let Err(e) = rc.render(fbo, w, h, true, false) {
                         tracing::warn!("mpv render failed: {e}");
                     }
                     rc.report_swap();
@@ -483,7 +495,6 @@ impl VideoSurface for LinuxSurface {
         }
 
         let slot = self.slot;
-        SURFACES.fetch_add(1, Ordering::Relaxed);
         STATE.with(|s| {
             s.borrow_mut().insert(
                 slot,
@@ -520,7 +531,7 @@ impl VideoSurface for LinuxSurface {
                 }
                 glarea.queue_render();
             }
-            Video::Hdr { surface, .. } => surface.rebind(engine),
+            Video::Subsurface { surface, .. } => surface.rebind(engine),
         });
     }
 
@@ -535,7 +546,7 @@ impl VideoSurface for LinuxSurface {
         self.with_state(move |st| match &st.video {
             // Hiding does not unrealize, so the render context survives.
             Video::GlArea { glarea, .. } => glarea.set_visible(visible),
-            Video::Hdr { surface, .. } => surface.set_visible(visible),
+            Video::Subsurface { surface, .. } => surface.set_visible(visible),
         });
     }
 
@@ -544,7 +555,6 @@ impl VideoSurface for LinuxSurface {
         let slot = self.slot;
         STATE.with(|s| {
             if let Some(st) = s.borrow_mut().remove(&slot) {
-                SURFACES.fetch_sub(1, Ordering::Relaxed);
                 match st.video {
                     Video::GlArea { glarea, render, .. } => {
                         glarea.make_current();
@@ -552,7 +562,7 @@ impl VideoSurface for LinuxSurface {
                         st.overlay.remove(&glarea);
                     }
                     // Dropping stops the render thread and destroys the subsurface.
-                    Video::Hdr { surface, .. } => drop(surface),
+                    Video::Subsurface { surface, .. } => drop(surface),
                 }
             }
         });

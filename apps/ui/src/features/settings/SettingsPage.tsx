@@ -233,6 +233,13 @@ function PlaybackSection() {
           onChange={(v) => v && patch.mutate({ hwdec: v as HwdecSetting })}
         />
       </SettingRow>
+      <SettingRow label={t('settings.performanceMode')} help={t('settings.performanceMode.help')} wide>
+        <Switch
+          aria-label={t('settings.performanceMode')}
+          checked={data.performanceMode ?? false}
+          onChange={(e) => patch.mutate({ performanceMode: e.currentTarget.checked })}
+        />
+      </SettingRow>
       <SettingRow label={t('settings.resumeLast')} help={t('settings.resumeLast.help')} wide>
         <Switch
           aria-label={t('settings.resumeLast')}

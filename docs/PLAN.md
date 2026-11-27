@@ -169,6 +169,13 @@ The Linux path is GTK-level, not a raw `wl_subsurface`, so it is expected to wor
 and X11**. M0 verifies GNOME (Mutter), KDE (KWin) and one X11 session. If X11 fails, the fallback is a
 separate video window on X11 only.
 
+*Update (2026-11):* on Wayland the video now goes into our own `wl_subsurface` under the window, drawn
+on its own render thread (`surface/wayland_video.rs`), and the `GtkGLArea` is used on X11 and as the
+fallback. With a GtkGLArea every video frame makes GTK recomposite the window, webview included, on the
+main thread, which is too slow on low-power machines. The subsurface bypasses GTK and WebKit, and it is
+also what carries HDR when the compositor supports `wp_color_management_v1`. Setting
+`DOWNLINK_VIDEO_SURFACE=glarea` forces the GtkGLArea for troubleshooting.
+
 **Why not the render API into the webview?** A webview can't consume a GPU texture from mpv without a
 per-engine shared-texture bridge (WebView2, WKWebView and WebKitGTK all differ). Native surface
 under a transparent webview is one design with three small shims.
