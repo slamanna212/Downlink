@@ -973,6 +973,7 @@ impl Source for XtreamClient {
                 episode: Some(e.episode).filter(|n| *n > 0),
                 duration_secs: e.duration_secs.filter(|d| *d > 0),
                 container: e.container_extension,
+                poster: e.poster,
                 ..Default::default()
             })
             .collect())

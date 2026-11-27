@@ -637,13 +637,17 @@ impl Service {
                 else {
                     return Ok(None);
                 };
+                let mut parent_art = None;
                 let subtitle = if row.kind == "episode" {
                     let series = match &row.parent_ext {
                         Some(p) => self
                             .store
                             .vod_by_ext(row.source_id, "series", p)
                             .await?
-                            .map(|s| s.name),
+                            .map(|s| {
+                                parent_art = s.backdrop_key.or(s.art_key);
+                                s.name
+                            }),
                         None => None,
                     };
                     Some(match (series, row.season, row.episode) {
@@ -661,7 +665,10 @@ impl Service {
                     programme: None,
                     title: row.name.clone(),
                     subtitle,
-                    art: self.art(row.source_id, row.art_key.as_deref()).await,
+                    art: match self.art(row.source_id, row.art_key.as_deref()).await {
+                        Some(art) => Some(art),
+                        None => self.art(row.source_id, parent_art.as_deref()).await,
+                    },
                     progress,
                     remaining_secs: remaining,
                 }))

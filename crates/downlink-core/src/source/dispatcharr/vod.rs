@@ -43,6 +43,8 @@ struct EpisodeRow {
     tmdb_id: Option<String>,
     #[serde(default, deserialize_with = "super::dto::de_opt_string")]
     imdb_id: Option<String>,
+    #[serde(default)]
+    custom_properties: Value,
 }
 
 #[derive(serde::Deserialize)]
@@ -63,6 +65,7 @@ impl EpisodeRow {
             title: self.name.unwrap_or_default(),
             rating: self.rating,
             plot: self.description,
+            poster: first_http(self.custom_properties.get("movie_image")),
             season: self.season_number,
             episode: self.episode_number,
             duration_secs: self.duration_secs.filter(|d| *d > 0),
