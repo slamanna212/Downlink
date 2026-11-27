@@ -213,7 +213,7 @@ fn assert_stream(name: &str, codec: &str, w: i64, h: i64) -> Option<Player> {
 }
 
 #[test]
-fn audio_tracks_are_listed_and_switchable() {
+fn playback_recovers_and_advances_after_switching_audio_tracks() {
     let Some((p, _srv)) = play_clip("two_audio", 20.0) else {
         return;
     };
@@ -242,6 +242,21 @@ fn audio_tracks_are_listed_and_switchable() {
         "selection never reached the snapshot: {:?} aid={:?}",
         audio(&p),
         p.engine().get_property("aid")
+    );
+    // A changed selection does not prove the video resumed. Sample the position after the
+    // selection is visible, so frames already decoded before it cannot satisfy the check.
+    let selected_at = prop_f64(&p, "time-pos");
+    assert!(
+        wait(
+            || p.snapshot().state == Some(SessionState::Playing)
+                && prop_f64(&p, "time-pos") >= selected_at + 1.0,
+            5
+        ),
+        "playback did not advance after the switch: state={:?} position={:.3} (was {:.3}) avsync={:?}",
+        p.snapshot().state,
+        prop_f64(&p, "time-pos"),
+        selected_at,
+        p.engine().get_property("avsync")
     );
 }
 
