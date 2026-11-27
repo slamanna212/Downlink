@@ -91,6 +91,13 @@ impl Store {
         self.pool.close().await;
     }
 
+    /// Refresh query-planner statistics for tables whose size changed a lot (bounded work). Run
+    /// after a sync: with millions of programme rows the planner needs real statistics.
+    pub async fn optimize(&self) -> Result<()> {
+        sqlx::query("PRAGMA optimize").execute(&self.pool).await?;
+        Ok(())
+    }
+
     /// Record the outcome of syncing one entity (`channels`, `guide`, …).
     pub async fn set_sync_ok(&self, source_id: i64, entity: &str, now: i64) -> Result<()> {
         sqlx::query(
@@ -190,7 +197,18 @@ async fn open_pool(path: &Path) -> Result<SqlitePool> {
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .foreign_keys(true)
-        .pragma("secure_delete", "ON")
+        // Nothing secret is stored (rule 7), so freed pages need not be zero-filled: FAST clears
+        // deleted content only where it costs no extra I/O. Guide refreshes delete and rewrite
+        // hundreds of thousands of rows; ON doubled that write volume.
+        .pragma("secure_delete", "FAST")
+        // 64 MiB page cache and up to 256 MiB memory-mapped reads per connection: large guides
+        // and catalogues no longer thrash the 2 MiB default.
+        .pragma("cache_size", "-65536")
+        .pragma("mmap_size", "268435456")
+        .pragma("temp_store", "MEMORY")
+        // Query-planner statistics: refreshed (bounded) when a connection closes and after syncs.
+        .analysis_limit(400u32)
+        .optimize_on_close(true, 400u32)
         .busy_timeout(Duration::from_secs(5));
     Ok(SqlitePoolOptions::new()
         .max_connections(4)

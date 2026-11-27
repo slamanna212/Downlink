@@ -51,46 +51,10 @@ pub struct XtreamClient {
     state: Mutex<AccountState>,
     vault: crate::vault::Vault,
     has_vod: std::sync::atomic::AtomicBool,
-    vod_cache: tokio::sync::Mutex<VodCache>,
-    /// Persists the VOD lists across restarts; `None` for throwaway clients (connection tests).
-    store: Option<crate::store::Store>,
 }
 
-/// Xtream has no server-side paging or search: the movie and series lists are fetched whole and
-/// served from memory, backed by `meta_cache` so a restart does not download them again.
-#[derive(Default)]
-struct VodCache {
-    movies: Slot<VodStreamDto>,
-    series: Slot<SeriesDto>,
-}
-
-/// `(fetched_at UTC seconds, rows)`.
-type Slot<T> = Option<(i64, std::sync::Arc<Vec<T>>)>;
-
-/// How long a fetched movie or series list is served before it is fetched again (only when VOD is
-/// being browsed: nothing refetches it in the background). VOD libraries change slowly.
-const VOD_CACHE_TTL_SECS: i64 = 6 * 3600;
-
-/// A cached VOD row whose artwork URLs are templated through the vault before it is written to
-/// SQLite (rule 7: no credentials in the database).
-trait VodRow: serde::Serialize + serde::de::DeserializeOwned + Send + Sync {
-    fn template(&mut self, vault: &crate::vault::Vault);
-}
-
-impl VodRow for VodStreamDto {
-    fn template(&mut self, vault: &crate::vault::Vault) {
-        self.icon = self.icon.as_deref().map(|u| vault.template_url(u));
-    }
-}
-
-impl VodRow for SeriesDto {
-    fn template(&mut self, vault: &crate::vault::Vault) {
-        self.cover = self.cover.as_deref().map(|u| vault.template_url(u));
-        self.backdrop_path = self.backdrop_path.as_deref().map(|u| vault.template_url(u));
-    }
-}
-
-/// `meta_cache` key prefix for a source's VOD lists (trailing `:` so source 1 never matches 12).
+/// `meta_cache` key prefix of the whole-list copies earlier versions kept (trailing `:` so source
+/// 1 never matches 12). The lists are `vod_item` rows now; the prefix remains for clean-up.
 pub fn vod_cache_prefix(source_id: i64) -> String {
     format!("xtvod:{source_id}:")
 }
@@ -191,16 +155,7 @@ impl XtreamClient {
             state: Mutex::new(AccountState::default()),
             vault: crate::vault::Vault::new(),
             has_vod: std::sync::atomic::AtomicBool::new(false),
-            vod_cache: tokio::sync::Mutex::new(VodCache::default()),
-            store: None,
         })
-    }
-
-    /// Keep the VOD lists in `store` as well as in memory.
-    #[must_use]
-    pub fn with_store(mut self, store: crate::store::Store) -> Self {
-        self.store = Some(store);
-        self
     }
 
     pub(crate) fn attach_credentials(
@@ -331,6 +286,19 @@ impl XtreamClient {
         extra: &[(&str, String)],
         what: &str,
     ) -> Result<Value> {
+        let bytes = self.get_body(action, extra, what).await?;
+        if bytes.iter().all(u8::is_ascii_whitespace) {
+            return Ok(Value::Null);
+        }
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    async fn get_body(
+        &self,
+        action: Option<&str>,
+        extra: &[(&str, String)],
+        what: &str,
+    ) -> Result<Vec<u8>> {
         let url = self.script_url("player_api.php", action, extra)?;
         let _permit = self
             .sem
@@ -355,11 +323,7 @@ impl XtreamClient {
         } else {
             256 * 1024
         };
-        let bytes = crate::http::read_body(resp, max_bytes, AppError::from).await?;
-        if bytes.iter().all(u8::is_ascii_whitespace) {
-            return Ok(Value::Null);
-        }
-        Ok(serde_json::from_slice(&bytes)?)
+        crate::http::read_body(resp, max_bytes, AppError::from).await
     }
 
     async fn list<T: serde::de::DeserializeOwned>(
@@ -368,19 +332,43 @@ impl XtreamClient {
         extra: &[(&str, String)],
         what: &str,
     ) -> Result<Vec<T>> {
-        let v = self.get_json(Some(action), extra, what).await?;
-        let items = match v {
-            Value::Array(a) => a,
-            // Some panels wrap, some answer `{}` for "nothing".
-            Value::Object(mut o) => match o.remove("data").or_else(|| o.remove("results")) {
-                Some(Value::Array(a)) => a,
-                _ => Vec::new(),
-            },
+        self.list_map(action, extra, what, Some).await
+    }
+
+    /// [`list`](Self::list), converting each item as it is read. Items are parsed one at a time
+    /// from the raw reply: a 100,000-title catalogue never exists as a JSON tree, and only the
+    /// converted values are kept. Unreadable items are skipped.
+    async fn list_map<T: serde::de::DeserializeOwned, U>(
+        &self,
+        action: &str,
+        extra: &[(&str, String)],
+        what: &str,
+        mut map: impl FnMut(T) -> Option<U>,
+    ) -> Result<Vec<U>> {
+        use serde_json::value::RawValue;
+
+        // Some panels wrap the list, some answer `{}` (or anything else) for "nothing".
+        #[derive(serde::Deserialize)]
+        struct Wrapped<'a> {
+            #[serde(borrow, default)]
+            data: Option<Vec<&'a RawValue>>,
+            #[serde(borrow, default)]
+            results: Option<Vec<&'a RawValue>>,
+        }
+
+        let body = self.get_body(Some(action), extra, what).await?;
+        let items: Vec<&RawValue> = match body.iter().find(|b| !b.is_ascii_whitespace()) {
+            Some(b'[') => serde_json::from_slice(&body)?,
+            Some(b'{') => serde_json::from_slice::<Wrapped>(&body)
+                .ok()
+                .and_then(|w| w.data.or(w.results))
+                .unwrap_or_default(),
             _ => Vec::new(),
         };
         Ok(items
             .into_iter()
-            .filter_map(|i| serde_json::from_value(i).ok())
+            .filter_map(|raw| serde_json::from_str::<T>(raw.get()).ok())
+            .filter_map(&mut map)
             .collect())
     }
 
@@ -528,103 +516,6 @@ impl XtreamClient {
 
     fn fetcher(&self) -> Result<HttpFetcher> {
         HttpFetcher::new(self.tls_pin.as_ref())
-    }
-
-    async fn movies_cached(&self) -> Result<std::sync::Arc<Vec<VodStreamDto>>> {
-        self.list_cached(VodKind::Movie, |c| &mut c.movies, || self.vod_streams(None))
-            .await
-    }
-
-    async fn series_cached(&self) -> Result<std::sync::Arc<Vec<SeriesDto>>> {
-        self.list_cached(VodKind::Series, |c| &mut c.series, || self.series(None))
-            .await
-    }
-
-    /// Memory, then `meta_cache`, then the server. A failed fetch serves the newest stale copy.
-    async fn list_cached<T, F, Fut>(
-        &self,
-        kind: VodKind,
-        slot: impl Fn(&mut VodCache) -> &mut Slot<T>,
-        fetch: F,
-    ) -> Result<std::sync::Arc<Vec<T>>>
-    where
-        T: VodRow + Clone,
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<Vec<T>>>,
-    {
-        let now = crate::sync::now_utc();
-        let mut g = self.vod_cache.lock().await;
-        if let Some((at, v)) = slot(&mut g)
-            && now - *at < VOD_CACHE_TTL_SECS
-        {
-            return Ok(v.clone());
-        }
-        let key = format!(
-            "{}{}",
-            vod_cache_prefix(self.id.0),
-            if kind == VodKind::Movie {
-                "movie"
-            } else {
-                "series"
-            }
-        );
-        if slot(&mut g).is_none()
-            && let Some(store) = &self.store
-            && let Ok(Some((body, at))) = store.meta_get(&key).await
-            && let Ok(rows) = serde_json::from_str::<Vec<T>>(&body)
-        {
-            // Too old: kept only as the fallback for a failed fetch below.
-            let v = std::sync::Arc::new(rows);
-            *slot(&mut g) = Some((at, v.clone()));
-            if now - at < VOD_CACHE_TTL_SECS {
-                return Ok(v);
-            }
-        }
-        match fetch().await {
-            Ok(mut rows) => {
-                rows.iter_mut().for_each(|r| r.template(&self.vault));
-                self.vault.persist().await?;
-                if let Some(store) = &self.store {
-                    match serde_json::to_string(&rows) {
-                        Ok(body) => {
-                            if let Err(e) = store.meta_put(&key, &body, now).await {
-                                tracing::warn!(error = %e, "saving the VOD list failed");
-                            }
-                        }
-                        Err(e) => tracing::warn!(error = %e, "saving the VOD list failed"),
-                    }
-                }
-                let v = std::sync::Arc::new(rows);
-                *slot(&mut g) = Some((now, v.clone()));
-                Ok(v)
-            }
-            Err(e) => match slot(&mut g) {
-                Some((_, v)) => {
-                    tracing::warn!(error = %e, "serving the cached VOD list");
-                    Ok(v.clone())
-                }
-                None => Err(e),
-            },
-        }
-    }
-
-    async fn category_counts(
-        &self,
-        kind: VodKind,
-    ) -> Result<std::collections::HashMap<String, i64>> {
-        let mut m = std::collections::HashMap::new();
-        if kind == VodKind::Movie {
-            for x in self.movies_cached().await?.iter() {
-                *m.entry(x.category_id.clone().unwrap_or_default())
-                    .or_insert(0) += 1;
-            }
-        } else {
-            for x in self.series_cached().await?.iter() {
-                *m.entry(x.category_id.clone().unwrap_or_default())
-                    .or_insert(0) += 1;
-            }
-        }
-        Ok(m)
     }
 
     fn movie_item(&self, m: &VodStreamDto) -> VodItem {
@@ -880,83 +771,72 @@ impl Source for XtreamClient {
         } else {
             self.series_categories().await?
         };
-        let counts = self.category_counts(kind).await.unwrap_or_default();
+        // Counts come from the stored catalogue (the service fills them in).
         Ok(cats
             .into_iter()
             .map(|c| VodCategoryInfo {
-                count: Some(counts.get(&c.id).copied().unwrap_or(0)),
+                count: None,
                 ext_id: c.id,
                 name: c.name,
             })
             .collect())
     }
 
+    /// Paged from a fresh download of the whole list. The service never calls this for Xtream
+    /// (it pages the stored catalogue, see [`vod_whole_catalog`](Source::vod_whole_catalog)).
     async fn vod_list(&self, kind: VodKind, q: &VodListQuery) -> Result<VodListPage> {
         let needle = q
             .search
             .as_deref()
             .map(|s| s.trim().to_lowercase())
             .filter(|s| !s.is_empty());
-        let matches = |name: &str, cat: &Option<String>| {
-            needle
-                .as_ref()
-                .is_none_or(|n| name.to_lowercase().contains(n.as_str()))
-                && q.category_ext
-                    .as_ref()
-                    .is_none_or(|c| cat.as_deref() == Some(c.as_str()))
-        };
         let (offset, limit) = (
             usize::try_from(q.offset.max(0)).unwrap_or(0),
             usize::try_from(q.limit.clamp(1, 500)).unwrap_or(50),
         );
-        let mut items = Vec::new();
-        let mut total = 0usize;
-        if kind == VodKind::Movie {
-            for m in self
-                .movies_cached()
-                .await?
-                .iter()
-                .filter(|m| matches(&m.name, &m.category_id))
-            {
-                if total >= offset && items.len() < limit {
-                    items.push(self.movie_item(m));
-                }
-                total += 1;
-            }
-        } else {
-            for sr in self
-                .series_cached()
-                .await?
-                .iter()
-                .filter(|s| matches(&s.name, &s.category_id))
-            {
-                if total >= offset && items.len() < limit {
-                    items.push(self.series_item(sr));
-                }
-                total += 1;
-            }
-        }
+        let matching: Vec<VodItem> = self
+            .vod_catalog(kind)
+            .await?
+            .into_iter()
+            .filter(|it| {
+                needle
+                    .as_ref()
+                    .is_none_or(|n| it.title.to_lowercase().contains(n.as_str()))
+                    && q.category_ext
+                        .as_ref()
+                        .is_none_or(|c| it.category_ext.as_deref() == Some(c.as_str()))
+            })
+            .collect();
+        let total = i64::try_from(matching.len()).unwrap_or(0);
         Ok(VodListPage {
-            items,
-            total: Some(i64::try_from(total).unwrap_or(0)),
+            items: matching.into_iter().skip(offset).take(limit).collect(),
+            total: Some(total),
         })
     }
 
-    async fn vod_detail(&self, kind: VodKind, ext_id: &str) -> Result<VodItem> {
-        let found = if kind == VodKind::Movie {
-            self.movies_cached()
+    fn vod_whole_catalog(&self) -> bool {
+        true
+    }
+
+    async fn vod_catalog(&self, kind: VodKind) -> Result<Vec<VodItem>> {
+        let items = match kind {
+            VodKind::Movie => {
+                self.list_map("get_vod_streams", &[], "its movies", |m: VodStreamDto| {
+                    Some(self.movie_item(&m))
+                })
                 .await?
-                .iter()
-                .find(|m| m.stream_id == ext_id)
-                .map(|m| self.movie_item(m))
-        } else {
-            self.series_cached()
+            }
+            VodKind::Series => {
+                self.list_map("get_series", &[], "its series", |s: SeriesDto| {
+                    Some(self.series_item(&s))
+                })
                 .await?
-                .iter()
-                .find(|s| s.series_id == ext_id)
-                .map(|s| self.series_item(s))
+            }
+            VodKind::Episode => return Err(AppError::local("Episodes are listed per series.")),
         };
-        found.ok_or_else(|| AppError::stream("That title is not in the library any more."))
+        // Artwork URLs were templated through the vault: keep the credentials it learned.
+        self.vault.persist().await?;
+        Ok(items)
     }
 
     async fn series_episodes(&self, series_ext_id: &str) -> Result<Vec<VodItem>> {

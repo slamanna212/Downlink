@@ -400,3 +400,106 @@ async fn pending_migration_backs_up_and_keeps_two_copies() {
         .unwrap();
     assert_eq!(name, "KEEP");
 }
+
+#[tokio::test]
+async fn whole_vod_catalogue_sync_keeps_ids_and_details_and_drops_removed_titles() {
+    use crate::source::{VodItem, VodKind};
+    let (store, src, _) = seeded().await;
+    let movie = |id: &str, title: &str, cat: &str| VodItem {
+        kind: Some(VodKind::Movie),
+        ext_id: id.into(),
+        title: title.into(),
+        category_ext: Some(cat.into()),
+        ..Default::default()
+    };
+    let first = [movie("1", "Alpha Test", "a"), movie("2", "Beta Test", "b")];
+    store
+        .sync_vod_catalog(src.id, VodKind::Movie, &first, 10)
+        .await
+        .unwrap();
+    let alpha = store.vod_by_ext(src.id, "movie", "1").await.unwrap().unwrap();
+    // A detail fetched on demand is not erased by the next list refresh.
+    let mut detail = movie("1", "Alpha Test", "a");
+    detail.plot = Some("Fetched on demand.".into());
+    store.upsert_vod_items(src.id, &[detail], 11).await.unwrap();
+
+    let second = [movie("3", "Gamma Test", "a"), movie("1", "Alpha Test", "a")];
+    store
+        .sync_vod_catalog(src.id, VodKind::Movie, &second, 20)
+        .await
+        .unwrap();
+    let (rows, total) = store
+        .vod_catalog_page(src.id, VodKind::Movie, None, None, 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(total, 2, "Beta is gone");
+    assert_eq!(rows[0].name, "Gamma Test", "provider order follows the new list");
+    assert_eq!(rows[1].id, alpha.id, "row ids are stable");
+    assert_eq!(rows[1].description.as_deref(), Some("Fetched on demand."));
+    assert_eq!(
+        store.vod_catalog_counts(src.id, VodKind::Movie).await.unwrap()["a"],
+        2
+    );
+    // Phrase search: the words in order, the last one a prefix.
+    let (hits, _) = store
+        .vod_catalog_page(src.id, VodKind::Movie, None, Some("gamma te"), 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 1);
+    let (hits, _) = store
+        .vod_catalog_page(src.id, VodKind::Movie, None, Some("test gamma"), 0, 10)
+        .await
+        .unwrap();
+    assert!(hits.is_empty());
+    assert_eq!(store.search_vod("beta", 10).await.unwrap().len(), 0, "removed from search");
+    assert_eq!(store.search_vod("alpha", 10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn programme_search_indexes_the_opening_of_long_descriptions() {
+    let (store, src, groups) = seeded().await;
+    store
+        .sync_channels(src.id, &[ch("1", "Channel One", 1.0)], &groups)
+        .await
+        .unwrap();
+    let cid = store.channel_by_ext(src.id, "1").await.unwrap().unwrap().id;
+    let long = format!("Openingword {} trailingword", "filler ".repeat(60));
+    let row = |description: &str| ProgrammeRow {
+        channel_id: cid,
+        start_utc: 100,
+        end_utc: 200,
+        ext_id: None,
+        title: Some("Title".into()),
+        subtitle: None,
+        description: Some(description.into()),
+        season: None,
+        episode: None,
+        flags: 0,
+        icon: None,
+    };
+    let hits = |q: &'static str| {
+        let store = store.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM programme_fts WHERE programme_fts MATCH ?",
+            )
+            .bind(q)
+            .fetch_one(store.pool())
+            .await
+            .unwrap()
+        }
+    };
+    store.upsert_programmes(&[row(&long)]).await.unwrap();
+    assert_eq!(hits("openingword").await, 1);
+    assert_eq!(hits("trailingword").await, 0, "past the indexed opening");
+    // Updates and deletes remove exactly what was indexed (no stale terms left behind).
+    store
+        .upsert_programmes(&[row("Replacement text")])
+        .await
+        .unwrap();
+    assert_eq!(hits("openingword").await, 0);
+    assert_eq!(hits("replacement").await, 1);
+    store.prune_programmes(1_000).await.unwrap();
+    assert_eq!(hits("replacement").await, 0);
+    assert_eq!(hits("title").await, 0);
+}

@@ -111,7 +111,7 @@ const COLS: &str = "c.id, c.source_id, c.ext_id, c.uuid, c.number, c.name, c.gro
     c.stream_redirect, c.play_url, c.play_headers, c.epg_match, c.sort_key";
 
 /// FTS5 prefix query from free text: every token quoted and starred.
-fn fts_query(q: &str) -> Option<String> {
+pub(crate) fn fts_query(q: &str) -> Option<String> {
     let toks: Vec<String> = q
         .split(|ch: char| !(ch.is_alphanumeric() || ch == '.'))
         .filter(|t| !t.is_empty())

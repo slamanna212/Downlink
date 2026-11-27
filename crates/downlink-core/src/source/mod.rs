@@ -419,6 +419,16 @@ pub trait Source: Send + Sync {
     async fn vod_list(&self, _kind: VodKind, _q: &VodListQuery) -> Result<VodListPage> {
         Err(no_vod())
     }
+    /// True for sources that deliver their whole movie or series list in one reply, with no
+    /// server-side paging or search (Xtream). The service stores that list as `vod_item` rows
+    /// ([`vod_catalog`](Self::vod_catalog)) and pages, filters and searches it locally.
+    fn vod_whole_catalog(&self) -> bool {
+        false
+    }
+    /// The complete list of `kind` (`Movie` or `Series`) in provider order, artwork templated.
+    async fn vod_catalog(&self, _kind: VodKind) -> Result<Vec<VodItem>> {
+        Err(no_vod())
+    }
     async fn vod_detail(&self, _kind: VodKind, _ext_id: &str) -> Result<VodItem> {
         Err(no_vod())
     }

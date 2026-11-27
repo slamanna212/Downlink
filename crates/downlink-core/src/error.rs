@@ -195,6 +195,16 @@ impl fmt::Display for AppError {
 
 impl std::error::Error for AppError {}
 
+/// Message of a request that hit the client timeout.
+pub(crate) const TIMEOUT: &str = "The server took too long to answer.";
+
+impl AppError {
+    /// True when the request hit the client timeout.
+    pub(crate) fn is_timeout(&self) -> bool {
+        self.code == ErrorCode::Network && self.message == TIMEOUT
+    }
+}
+
 impl From<reqwest::Error> for AppError {
     fn from(e: reqwest::Error) -> Self {
         // Drop the URL first: it may carry credentials, and redaction is a second line of defence.
@@ -206,7 +216,7 @@ impl From<reqwest::Error> for AppError {
             return Self::from_status(status.as_u16(), None, "that resource");
         }
         if e.is_timeout() {
-            return Self::network("The server took too long to answer.");
+            return Self::network(TIMEOUT);
         }
         if e.is_connect() {
             return Self::network("Could not connect to the server.");

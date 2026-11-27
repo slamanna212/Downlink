@@ -112,8 +112,8 @@ async fn file_sha256(path: PathBuf) -> Result<String> {
     tokio::task::spawn_blocking(move || -> Result<String> {
         use sha2::{Digest, Sha256};
         use std::io::Read;
-        let file = crate::util::open_import_file(&path)?;
-        let mut f = crate::util::BoundedReader::new(file, crate::util::MAX_IMPORT_FILE_BYTES);
+        let file = crate::util::open_import_file_limited(&path, crate::util::MAX_GUIDE_FILE_BYTES)?;
+        let mut f = crate::util::BoundedReader::new(file, crate::util::MAX_GUIDE_FILE_BYTES);
         let mut h = Sha256::new();
         let mut buf = vec![0u8; 256 * 1024];
         loop {
@@ -176,6 +176,8 @@ pub struct Service {
     status: Mutex<HashMap<i64, SourceStatus>>,
     /// One sync at a time per source: a manual sync during an auto refresh waits for it.
     sync_locks: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
+    /// One download of a source's whole VOD catalogue (movies or series) at a time.
+    vod_catalog_locks: Mutex<HashMap<(i64, &'static str), Arc<tokio::sync::Mutex<()>>>>,
     /// Auto refresh interval in seconds (0 = off), cached from settings for `status_of`.
     auto_refresh_secs: std::sync::atomic::AtomicI64,
     registered_logos: Mutex<HashSet<String>>,
@@ -244,6 +246,7 @@ impl Service {
             dispatcharr: RwLock::new(HashMap::new()),
             status: Mutex::new(HashMap::new()),
             sync_locks: Mutex::new(HashMap::new()),
+            vod_catalog_locks: Mutex::new(HashMap::new()),
             auto_refresh_secs: std::sync::atomic::AtomicI64::new(DEFAULT_AUTO_REFRESH_HOURS * 3600),
             registered_logos: Mutex::new(HashSet::new()),
             current_stream: Mutex::new(HashMap::new()),
@@ -396,8 +399,7 @@ impl Service {
                     row.username.as_deref().unwrap_or_default(),
                     pw,
                     tls_pin,
-                )?
-                .with_store(self.store.clone());
+                )?;
                 client.attach_credentials(self.secrets.clone(), &row.uuid)?;
                 Arc::new(client)
             }
@@ -994,6 +996,10 @@ impl Service {
         {
             tracing::warn!(error = %e, "state sync failed");
         }
+        // Channel and guide row counts may have moved by millions: refresh planner statistics.
+        if let Err(e) = self.store.optimize().await {
+            tracing::warn!(error = %e, "database optimize failed");
+        }
         self.progress(source_id, "done", 4, 4);
         self.emit(Event::CatalogUpdated(
             self.counts(source_id, CatalogChange::SyncComplete).await?,
@@ -1148,6 +1154,12 @@ impl Service {
         });
         match r {
             Ok(rep) => {
+                if rep.capped > 0 {
+                    tracing::warn!(
+                        capped = rep.capped,
+                        "guide is larger than the stored-guide limit; the rest was skipped"
+                    );
+                }
                 tracing::info!(
                     programmes = rep.programmes,
                     by_name = rep.matches.by_name,

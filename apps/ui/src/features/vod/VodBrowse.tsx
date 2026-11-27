@@ -63,7 +63,7 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
     initialPageParam: 0,
     queryFn: async ({ pageParam }): Promise<Tile[]> => {
       const args = { categoryId, query: deferred || null, offset: pageParam, limit: PAGE, compact: true };
-      return kind === 'movie' ? (await invoke('list_movies', args)).map(movieTile) : (await invoke('list_series', args)).map(seriesTile);
+      return kind === 'movie' ? (await invoke('list_movies', args)).items.map(movieTile) : (await invoke('list_series', args)).items.map(seriesTile);
     },
     getNextPageParam: (last, pages) => (last.length < PAGE ? undefined : pages.length * PAGE),
     placeholderData: (prev) => prev,

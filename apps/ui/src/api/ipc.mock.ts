@@ -386,13 +386,13 @@ export function createMockBackend(): Backend {
     },
     quit_app: () => null,
     list_vod_categories: ({ kind }) => vod.vodCategories(kind),
-    list_movies: (a) => vod.listMovies(a),
+    list_movies: (a) => ({ items: vod.listMovies(a), total: vod.countMovies(a) }),
     get_movie: ({ id }) => {
       const m = vod.getMovie(id);
       if (!m) throw appError('stream', 'That movie is no longer in the library.');
       return m;
     },
-    list_series: (a) => vod.listSeries(a),
+    list_series: (a) => ({ items: vod.listSeries(a), total: vod.countSeries(a) }),
     get_series: ({ id }) => {
       const s = vod.getSeries(id);
       if (!s) throw appError('stream', 'That series is no longer in the library.');

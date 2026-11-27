@@ -109,9 +109,9 @@ export interface Commands {
   check_for_updates: { args: Record<string, never>; result: UpdateStatus };
   install_update: { args: Record<string, never>; result: null };
   list_vod_categories: { args: { kind: 'movie' | 'series'; withCounts?: boolean }; result: VodCategory[] };
-  list_movies: { args: VodListArgs & { compact?: boolean }; result: Movie[] };
+  list_movies: { args: VodListArgs & { compact?: boolean }; result: { items: Movie[]; total: number | null } };
   get_movie: { args: { id: number }; result: Movie };
-  list_series: { args: VodListArgs & { compact?: boolean }; result: Series[] };
+  list_series: { args: VodListArgs & { compact?: boolean }; result: { items: Series[]; total: number | null } };
   get_series: { args: { id: number }; result: SeriesDetail };
   play_vod: { args: PlayVodArgs; result: null };
   list_recordings: { args: Record<string, never>; result: RecordingsData };

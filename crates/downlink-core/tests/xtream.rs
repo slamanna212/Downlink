@@ -543,66 +543,64 @@ async fn panel_b_decodes_into_the_same_models_as_the_base_set() {
 }
 
 #[tokio::test]
-async fn vod_lists_persist_across_restarts_without_credentials() {
-    use downlink_core::source::VodListQuery;
+async fn vod_catalogue_is_stored_as_rows_without_credentials() {
     use downlink_core::store::Store;
 
     let server = MockServer::start().await;
-    let movies = serde_json::json!([{
-        "stream_id": 7001, "name": "Synthetic Movie", "category_id": "5",
-        "stream_icon": format!("{}/movie/{USER}/{PASS}/poster.jpg", server.uri()),
-    }]);
+    let movies = serde_json::json!([
+        {
+            "stream_id": 7001, "name": "Synthetic Movie", "category_id": "5",
+            "stream_icon": format!("{}/movie/{USER}/{PASS}/poster.jpg", server.uri()),
+        },
+        {"stream_id": 7002, "name": "Other Feature", "category_id": "6"},
+        "not an object: skipped",
+    ]);
     Mock::given(method("GET"))
         .and(path("/player_api.php"))
         .and(query_param("action", "get_vod_streams"))
         .respond_with(ResponseTemplate::new(200).set_body_json(movies))
-        .expect(1) // first launch only
+        .expect(1)
         .mount(&server)
         .await;
     let store = Store::open_memory().await.unwrap();
-    let q = VodListQuery {
-        limit: 10,
-        ..Default::default()
-    };
-
-    let first = client(&server).with_store(store.clone());
-    let page = first.vod_list(VodKind::Movie, &q).await.unwrap();
-    assert_eq!(page.items[0].title, "Synthetic Movie");
-    let (body, _) = store.meta_get("xtvod:1:movie").await.unwrap().unwrap();
-    assert!(!body.contains(PASS), "no credentials in SQLite: {body}");
-
-    // "Restart": a new client on the same database serves the list without a request.
-    let second = client(&server).with_store(store.clone());
-    let page = second.vod_list(VodKind::Movie, &q).await.unwrap();
-    assert_eq!(page.items[0].title, "Synthetic Movie");
-}
-
-#[tokio::test]
-async fn vod_list_falls_back_to_the_saved_copy_when_the_server_fails() {
-    use downlink_core::source::VodListQuery;
-    use downlink_core::store::Store;
-
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/player_api.php"))
-        .and(query_param("action", "get_vod_streams"))
-        .respond_with(ResponseTemplate::new(500))
-        .mount(&server)
-        .await;
-    let store = Store::open_memory().await.unwrap();
-    store
-        .meta_put(
-            "xtvod:1:movie",
-            r#"[{"stream_id":"7002","name":"Saved Movie"}]"#,
-            1, // long expired
-        )
+    let src = store
+        .insert_source(&downlink_core::store::NewSource {
+            kind: "xtream".into(),
+            name: "Panel".into(),
+            base_url: Some(server.uri()),
+            secret_ref: None,
+            username: Some(USER.into()),
+            tls_insecure: false,
+            created_at: 1,
+        })
         .await
         .unwrap();
-    let c = client(&server).with_store(store);
-    let q = VodListQuery {
-        limit: 10,
-        ..Default::default()
-    };
-    let page = c.vod_list(VodKind::Movie, &q).await.unwrap();
-    assert_eq!(page.items[0].title, "Saved Movie");
+    assert_eq!(src.id, 1);
+    let c = client(&server);
+    let items = c.vod_catalog(VodKind::Movie).await.unwrap();
+    assert_eq!(items.len(), 2, "unreadable items are skipped");
+    store
+        .sync_vod_catalog(1, VodKind::Movie, &items, 100)
+        .await
+        .unwrap();
+
+    let (rows, total) = store
+        .vod_catalog_page(1, VodKind::Movie, None, None, 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(total, 2);
+    assert_eq!(rows[0].name, "Synthetic Movie", "provider order");
+    let art = rows[0].art_key.as_deref().unwrap();
+    assert!(!art.contains(PASS), "no credentials in SQLite: {art}");
+
+    let (rows, total) = store
+        .vod_catalog_page(1, VodKind::Movie, Some("6"), None, 0, 10)
+        .await
+        .unwrap();
+    assert_eq!((total, rows[0].name.as_str()), (1, "Other Feature"));
+    let (rows, _) = store
+        .vod_catalog_page(1, VodKind::Movie, None, Some("synth"), 0, 10)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
 }

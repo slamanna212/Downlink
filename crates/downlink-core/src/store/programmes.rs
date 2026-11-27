@@ -19,6 +19,9 @@ pub struct ProgrammeRow {
     pub icon: Option<String>,
 }
 
+/// Rows per write transaction when a guide window is stored (see `replace_programme_window`).
+const WINDOW_WRITE_ROWS: usize = 5_000;
+
 impl Store {
     pub async fn programme_row(
         &self,
@@ -96,7 +99,10 @@ impl Store {
         Ok(())
     }
 
-    /// Reconcile one authoritative source window in a single transaction.
+    /// Reconcile one authoritative source window: drop stored programmes the window no longer
+    /// has, then upsert the rest in [`WINDOW_WRITE_ROWS`]-row transactions. A window for tens of
+    /// thousands of channels is hundreds of thousands of rows; one transaction held the write
+    /// lock long enough for unrelated writes (favourites, resume positions) to time out.
     pub async fn replace_programme_window(
         &self,
         source_id: i64,
@@ -122,8 +128,12 @@ impl Store {
             })
             .collect();
         Self::delete_programme_rows(&mut tx, &obsolete).await?;
-        Self::write_programmes(&mut tx, rows).await?;
         tx.commit().await?;
+        for chunk in rows.chunks(WINDOW_WRITE_ROWS) {
+            let mut tx = self.pool().begin_with("BEGIN IMMEDIATE").await?;
+            Self::write_programmes(&mut tx, chunk).await?;
+            tx.commit().await?;
+        }
         Ok(rows.len())
     }
 

@@ -3,7 +3,7 @@
 //! span the feed covers for it (so rescheduled programmes disappear); a failed or truncated
 //! refresh only upserts and never deletes.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 
@@ -19,8 +19,11 @@ use crate::util::import_limit;
 
 pub const BATCH: usize = 5_000;
 const MAX_BATCH_TEXT_BYTES: usize = 8 * 1024 * 1024;
-const MAX_CHANNEL_PROGRAMMES: usize = 2_000_000;
-const MAX_PROGRAMME_TEXT_BYTES: usize = 512 * 1024 * 1024;
+/// Stored rows (inside the retention window, after channel fan-out). 20,000 channels with two
+/// weeks of guide is about 7M. Past the cap programmes are skipped and counted, not fatal.
+pub(crate) const MAX_STORED_PROGRAMMES: usize = 12_000_000;
+/// Stored programme text, same rule as [`MAX_STORED_PROGRAMMES`].
+const MAX_PROGRAMME_TEXT_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MatchSummary {
@@ -40,6 +43,8 @@ pub struct IngestReport {
     /// Programmes for XMLTV channels no playlist channel maps to.
     pub unmatched_programmes: u64,
     pub outside_window: u64,
+    /// Programmes skipped because the stored-guide cap was reached (the rest of the guide is kept).
+    pub capped: u64,
     pub assumed_tz: u64,
     pub truncated: bool,
     pub matches: MatchSummary,
@@ -185,7 +190,9 @@ async fn save_matches(store: &Store, updates: &[(i64, &'static str)]) -> Result<
 struct Coverage {
     first_start: i64,
     last_end: i64,
-    starts: HashSet<i64>,
+    /// Sorted and de-duplicated once the feed has been read (a `Vec` keeps millions of starts
+    /// at 8 bytes each).
+    starts: Vec<i64>,
 }
 
 async fn channel_shifts(store: &Store, source_id: i64) -> Result<HashMap<i64, i64>> {
@@ -199,14 +206,17 @@ async fn channel_shifts(store: &Store, source_id: i64) -> Result<HashMap<i64, i6
 }
 
 /// Remove stored programmes that sit inside a channel's fed span but were not in the feed.
+/// One short transaction per batch of channels: with tens of thousands of channels a single
+/// transaction held the write lock long enough for unrelated writes (favourites, resume
+/// positions) to time out.
 async fn replace_within_coverage(store: &Store, cov: &HashMap<i64, Coverage>) -> Result<u64> {
     let mut removed = 0;
-    let mut tx = store.pool().begin_with("BEGIN IMMEDIATE").await?;
     let bounds: Vec<_> = cov
         .iter()
         .map(|(&id, c)| (id, c.first_start, c.last_end))
         .collect();
     for batch in bounds.chunks(128) {
+        let mut tx = store.pool().begin_with("BEGIN IMMEDIATE").await?;
         let have: Vec<(i64, i64, i64)> = sqlx::query_as(
             "WITH bounds AS (
                SELECT json_extract(value, '$[0]') AS id, json_extract(value, '$[1]') AS first_start,
@@ -222,13 +232,13 @@ async fn replace_within_coverage(store: &Store, cov: &HashMap<i64, Coverage>) ->
             .into_iter()
             .filter_map(|(rowid, channel, start)| {
                 cov.get(&channel)
-                    .is_some_and(|c| !c.starts.contains(&start))
+                    .is_some_and(|c| c.starts.binary_search(&start).is_err())
                     .then_some(rowid)
             })
             .collect();
         removed += Store::delete_programme_rows(&mut tx, &obsolete).await?;
+        tx.commit().await?;
     }
-    tx.commit().await?;
     Ok(removed)
 }
 
@@ -271,11 +281,11 @@ pub async fn ingest_with_progress(
         // De-duplicate by (channel, start): the first one in a batch wins. Duplicates in real
         // feeds are near each other, so a per-batch set bounds memory.
         let mut seen: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
-        let (mut unmatched, mut outside) = (0u64, 0u64);
+        let (mut unmatched, mut outside, mut capped) = (0u64, 0u64, 0u64);
         let mut cov: HashMap<i64, Coverage> = HashMap::new();
         let mut batch_bytes = 0;
-        let mut text_bytes = 0;
-        let mut channel_programmes = 0;
+        let mut text_bytes = 0u64;
+        let mut stored = 0usize;
         let cancelled = || io::Error::new(io::ErrorKind::BrokenPipe, "The guide import stopped.");
         let stats = try_parse_programmes(&path, default_tz, |p| {
             let Some(ids) = by_xmltv.get(&p.channel) else {
@@ -283,10 +293,6 @@ pub async fn ingest_with_progress(
                 unmatched += 1;
                 return Ok(());
             };
-            channel_programmes += ids.len();
-            if channel_programmes > MAX_CHANNEL_PROGRAMMES {
-                return Err(import_limit());
-            }
             let row_bytes = [&p.title, &p.subtitle, &p.description, &p.icon]
                 .into_iter()
                 .filter_map(|part| part.as_ref())
@@ -304,18 +310,22 @@ pub async fn ingest_with_progress(
                 if !seen.insert((*id, start)) {
                     continue;
                 }
+                if stored >= MAX_STORED_PROGRAMMES
+                    || text_bytes + row_bytes as u64 > MAX_PROGRAMME_TEXT_BYTES
+                {
+                    capped += 1;
+                    continue;
+                }
+                stored += 1;
+                text_bytes += row_bytes as u64;
                 let c = cov.entry(*id).or_insert_with(|| Coverage {
                     first_start: start,
                     last_end: end,
-                    starts: HashSet::new(),
+                    starts: Vec::new(),
                 });
                 c.first_start = c.first_start.min(start);
                 c.last_end = c.last_end.max(end);
-                c.starts.insert(start);
-                text_bytes += row_bytes;
-                if text_bytes > MAX_PROGRAMME_TEXT_BYTES {
-                    return Err(import_limit());
-                }
+                c.starts.push(start);
                 batch_bytes += row_bytes;
                 batch.push(ProgrammeRow {
                     channel_id: *id,
@@ -345,7 +355,11 @@ pub async fn ingest_with_progress(
         if !batch.is_empty() {
             tx.blocking_send(batch).map_err(|_| cancelled())?;
         }
-        Ok((stats, unmatched, outside, cov))
+        for c in cov.values_mut() {
+            c.starts.sort_unstable();
+            c.starts.dedup();
+        }
+        Ok((stats, unmatched, outside, capped, cov))
     });
 
     let mut written = 0usize;
@@ -353,7 +367,7 @@ pub async fn ingest_with_progress(
         written += store.upsert_programmes(&batch).await?;
         on_batch(written);
     }
-    let (stats, unmatched, outside, cov) = parser
+    let (stats, unmatched, outside, capped, cov) = parser
         .await
         .map_err(|_| AppError::local("Reading the guide was interrupted."))??;
     // Only a feed read to the end may replace anything: a truncated one proves nothing about
@@ -370,6 +384,7 @@ pub async fn ingest_with_progress(
         dropped: stats.dropped,
         unmatched_programmes: unmatched,
         outside_window: outside,
+        capped,
         assumed_tz: stats.assumed_tz,
         truncated: stats.truncated,
         matches: summary,

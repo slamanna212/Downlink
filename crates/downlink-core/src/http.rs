@@ -78,6 +78,14 @@ mod tests {
     }
 }
 
+/// Message of the error [`read_body`] returns when a reply exceeds its bound.
+pub(crate) const TOO_LARGE: &str = "The server response is too large.";
+
+/// True when `e` is [`read_body`]'s size-bound error.
+pub(crate) fn is_too_large(e: &crate::AppError) -> bool {
+    e.code == crate::ErrorCode::Server && e.message == TOO_LARGE
+}
+
 /// Read a response using an upper bound independent of the server's framing.
 pub async fn read_body(
     mut response: reqwest::Response,
@@ -85,7 +93,7 @@ pub async fn read_body(
     on_error: impl Fn(reqwest::Error) -> crate::AppError,
 ) -> crate::Result<Vec<u8>> {
     fn too_large() -> crate::AppError {
-        crate::AppError::server("The server response is too large.")
+        crate::AppError::server(TOO_LARGE)
     }
 
     if response

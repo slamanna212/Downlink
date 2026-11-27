@@ -11,6 +11,44 @@ use crate::store::{RecordingRow, ResumeRow, VodRow};
 const CAT_STRIDE: i64 = 1_000_000;
 const VOD_CATS_ENTITY: &str = "vod_categories";
 
+/// How long a stored whole catalogue (Xtream movies or series) is used before it is downloaded
+/// again. A stale one keeps being served while the new copy downloads in the background.
+const VOD_CATALOG_TTL_SECS: i64 = 6 * 3600;
+
+/// `sync_state` entity of a stored whole catalogue.
+fn catalog_entity(kind: VodKind) -> &'static str {
+    match kind {
+        VodKind::Series => "vod_catalog_series",
+        _ => "vod_catalog_movie",
+    }
+}
+
+/// Download a source's whole catalogue of `kind` and make it the stored one. Failures are
+/// recorded and the previous rows kept.
+async fn refresh_vod_catalog(
+    store: &Store,
+    client: &dyn SourceClient,
+    source_id: i64,
+    kind: VodKind,
+) -> Result<()> {
+    let entity = catalog_entity(kind);
+    let r = async {
+        let items = client.vod_catalog(kind).await?;
+        store
+            .sync_vod_catalog(source_id, kind, &items, now_utc())
+            .await?;
+        store.recount_vod_categories(source_id, kind).await?;
+        tracing::info!(titles = items.len(), kind = kind.as_str(), "vod catalogue stored");
+        Ok::<(), AppError>(())
+    }
+    .await;
+    match &r {
+        Ok(()) => store.set_sync_ok(source_id, entity, now_utc()).await?,
+        Err(e) => store.set_sync_error(source_id, entity, &e.message).await?,
+    }
+    r
+}
+
 /// What `play_vod` hands the desktop.
 #[derive(Debug)]
 pub struct VodPlay {
@@ -156,7 +194,15 @@ impl Service {
         let r = async {
             let client = self.client(source_id).await?;
             for k in [VodKind::Movie, VodKind::Series] {
-                let categories = client.vod_categories(k).await?;
+                let mut categories = client.vod_categories(k).await?;
+                if client.vod_whole_catalog() {
+                    // Counted from the stored catalogue (downloaded now if missing or stale).
+                    self.ensure_vod_catalog(source_id, &client, k, true).await?;
+                    let counts = self.store.vod_catalog_counts(source_id, k).await?;
+                    for c in &mut categories {
+                        c.count = Some(counts.get(&c.ext_id).copied().unwrap_or(0));
+                    }
+                }
                 self.store
                     .replace_vod_categories(source_id, k, &categories)
                     .await?;
@@ -187,7 +233,9 @@ impl Service {
             .unwrap_or((id / CAT_STRIDE, (id % CAT_STRIDE).to_string()))
     }
 
-    async fn vod_rows(&self, kind: VodKind, a: &VodListArgs) -> Result<Vec<VodRow>> {
+    /// One page of titles across VOD sources, with the total number of matches when every
+    /// source involved can say (stored catalogues always can; a paged server usually does).
+    async fn vod_rows(&self, kind: VodKind, a: &VodListArgs) -> Result<(Vec<VodRow>, Option<i64>)> {
         let mut sources = self.caps_sources(Caps::VOD).await?;
         let mut category_ext = None;
         if let Some(cid) = a.category_id {
@@ -199,34 +247,119 @@ impl Service {
         let mut skip = a.offset.unwrap_or(0).max(0);
         let mut remaining = limit;
         let mut out = Vec::new();
+        let mut grand_total = Some(0i64);
         for src in sources {
             let client = self.client(src.id).await?;
-            let page = client
-                .vod_list(
-                    kind,
-                    &VodListQuery {
-                        category_ext: category_ext.clone(),
-                        search: a.query.clone(),
-                        offset: skip,
-                        limit: remaining,
-                    },
-                )
-                .await?;
-            let total = page
-                .total
-                .unwrap_or(i64::try_from(page.items.len()).unwrap_or(0) + skip);
-            let rows = self
-                .store
-                .upsert_vod_items(src.id, &page.items, now_utc())
-                .await?;
+            let (rows, total) = if client.vod_whole_catalog() {
+                // Paged, filtered and searched locally: no provider request per page. Once the
+                // page is full this only counts (LIMIT 0).
+                self.ensure_vod_catalog(src.id, &client, kind, false)
+                    .await?;
+                let (rows, total) = self
+                    .store
+                    .vod_catalog_page(
+                        src.id,
+                        kind,
+                        category_ext.as_deref(),
+                        a.query.as_deref(),
+                        skip,
+                        remaining.max(0),
+                    )
+                    .await?;
+                (rows, Some(total))
+            } else if remaining <= 0 {
+                // Counting a paged server would cost a request: the total stays unknown.
+                grand_total = None;
+                continue;
+            } else {
+                let page = client
+                    .vod_list(
+                        kind,
+                        &VodListQuery {
+                            category_ext: category_ext.clone(),
+                            search: a.query.clone(),
+                            offset: skip,
+                            limit: remaining,
+                        },
+                    )
+                    .await?;
+                let got = i64::try_from(page.items.len()).unwrap_or(0);
+                // No count from the server, but a short page means this was the end.
+                let total = page.total.or((got < remaining).then_some(skip + got));
+                let rows = self
+                    .store
+                    .upsert_vod_items(src.id, &page.items, now_utc())
+                    .await?;
+                (rows, total)
+            };
+            grand_total = grand_total.zip(total).map(|(a, b)| a + b);
+            let total = total.unwrap_or(i64::try_from(rows.len()).unwrap_or(0) + skip);
             remaining -= i64::try_from(rows.len()).unwrap_or(0);
             skip = (skip - total).max(0);
             out.extend(rows);
-            if remaining <= 0 {
-                break;
-            }
         }
-        Ok(out)
+        Ok((out, grand_total))
+    }
+
+    fn vod_catalog_lock(
+        &self,
+        source_id: i64,
+        kind: VodKind,
+    ) -> Result<Arc<tokio::sync::Mutex<()>>> {
+        Ok(self
+            .vod_catalog_locks
+            .lock()
+            .map_err(|_| AppError::local("Sync state is unavailable."))?
+            .entry((source_id, catalog_entity(kind)))
+            .or_default()
+            .clone())
+    }
+
+    /// Make sure a whole-catalogue source has its `kind` catalogue stored. Missing: download it
+    /// now (concurrent callers wait for the one download). Stale: with `wait`, download it now;
+    /// otherwise serve the stored rows and download the new copy in the background.
+    async fn ensure_vod_catalog(
+        &self,
+        source_id: i64,
+        client: &Arc<dyn SourceClient>,
+        kind: VodKind,
+        wait: bool,
+    ) -> Result<()> {
+        let last_ok = |state: Option<(Option<i64>, Option<String>)>| state.and_then(|(ok, _)| ok);
+        let fresh = |t: Option<i64>| t.is_some_and(|t| now_utc() - t < VOD_CATALOG_TTL_SECS);
+        let entity = catalog_entity(kind);
+        let stored = last_ok(self.store.sync_state(source_id, entity).await?);
+        if fresh(stored) {
+            return Ok(());
+        }
+        let lock = self.vod_catalog_lock(source_id, kind)?;
+        if stored.is_some() && !wait {
+            if let Ok(guard) = lock.try_lock_owned() {
+                let (store, client) = (self.store.clone(), client.clone());
+                tokio::spawn(async move {
+                    let _guard = guard;
+                    if let Err(e) =
+                        refresh_vod_catalog(&store, client.as_ref(), source_id, kind).await
+                    {
+                        tracing::warn!(error = %e, "vod catalogue refresh failed");
+                    }
+                });
+            }
+            return Ok(());
+        }
+        let _guard = lock.lock().await;
+        // Another caller may have finished the download while this one waited.
+        if fresh(last_ok(self.store.sync_state(source_id, entity).await?)) {
+            return Ok(());
+        }
+        match refresh_vod_catalog(&self.store, client.as_ref(), source_id, kind).await {
+            // A failed refresh of a catalogue that exists still serves the stored rows.
+            Err(e) if stored.is_some() => {
+                tracing::warn!(error = %e, "vod catalogue refresh failed, serving the stored copy");
+                Ok(())
+            }
+            r => r,
+        }
     }
 
     async fn resume_of(&self, r: &VodRow) -> Result<Option<ResumeRow>> {
@@ -325,17 +458,25 @@ impl Service {
     }
 
     pub async fn list_movies(&self, a: VodListArgs) -> Result<Vec<MovieDto>> {
-        self.movie_page(a, false).await
+        Ok(self.movie_page(a, false).await?.items)
     }
 
-    pub async fn movie_page(&self, a: VodListArgs, compact: bool) -> Result<Vec<MovieDto>> {
-        let rows = self.vod_rows(VodKind::Movie, &a).await?;
+    /// A page of movies and the total matching (when known), for the browse grid.
+    pub async fn movie_page(&self, a: VodListArgs, compact: bool) -> Result<VodPageDto<MovieDto>> {
+        let (rows, total) = self.vod_rows(VodKind::Movie, &a).await?;
+        Ok(VodPageDto {
+            items: self.movie_dtos(&rows, compact).await?,
+            total,
+        })
+    }
+
+    async fn movie_dtos(&self, rows: &[VodRow], compact: bool) -> Result<Vec<MovieDto>> {
         if rows.is_empty() {
             return Ok(Vec::new());
         }
         let ids: Vec<_> = rows.iter().map(|r| r.id).collect();
         let (resumes, art) =
-            tokio::join!(self.store.vod_resumes(&ids), self.page_art(&rows, compact));
+            tokio::join!(self.store.vod_resumes(&ids), self.page_art(rows, compact));
         let resumes = resumes?;
         Ok(rows
             .iter()
@@ -359,18 +500,26 @@ impl Service {
     }
 
     pub async fn list_series(&self, a: VodListArgs) -> Result<Vec<SeriesDto>> {
-        self.series_page(a, false).await
+        Ok(self.series_page(a, false).await?.items)
     }
 
-    pub async fn series_page(&self, a: VodListArgs, compact: bool) -> Result<Vec<SeriesDto>> {
-        let rows = self.vod_rows(VodKind::Series, &a).await?;
+    /// A page of series and the total matching (when known), for the browse grid.
+    pub async fn series_page(&self, a: VodListArgs, compact: bool) -> Result<VodPageDto<SeriesDto>> {
+        let (rows, total) = self.vod_rows(VodKind::Series, &a).await?;
+        Ok(VodPageDto {
+            items: self.series_dtos(&rows, compact).await?,
+            total,
+        })
+    }
+
+    async fn series_dtos(&self, rows: &[VodRow], compact: bool) -> Result<Vec<SeriesDto>> {
         if rows.is_empty() {
             return Ok(Vec::new());
         }
         let ids: Vec<_> = rows.iter().map(|r| r.id).collect();
         let (counts, art) = tokio::join!(
             self.store.vod_season_counts(&ids),
-            self.page_art(&rows, compact)
+            self.page_art(rows, compact)
         );
         let counts = counts?;
         Ok(rows

@@ -469,6 +469,14 @@ pub struct VodCategoryDto {
     pub count_pending: bool,
 }
 
+/// A page of the VOD browse grid. `total` is the number of matching titles, when known.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VodPageDto<T> {
+    pub items: Vec<T>,
+    pub total: Option<i64>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VodListArgs {

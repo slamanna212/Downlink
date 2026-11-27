@@ -312,6 +312,89 @@ async fn endpoint_epg_grid() {
     assert_eq!(p[1].end_utc, 1_735_731_000 + 3600);
 }
 
+/// A window whose reply is too slow is split into halves; programmes spanning a slice boundary
+/// are kept once, and later windows start at the slice length that worked.
+#[tokio::test]
+async fn grid_splits_slow_windows_and_remembers_the_slice() {
+    struct Grid;
+    impl wiremock::Respond for Grid {
+        fn respond(&self, r: &wiremock::Request) -> ResponseTemplate {
+            let q: std::collections::HashMap<String, String> =
+                r.url.query_pairs().into_owned().collect();
+            let t = |k: &str| {
+                time::OffsetDateTime::parse(&q[k], &time::format_description::well_known::Rfc3339)
+                    .unwrap()
+                    .unix_timestamp()
+            };
+            let (start, end) = (t("start"), t("end"));
+            if end - start > 2 * 3600 {
+                // Too slow for the client timeout below.
+                return json(serde_json::json!({"data": []}))
+                    .set_delay(std::time::Duration::from_secs(3));
+            }
+            // Hourly programmes overlapping the slice (the real grid returns overlaps too).
+            let first = start - start.rem_euclid(3600);
+            let rows: Vec<_> = (0..)
+                .map(|i| first + i * 3600)
+                .take_while(|s| *s < end)
+                .map(|s| {
+                    let fmt = |x: i64| {
+                        time::OffsetDateTime::from_unix_timestamp(x)
+                            .unwrap()
+                            .format(&time::format_description::well_known::Rfc3339)
+                            .unwrap()
+                    };
+                    serde_json::json!({"id": s, "start_time": fmt(s), "end_time": fmt(s + 3600),
+                                       "title": "Hourly", "tvg_id": "one.test"})
+                })
+                .collect();
+            json(serde_json::json!({ "data": rows }))
+        }
+    }
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/epg/grid/"))
+        .respond_with(Grid)
+        .mount(&server)
+        .await;
+    let c = DispatcharrClient::new(
+        SourceId(1),
+        &server.uri(),
+        Credentials::ApiKey(SecretString::new(KEY)),
+        ClientOptions {
+            timeout: std::time::Duration::from_secs(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // 8 h starting on the hour, programmes spanning the 30-minute offset boundaries included.
+    let start = 1_735_725_600 + 1800;
+    let w = TimeWindow {
+        start_utc: start,
+        end_utc: start + 8 * 3600,
+    };
+    let p = c.guide(w).await.unwrap();
+    let mut starts: Vec<i64> = p.iter().map(|p| p.start_utc).collect();
+    starts.sort_unstable();
+    let expected: Vec<i64> = (0..9).map(|i| 1_735_725_600 + i * 3600).collect();
+    assert_eq!(starts, expected, "every hour once, boundaries de-duplicated");
+
+    // The next window goes straight to the learned slice: no slow full-window request.
+    let before = server.received_requests().await.unwrap().len();
+    c.guide(TimeWindow {
+        start_utc: start,
+        end_utc: start + 4 * 3600,
+    })
+    .await
+    .unwrap();
+    let requests = server.received_requests().await.unwrap();
+    assert!(
+        requests[before..].len() <= 2,
+        "two 2 h slices at most, got {}",
+        requests.len() - before
+    );
+}
+
 #[tokio::test]
 async fn endpoint_current_programs() {
     let server = MockServer::start().await;

@@ -170,7 +170,8 @@ async fn vod_categories_come_from_the_sync_cache_not_the_provider() {
             true,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .items;
     assert!(movies[0].poster.is_some());
     assert!(movies.iter().all(|m| m.backdrop.is_none()));
     assert!(

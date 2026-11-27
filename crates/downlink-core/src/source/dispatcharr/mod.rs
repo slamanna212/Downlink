@@ -37,6 +37,10 @@ pub const MIN_VERSION: (u32, u32, u32) = (0, 32, 0);
 /// Per-source request concurrency (PLAN §2.5).
 const MAX_CONCURRENT: usize = 2;
 const MAX_PAGES: u32 = 10_000;
+/// Bound on one guide-grid reply. Larger windows are fetched as several smaller slices.
+const GRID_MAX_BYTES: usize = 96 * 1024 * 1024;
+/// The grid is never split below this (a reply this short that is still too large fails).
+const MIN_GRID_SLICE_SECS: i64 = 15 * 60;
 
 #[derive(Clone)]
 pub enum Credentials {
@@ -177,6 +181,9 @@ pub struct DispatcharrClient {
     /// `m3u account id -> name` for the stream picker (see [`ACCOUNT_NAMES_TTL`]).
     account_names: tokio::sync::Mutex<Option<(std::time::Instant, AccountNames)>>,
     vod_categories: tokio::sync::Mutex<HashMap<VodKind, CachedVodCategories>>,
+    /// Longest guide-grid slice that has worked, in seconds (0: whole windows). Learned when a
+    /// window's reply is too large or too slow (tens of thousands of channels), then reused.
+    grid_slice_secs: std::sync::atomic::AtomicI64,
 }
 
 type CachedVodCategories = (std::time::Instant, Vec<VodCategoryInfo>);
@@ -285,6 +292,7 @@ impl DispatcharrClient {
             epg_map: tokio::sync::Mutex::new(None),
             account_names: tokio::sync::Mutex::new(None),
             vod_categories: tokio::sync::Mutex::new(HashMap::new()),
+            grid_slice_secs: std::sync::atomic::AtomicI64::new(0),
         })
     }
 
@@ -864,11 +872,71 @@ impl DispatcharrClient {
 
     // ---- guide ------------------------------------------------------------------------------
 
+    /// Programmes overlapping `window`. A reply that is too large or too slow (tens of thousands
+    /// of channels) splits the window into halves, down to [`MIN_GRID_SLICE_SECS`]; the slice
+    /// length that worked is remembered for later windows.
     pub async fn grid(
         &self,
         window: TimeWindow,
         channel_profile_id: Option<i64>,
     ) -> Result<Vec<Programme>> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut out: Vec<Programme> = Vec::new();
+        let mut seen: HashSet<(String, i64)> = HashSet::new();
+        let mut start = window.start_utc;
+        while start < window.end_utc {
+            let slice = self.grid_slice_secs.load(Relaxed);
+            let end = if slice > 0 {
+                start.saturating_add(slice).min(window.end_utc)
+            } else {
+                window.end_utc
+            };
+            let part = TimeWindow {
+                start_utc: start,
+                end_utc: end,
+            };
+            match self.grid_once(part, channel_profile_id).await {
+                Ok(programmes) => {
+                    // A programme spanning a slice boundary comes back in both slices.
+                    out.extend(programmes.into_iter().filter(|p| {
+                        slice == 0 || seen.insert((p.channel_ref.clone(), p.start_utc))
+                    }));
+                    start = end;
+                }
+                Err(e)
+                    if (crate::http::is_too_large(&e) || e.is_timeout())
+                        && end - start > MIN_GRID_SLICE_SECS =>
+                {
+                    let half = ((end - start) / 2).max(MIN_GRID_SLICE_SECS);
+                    self.grid_slice_secs.store(half, Relaxed);
+                    tracing::info!(slice_secs = half, "guide window split into smaller requests");
+                    if slice == 0 {
+                        // Programmes from earlier slices are only de-duplicated from now on.
+                        seen.extend(out.iter().map(|p| (p.channel_ref.clone(), p.start_utc)));
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(out)
+    }
+
+    /// One grid request. Items are parsed one by one from the raw reply (no intermediate JSON
+    /// tree, which cost several times the reply size for large guides); unreadable items are
+    /// skipped.
+    async fn grid_once(
+        &self,
+        window: TimeWindow,
+        channel_profile_id: Option<i64>,
+    ) -> Result<Vec<Programme>> {
+        use serde_json::value::RawValue;
+
+        #[derive(serde::Deserialize)]
+        struct Wrapped<'a> {
+            #[serde(borrow, default)]
+            data: Option<Vec<&'a RawValue>>,
+        }
+
         let mut q = vec![
             ("start", fmt_time(window.start_utc)?),
             ("end", fmt_time(window.end_utc)?),
@@ -876,23 +944,39 @@ impl DispatcharrClient {
         if let Some(p) = channel_profile_id {
             q.push(("channel_profile_id", p.to_string()));
         }
-        let v = self.get_json("api/epg/grid/", &q, "the guide").await?;
-        let items = match v {
-            Value::Object(mut o) => match o.remove("data") {
-                Some(Value::Array(a)) => a,
-                _ => Vec::new(),
-            },
-            Value::Array(a) => a,
-            _ => Vec::new(),
+        let reply = self
+            .call_bounded(Method::GET, "api/epg/grid/", &q, None, GRID_MAX_BYTES)
+            .await?
+            .ok("the guide")?;
+        let body = &reply.body;
+        let items: Vec<&RawValue> = match body.iter().find(|b| !b.is_ascii_whitespace()) {
+            None => Vec::new(),
+            Some(b'[') => serde_json::from_slice(body)?,
+            Some(b'{') => serde_json::from_slice::<Wrapped>(body)?
+                .data
+                .unwrap_or_default(),
+            Some(_) => Vec::new(),
         };
-        Ok(Self::parse_items::<ProgramDto>(items, "programmes")
+        let mut skipped = 0usize;
+        let out = items
             .into_iter()
+            .filter_map(|raw| match serde_json::from_str::<ProgramDto>(raw.get()) {
+                Ok(p) => Some(p),
+                Err(_) => {
+                    skipped += 1;
+                    None
+                }
+            })
             // Standard dummy blocks are 4 h placeholders titled with the channel name, generated
             // for channels with no EPG at all; the guide's own empty row says that better.
             // Custom dummy-EPG rows carry real titles and stay (they key on the channel uuid).
             .filter(|p| !p.id.starts_with("dummy-standard-"))
             .filter_map(ProgramDto::into_programme)
-            .collect())
+            .collect();
+        if skipped > 0 {
+            tracing::warn!(skipped, what = "programmes", "skipped unreadable items");
+        }
+        Ok(out)
     }
 
     /// `POST /api/epg/current-programs/`. Tolerates an array, `{data|programs|results: [...]}` or a

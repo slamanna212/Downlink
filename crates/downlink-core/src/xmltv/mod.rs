@@ -16,14 +16,18 @@ use quick_xml::events::{BytesStart, Event};
 use crate::source::flags;
 use crate::util::{BoundedReader, import_limit};
 
-const MAX_EXPANDED_BYTES: u64 = 512 * 1024 * 1024;
+/// Decompressed guide size. Parsing streams, so memory does not grow with this; a guide for
+/// 20,000+ channels with a week of descriptions runs to several gigabytes.
+const MAX_EXPANDED_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 const MAX_EVENT_BYTES: usize = 1024 * 1024;
 const MAX_FIELD_BYTES: usize = 64 * 1024;
 const MAX_CHANNELS: usize = 200_000;
 const MAX_NESTING: usize = 64;
 const MAX_XML_NAME_BYTES: usize = 1024;
 const MAX_CHANNEL_METADATA: usize = 32 * 1024 * 1024;
-const MAX_PROGRAMMES: u64 = 2_000_000;
+/// Every `<programme>` in the document, stored or not (unmatched channels, outside retention).
+/// A runaway-document guard only: what is stored is capped separately, without failing.
+const MAX_PROGRAMMES: u64 = 40_000_000;
 /// Longer icon URLs are dropped (they would only bloat the database).
 const MAX_ICON_URL: usize = 2048;
 
@@ -182,7 +186,10 @@ fn read_event<'a>(
 }
 
 fn open(path: &Path) -> io::Result<Reader<XmlInput>> {
-    let r = BoundedReader::new(crate::util::open_decompressed(path)?, MAX_EXPANDED_BYTES);
+    let r = BoundedReader::new(
+        crate::util::open_decompressed_limited(path, crate::util::MAX_GUIDE_FILE_BYTES)?,
+        MAX_EXPANDED_BYTES,
+    );
     // Auto-detect BOM and transcode declared encodings, including ISO-8859-1 guides, to UTF-8.
     let decoder = quick_xml::encoding::DecodingReader::new(BufReader::with_capacity(64 * 1024, r));
     let mut reader = Reader::from_reader(XmlInput {

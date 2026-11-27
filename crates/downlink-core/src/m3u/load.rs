@@ -230,7 +230,8 @@ impl Fetcher for HttpFetcher {
             etag: header(ETAG),
             last_modified: header(LAST_MODIFIED),
         };
-        let mut remaining = MAX_DOWNLOAD;
+        // Only guide feeds (XMLTV) are fetched conditionally; they get the larger guide cap.
+        let mut remaining = crate::util::MAX_GUIDE_FILE_BYTES;
         Ok(Conditional::Fetched(
             download(resp, &mut remaining).await?,
             validators,

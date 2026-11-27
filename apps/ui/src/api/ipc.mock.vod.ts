@@ -53,6 +53,8 @@ const withResume = (m: Movie): Movie => {
   return w === undefined ? m : { ...m, resumeSecs: w, watched: false };
 };
 
+export const countMovies = (a: VodListArgs) => page(allMovies(), { ...a, offset: 0, limit: Infinity }).length;
+export const countSeries = (a: VodListArgs) => page(allSeries(), { ...a, offset: 0, limit: Infinity }).length;
 export const listMovies = (a: VodListArgs) => page(allMovies(), a).map(withResume);
 export const getMovie = (id: number): Movie | undefined => {
   const m = allMovies().find((x) => x.id === id);

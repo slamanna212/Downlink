@@ -45,6 +45,21 @@ impl VodRow {
     }
 }
 
+/// FTS5 query for a title search: the words as one phrase, the last one a prefix
+/// (`"spider man"*`), so "movie 2" finds "Movie 2" and not "Movie 1 (2021)".
+fn vod_fts_query(q: &str) -> Option<String> {
+    let toks: Vec<String> = q
+        .split(|ch: char| !ch.is_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .map(str::to_owned)
+        .collect();
+    (!toks.is_empty()).then(|| format!("\"{}\"*", toks.join(" ")))
+}
+
+/// Rows per transaction / per statement when a whole catalogue is stored.
+const CATALOG_TX_ROWS: usize = 2_000;
+const CATALOG_STMT_ROWS: usize = 50;
+
 const VOD_COLS: &str = "id, source_id, kind, ext_id, parent_ext, name, year, rating, genre, description, \
     season, episode, duration_secs, art_key, backdrop_key, uuid, container, category_ext, tmdb_id, imdb_id, meta";
 
@@ -306,6 +321,217 @@ impl Store {
         )))
         .bind(source_id)
         .bind(series_ext)
+        .fetch_all(self.pool())
+        .await?)
+    }
+
+    // ---- whole catalogues (sources without server paging, e.g. Xtream) ----------------------
+
+    /// Make `items` (the source's complete list of `kind`, in provider order) the stored
+    /// catalogue: upsert changed rows, keep row ids and enriched details, and delete titles the
+    /// source no longer lists. Writes in short transactions so browsing and playback writes are
+    /// not held up behind a 100,000-title refresh.
+    pub async fn sync_vod_catalog(
+        &self,
+        source_id: i64,
+        kind: VodKind,
+        items: &[VodItem],
+        now: i64,
+    ) -> Result<()> {
+        let kind_str = kind.as_str();
+        let mut keep: HashSet<&str> = HashSet::with_capacity(items.len());
+        let mut rows: Vec<(i64, &VodItem)> = Vec::with_capacity(items.len());
+        for (position, it) in items.iter().enumerate() {
+            // The first occurrence of a duplicated id keeps its place.
+            if it.kind == Some(kind) && keep.insert(it.ext_id.as_str()) {
+                rows.push((i64::try_from(position).unwrap_or(i64::MAX), it));
+            }
+        }
+        for chunk in rows.chunks(CATALOG_TX_ROWS) {
+            let mut tx = self.pool().begin_with("BEGIN IMMEDIATE").await?;
+            for batch in chunk.chunks(CATALOG_STMT_ROWS) {
+                Self::write_catalog_rows(&mut tx, source_id, kind_str, batch, now).await?;
+            }
+            tx.commit().await?;
+        }
+        let existing: Vec<(i64, String)> =
+            sqlx::query_as("SELECT id, ext_id FROM vod_item WHERE source_id = ? AND kind = ?")
+                .bind(source_id)
+                .bind(kind_str)
+                .fetch_all(self.pool())
+                .await?;
+        let gone: Vec<i64> = existing
+            .into_iter()
+            .filter(|(_, ext)| !keep.contains(ext.as_str()))
+            .map(|(id, _)| id)
+            .collect();
+        for chunk in gone.chunks(CATALOG_TX_ROWS) {
+            sqlx::query("DELETE FROM vod_item WHERE id IN (SELECT value FROM json_each(?))")
+                .bind(serde_json::to_string(chunk)?)
+                .execute(self.pool())
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn write_catalog_rows(
+        db: &mut sqlx::SqliteConnection,
+        source_id: i64,
+        kind: &str,
+        rows: &[(i64, &VodItem)],
+        now: i64,
+    ) -> Result<()> {
+        let mut query = sqlx::QueryBuilder::new(
+            "INSERT INTO vod_item (source_id, kind, ext_id, name, year, rating, genre, description,
+                   duration_secs, art_key, backdrop_key, container, category_ext, tmdb_id, imdb_id,
+                   position, updated_at) ",
+        );
+        query.push_values(rows, |mut b, &(position, it)| {
+            b.push_bind(source_id)
+                .push_bind(kind)
+                .push_bind(&it.ext_id)
+                .push_bind(&it.title)
+                .push_bind(it.year)
+                .push_bind(&it.rating)
+                .push_bind(&it.genre)
+                .push_bind(&it.plot)
+                .push_bind(it.duration_secs)
+                .push_bind(&it.poster)
+                .push_bind(&it.backdrop)
+                .push_bind(&it.container)
+                .push_bind(&it.category_ext)
+                .push_bind(&it.tmdb_id)
+                .push_bind(&it.imdb_id)
+                .push_bind(position)
+                .push_bind(now);
+        });
+        // List fields replace what is stored only when the list has them (details fetched on
+        // demand stay); unchanged rows are not rewritten.
+        query.push(
+            " ON CONFLICT(source_id, kind, ext_id) DO UPDATE SET
+                   name = excluded.name,
+                   year = coalesce(excluded.year, vod_item.year),
+                   rating = coalesce(excluded.rating, vod_item.rating),
+                   genre = coalesce(excluded.genre, vod_item.genre),
+                   description = coalesce(excluded.description, vod_item.description),
+                   duration_secs = coalesce(excluded.duration_secs, vod_item.duration_secs),
+                   art_key = coalesce(excluded.art_key, vod_item.art_key),
+                   backdrop_key = coalesce(excluded.backdrop_key, vod_item.backdrop_key),
+                   container = coalesce(excluded.container, vod_item.container),
+                   category_ext = excluded.category_ext,
+                   tmdb_id = coalesce(excluded.tmdb_id, vod_item.tmdb_id),
+                   imdb_id = coalesce(excluded.imdb_id, vod_item.imdb_id),
+                   position = excluded.position,
+                   updated_at = excluded.updated_at
+                 WHERE (vod_item.name, vod_item.year, vod_item.rating, vod_item.genre,
+                        vod_item.description, vod_item.duration_secs, vod_item.art_key,
+                        vod_item.backdrop_key, vod_item.container, vod_item.category_ext,
+                        vod_item.tmdb_id, vod_item.imdb_id, vod_item.position)
+                    IS NOT (excluded.name, coalesce(excluded.year, vod_item.year),
+                        coalesce(excluded.rating, vod_item.rating),
+                        coalesce(excluded.genre, vod_item.genre),
+                        coalesce(excluded.description, vod_item.description),
+                        coalesce(excluded.duration_secs, vod_item.duration_secs),
+                        coalesce(excluded.art_key, vod_item.art_key),
+                        coalesce(excluded.backdrop_key, vod_item.backdrop_key),
+                        coalesce(excluded.container, vod_item.container), excluded.category_ext,
+                        coalesce(excluded.tmdb_id, vod_item.tmdb_id),
+                        coalesce(excluded.imdb_id, vod_item.imdb_id), excluded.position)",
+        );
+        query
+            .build()
+            .persistent(rows.len() == CATALOG_STMT_ROWS)
+            .execute(db)
+            .await?;
+        Ok(())
+    }
+
+    /// One page of a stored catalogue in provider order, optionally within a category and
+    /// matching a title search, with the total number of matches.
+    pub async fn vod_catalog_page(
+        &self,
+        source_id: i64,
+        kind: VodKind,
+        category_ext: Option<&str>,
+        search: Option<&str>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<VodRow>, i64)> {
+        let fts = search.and_then(vod_fts_query);
+        if search.is_some_and(|s| !s.trim().is_empty()) && fts.is_none() {
+            return Ok((Vec::new(), 0));
+        }
+        let filter = "source_id = ?1 AND kind = ?2 AND (?3 IS NULL OR category_ext = ?3)
+             AND (?4 IS NULL OR id IN (SELECT rowid FROM vod_fts WHERE vod_fts MATCH ?4))";
+        let rows: Vec<VodRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {VOD_COLS} FROM vod_item WHERE {filter}
+             ORDER BY position, id LIMIT ?5 OFFSET ?6"
+        )))
+        .bind(source_id)
+        .bind(kind.as_str())
+        .bind(category_ext)
+        .bind(&fts)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(self.pool())
+        .await?;
+        let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM vod_item WHERE {filter}"
+        )))
+        .bind(source_id)
+        .bind(kind.as_str())
+        .bind(category_ext)
+        .bind(&fts)
+        .fetch_one(self.pool())
+        .await?;
+        Ok((rows, total))
+    }
+
+    /// Recount the cached categories of a stored catalogue from its rows.
+    pub async fn recount_vod_categories(&self, source_id: i64, kind: VodKind) -> Result<()> {
+        sqlx::query(
+            "UPDATE vod_category SET item_count = (
+               SELECT count(*) FROM vod_item v WHERE v.source_id = vod_category.source_id
+                 AND v.kind = vod_category.kind AND v.category_ext = vod_category.ext_id)
+             WHERE source_id = ? AND kind = ?",
+        )
+        .bind(source_id)
+        .bind(kind.as_str())
+        .execute(self.pool())
+        .await?;
+        Ok(())
+    }
+
+    /// Titles per category in a stored catalogue.
+    pub async fn vod_catalog_counts(
+        &self,
+        source_id: i64,
+        kind: VodKind,
+    ) -> Result<HashMap<String, i64>> {
+        let rows: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT category_ext, count(*) FROM vod_item
+             WHERE source_id = ? AND kind = ? AND category_ext IS NOT NULL GROUP BY category_ext",
+        )
+        .bind(source_id)
+        .bind(kind.as_str())
+        .fetch_all(self.pool())
+        .await?;
+        Ok(rows.into_iter().collect())
+    }
+
+    /// Movies and series of any source whose stored title matches `query` (FTS prefix match),
+    /// best matches first.
+    pub async fn search_vod(&self, query: &str, limit: i64) -> Result<Vec<VodRow>> {
+        let Some(fts) = vod_fts_query(query) else {
+            return Ok(Vec::new());
+        };
+        Ok(sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {VOD_COLS} FROM vod_item WHERE id IN (
+               SELECT rowid FROM vod_fts WHERE vod_fts MATCH ?1 ORDER BY rank LIMIT ?2)
+             ORDER BY length(name), name"
+        )))
+        .bind(fts)
+        .bind(limit)
         .fetch_all(self.pool())
         .await?)
     }

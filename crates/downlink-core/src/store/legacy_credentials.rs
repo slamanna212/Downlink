@@ -46,6 +46,12 @@ async fn checkpoint(conn: &mut SqliteConnection) -> Result<()> {
 
 async fn scrub(pool: &SqlitePool, secrets: &dyn SecretStore) -> Result<()> {
     let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    // The pool runs with `secure_delete = FAST`; this one-time scrub overwrites rows that held
+    // credentials, so zero every freed page on its connection too (the VACUUM below rewrites
+    // the file either way).
+    sqlx::query("PRAGMA secure_delete = ON")
+        .execute(&mut *tx)
+        .await?;
     let version: i64 = sqlx::query_scalar("PRAGMA user_version")
         .fetch_one(&mut *tx)
         .await?;

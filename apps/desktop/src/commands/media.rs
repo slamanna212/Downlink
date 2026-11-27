@@ -2,7 +2,7 @@
 
 use downlink_core::service::{
     MovieDto, RecordKindArg, RecordingRuleDto, RecordingsDto, SeriesDetailDto, SeriesDto,
-    VodCategoryDto, VodKindArg, VodListArgs,
+    VodCategoryDto, VodKindArg, VodListArgs, VodPageDto,
 };
 use tauri::State;
 
@@ -30,7 +30,7 @@ pub async fn list_movies(
     offset: Option<i64>,
     limit: Option<i64>,
     compact: Option<bool>,
-) -> CmdResult<Vec<MovieDto>> {
+) -> CmdResult<VodPageDto<MovieDto>> {
     state
         .svc()
         .await?
@@ -59,7 +59,7 @@ pub async fn list_series(
     offset: Option<i64>,
     limit: Option<i64>,
     compact: Option<bool>,
-) -> CmdResult<Vec<SeriesDto>> {
+) -> CmdResult<VodPageDto<SeriesDto>> {
     state
         .svc()
         .await?

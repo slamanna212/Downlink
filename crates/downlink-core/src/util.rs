@@ -7,9 +7,16 @@ use std::path::Path;
 /// Open a file, sniffing gzip/xz magic bytes (the extension is not trusted) and returning a
 /// streaming decompressed reader.
 pub fn open_decompressed(path: &Path) -> std::io::Result<Box<dyn Read + Send>> {
-    let file = open_import_file(path)?;
-    let mut r =
-        BufReader::with_capacity(64 * 1024, BoundedReader::new(file, MAX_IMPORT_FILE_BYTES));
+    open_decompressed_limited(path, MAX_IMPORT_FILE_BYTES)
+}
+
+/// [`open_decompressed`] with a caller-chosen cap on the (compressed) file size.
+pub(crate) fn open_decompressed_limited(
+    path: &Path,
+    max_file_bytes: u64,
+) -> std::io::Result<Box<dyn Read + Send>> {
+    let file = open_import_file_limited(path, max_file_bytes)?;
+    let mut r = BufReader::with_capacity(64 * 1024, BoundedReader::new(file, max_file_bytes));
     let magic = r.fill_buf()?;
     if magic.starts_with(&[0x1f, 0x8b]) {
         return Ok(Box::new(flate2::bufread::MultiGzDecoder::new(r)));
@@ -27,9 +34,13 @@ pub fn open_decompressed(path: &Path) -> std::io::Result<Box<dyn Read + Send>> {
 
 pub(crate) const MAX_IMPORT_FILE_BYTES: u64 = 512 * 1024 * 1024;
 
-pub(crate) fn open_import_file(path: &Path) -> io::Result<File> {
+/// Guide feeds (XMLTV) for tens of thousands of channels run to gigabytes uncompressed. They are
+/// streamed to disk and parsed incrementally, so only disk space scales with this cap.
+pub(crate) const MAX_GUIDE_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+pub(crate) fn open_import_file_limited(path: &Path, max_bytes: u64) -> io::Result<File> {
     let file = File::open(path)?;
-    if file.metadata()?.len() > MAX_IMPORT_FILE_BYTES {
+    if file.metadata()?.len() > max_bytes {
         return Err(import_limit());
     }
     Ok(file)
