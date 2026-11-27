@@ -247,7 +247,7 @@ export interface AppError {
 }
 
 export interface CatalogUpdated {
-  scope?: 'status' | 'channels' | 'guide' | 'recordings' | 'syncComplete' | 'sources';
+  scope?: 'status' | 'channels' | 'guide' | 'recordings' | 'syncComplete' | 'sources' | 'sports';
   sourceId: number;
   channels: number;
   groups: number;
@@ -751,4 +751,65 @@ export interface TmdbStatus {
   /** A key is saved (it never comes back to the UI). */
   configured: boolean;
   language: string;
+}
+
+// ---- sports tracking (docs/SPORTS.md) ---------------------------------------------------------
+
+export type SportsSession = 'race' | 'qualifying' | 'practice' | 'shows';
+
+export interface SportsTeam {
+  key: string;
+  name: string;
+  /** Nickname ("Bears"). */
+  short: string;
+  abbr: string;
+}
+
+/** Motorsport grouping (SPORTS §2.2); display names come from `t('sports.group.*')`. */
+export type SportsGroup = 'open_wheel' | 'stock_car' | 'sports_car' | 'motorcycle' | 'rally' | 'drag_dirt';
+
+export interface SportsLeague {
+  key: string;
+  name: string;
+  kind: 'team' | 'motorsport';
+  /** Motorsport only. A string so a newer catalog group never breaks the UI. */
+  group: SportsGroup | (string & {}) | null;
+  teams: SportsTeam[];
+}
+
+export interface SportsCatalog {
+  leagues: SportsLeague[];
+  sessions: SportsSession[];
+}
+
+/** `sports.follow` (SPORTS §3). Unknown keys are kept as-is and ignored. */
+export interface SportsFollow {
+  version: number;
+  includeReplays: boolean;
+  /** Present = followed; empty `teams` = every game in the league. */
+  leagues: Record<string, { teams: string[] }>;
+  series: Record<string, { sessions: SportsSession[] }>;
+}
+
+export interface SportsMatch {
+  channel: Channel;
+  /** Null for channel-name-only matches (event channels): shown as "on today". */
+  programme: Programme | null;
+  league: string;
+  leagueName: string;
+  /** Team keys that matched (followed or not). */
+  teams: string[];
+  followedTeams: string[];
+  /** Motorsport only. */
+  session: SportsSession | null;
+  /** A live broadcast (not a replay). Not "airing now": compare the programme times for that. */
+  live: boolean;
+  /** Live was inferred because the guide never sets LIVE flags ("likely live"). */
+  liveInferred: boolean;
+  source: 'programme' | 'channel';
+  score: number;
+  /** Event channels only: the start time read from the channel name, when it names one. */
+  eventStartUtc: number | null;
+  /** Other channels showing the same event, best first (SPORTS §5.1). The backend picks `channel`. */
+  alternates: Channel[];
 }

@@ -5,6 +5,7 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use downlink_core::auth::{MemorySecretStore, SecretStore};
+use downlink_core::service::dto::CatalogChange;
 use downlink_core::service::{AddSourceInput, Event, GuideArgs, ListChannelsArgs, Service};
 use downlink_core::store::Store;
 use serde_json::{Value, json};
@@ -187,7 +188,10 @@ async fn add_source_persists_reference_not_secret_and_emits_events() {
     let mut updated = None;
     while let Ok(ev) = rx.try_recv() {
         names.push(ev.name());
-        if let Event::CatalogUpdated(c) = ev {
+        // The sports rebuild runs in the background and may land after the sync's own update.
+        if let Event::CatalogUpdated(c) = ev
+            && !matches!(c.scope, CatalogChange::Sports)
+        {
             updated = Some(c);
         }
     }

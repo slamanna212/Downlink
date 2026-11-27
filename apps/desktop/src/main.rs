@@ -190,6 +190,10 @@ macro_rules! handlers {
             commands::metadata::tmdb_status,
             commands::metadata::tmdb_set_key,
             commands::metadata::tmdb_clear_key,
+            commands::sports::sports_catalog,
+            commands::sports::sports_follow_get,
+            commands::sports::sports_follow_set,
+            commands::sports::sports_matches,
             $($extra),*
         ]
     };

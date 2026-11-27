@@ -10,6 +10,7 @@ pub mod mediaserver;
 pub mod metadata;
 pub mod player;
 pub mod settings;
+pub mod sports;
 pub mod updates;
 
 pub type CmdResult<T> = Result<T, downlink_core::AppError>;

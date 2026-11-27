@@ -21,34 +21,19 @@ The catalog is a data file embedded in `downlink-core` (`src/sports/catalog.toml
 `include_str!`). Updating rosters, promotions/relegations or series renames is a data change, not a
 code change.
 
-```toml
-[[league]]
-key = "nfl"
-name = "NFL"
-kind = "team"                     # team | motorsport
-tokens = ["NFL", "NFL Football", "National Football League"]
-exclude = ["NFL Live", "Inside the NFL", "NFL Total Access", "Good Morning Football"]
+The header comment in `catalog.toml` is the format reference. In short:
 
-  [[league.team]]
-  key = "chi"
-  name = "Chicago Bears"
-  short = "Bears"
-  abbr = "CHI"
-  aliases = ["Chicago"]           # weak alias: only counts with league context
+- **League:** `key`, `name`, `kind` (team | motorsport), `group` (motorsport), `tokens` (strong),
+  `context` (risky tokens that need league context), `events` (marquee aliases, strong),
+  `exclude` (veto phrases, also used to hand off to a more specific series).
+- **Team:** `key`, `name` (strong), `short`, `abbr` (versus patterns only), `city` (weak),
+  `aliases` (strong), `weak`.
+- **`[sessions]`:** the session term lists. **`[words]`:** the replay, talk, sports-group and
+  category word lists.
 
-[[league]]
-key = "f1"
-name = "Formula 1"
-kind = "motorsport"
-group = "open_wheel"
-tokens = ["Formula 1", "Formula One", "F1"]
-events = ["Monaco Grand Prix", "Las Vegas Grand Prix"]   # extra strong aliases
-exclude = ["F1 Academy", "F1 TV"]                         # handed off to a more specific series
-```
-
-Each team has a key, a full name, a short name (nickname), an abbreviation and extra aliases.
-Aliases are tagged **strong** (unique enough on their own, like "49ers" or "Tottenham Hotspur") or
-**weak** (a city, or a nickname shared across leagues, like "Giants" or "Kings"). §5 says how
+Strong aliases are unique enough on their own ("49ers", "Tottenham Hotspur"). Weak ones are a
+city, or a nickname shared across leagues ("Giants", "Kings"). A `short` nickname found in more
+than one league is made weak automatically at load time. §5 says how
 each kind scores. Logos aren't shipped; the UI uses abbreviations on a neutral chip.
 
 ### 2.1 Team sports
@@ -226,6 +211,21 @@ Every scoring rule has a fixture test using invented titles in real formats, wit
 data (hard rule 16). That includes the shared-nickname cases (Giants, Cardinals, Rangers, Kings),
 motorsport session classification for every term in §2.3, and replay and talk-show rejection.
 
+### 5.1 One event, many channels
+
+`sports_matches` groups copies of the same event (`sports::group`), so a game on three channels is
+one match, and later one alert:
+
+- **Same event:** same league and session, and the airtimes overlap (no fixed minute windows:
+  copies of one event are on at the same time, even when one channel opens with its own build-up).
+  Teams must overlap; when both name two or more teams, the sets must be equal. Teamless listings
+  need equal normalized titles. An event channel joins the airing its named start falls in, or
+  the one on air now when its name has no time.
+- **Which channel leads:** favorite, then quality (4K > FHD > HD > unknown > SD), then guide data
+  over a name-only match, then score, then the lowest channel number.
+- The rest go in `alternates` (best first). The card shows "+N"; its menu ("Also on") plays any
+  of them.
+
 ## 6. Phases
 
 1. **Foundation:** catalog, `sports.follow`, matcher, the `sports_match` table, commands, and the
@@ -241,3 +241,47 @@ motorsport session classification for every term in §2.3, and replay and talk-s
 ## 7. Out of scope
 
 Following drivers or players, scores and results, spoiler hiding, and fetching team logos.
+
+## 8. Implementation notes (phase 1 + 2)
+
+Where the build refines §2–§5:
+
+- The catalog has 39 leagues: 6 team leagues and 33 motorsport series.
+- **Live markers.** Many guides mark live airings in the title instead of the XMLTV flag: a
+  superscript "ᴸᶦᵛᵉ" suffix, "(Live)", "[Live]", a "LIVE:" prefix. A source whose sports listings
+  carry a marker (or a LIVE flag) is trusted: an unmarked airing is a replay. Sources with no
+  markers fall back to "likely live", and later repeats of the same title on the same channel in
+  the window are replays.
+- **The listing must name the sport.** A programme matches only when its title or subtitle names
+  the league, an event or a team. A team channel's name or a description adds confidence but
+  never makes a match on its own ("No Game Today" on a team channel).
+- **Filler and feeds** (`[words] filler`, `feeds`): placeholder listings ("No Game Today",
+  "NO EVENT") never match; event-channel secondary feeds (on-board cameras, timing, trackers)
+  are dropped.
+- **Motorsport session words** add +15 next to the series name. A bare series title with no
+  session word counts as the race only when the guide marks it live, never on inference.
+- **Event channels** read a date in the name ("@ 27 Nov 11:50 AM ET"); one whose named start
+  is more than 4 hours past is over and dropped; a future one shows its start time
+  (`eventStartUtc`).
+- **Live vs. on air.** `live` on a match means "a live broadcast, not a replay", not "on air
+  now". The UI works out "on air" from programme times (channel-only matches count as on air) and
+  sorts on air first. The live badge shows only while a match is on air.
+- **Replay words** are checked in title and subtitle only. A replay word inside the league's own
+  token or event alias is ignored ("Winter Classic" is live).
+- **Session classification:** a term inside a longer matched term doesn't count; then the order
+  shows → qualifying → practice → race decides. So "Superpole Race" is race and "Grand Prix
+  Countdown" is shows. The talk penalty is skipped for titles classified as shows.
+- **Cross-league:** every league is scored and the best wins (exact ties keep both) before follow
+  filtering. That's how "F1 Academy" goes to `f1_academy`, not `f1`.
+- **Teams** match in title and subtitle, and in the description only when neither names one. The
+  cap is 2 teams in total. `abbr` counts only inside a versus pattern with league context.
+- **Channel-name matches:** a team league needs a team in the name ("NFL Network" alone is not a
+  match). Motorsport needs a session term or an event. A channel that already has a programme
+  match for the league gets no channel row.
+- **Follow rules:** a series with an empty session list shows nothing. Picked teams no longer in
+  the catalog don't widen to "All games".
+- **Rebuild triggers:** full sync, guide refresh (visible or single), content-filter change and
+  `sports_follow_set`. A mutex keeps it to one rebuild at a time. Each rebuild emits
+  `catalog://updated` with scope `sports`.
+- **Categories:** the +15 category signal exists in the matcher, but categories aren't stored
+  yet, so it's inert until a migration adds `programme.category`.

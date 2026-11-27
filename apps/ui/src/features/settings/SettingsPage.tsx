@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal, NavLink, PasswordInput, SegmentedControl, Select, Slider, Switch, Text } from '@mantine/core';
-import { IconInfoSquareRounded, IconPalette, IconPlayerPlay, IconPlugConnected, IconRefresh, IconServer2, IconStethoscope } from '@tabler/icons-react';
+import { IconInfoSquareRounded, IconPalette, IconPlayerPlay, IconPlugConnected, IconRefresh, IconServer2, IconStethoscope, IconTrophy } from '@tabler/icons-react';
 import { invoke, toAppError } from '../../api/ipc';
 import { useMediaServerStatus, useSettings, useSources, useUpdateStatus, useUpdateWaiting } from '../../api/queries';
 import type { AudioOutput, Deinterlace, DensitySetting, HdrOutput, HwdecSetting, PlexPin, Source, UpdateChannel } from '../../api/types';
@@ -15,6 +15,8 @@ import { t, type MessageKey } from '../../lib/i18n';
 import { useTasksStore } from '../../store/tasks';
 import { useUiStore } from '../../store/ui';
 import { ReleaseNotes } from './ReleaseNotes';
+import { Section } from './Section';
+import { SportsSection } from './SportsSection';
 import { copyDiagnostics } from '../diagnostics/copyDiagnostics';
 import { notifyError } from '../../components/Notify/notify';
 import classes from './Settings.module.css';
@@ -22,23 +24,13 @@ import classes from './Settings.module.css';
 const SECTIONS: { id: string; label: MessageKey; icon: TablerIcon }[] = [
   { id: 'sources', label: 'settings.sources', icon: IconPlugConnected },
   { id: 'playback', label: 'settings.playback', icon: IconPlayerPlay },
+  { id: 'sports', label: 'settings.sports', icon: IconTrophy },
   { id: 'metadata', label: 'settings.metadata', icon: IconInfoSquareRounded },
   { id: 'mediaserver', label: 'settings.mediaServer', icon: IconServer2 },
   { id: 'appearance', label: 'settings.appearance', icon: IconPalette },
   { id: 'updates', label: 'settings.updates', icon: IconRefresh },
   { id: 'about', label: 'settings.about', icon: IconStethoscope },
 ];
-
-function Section({ title, help, children }: { title: string; help: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <h2 className={classes.sectionTitle}>{title}</h2>
-      <p className={classes.sectionHelp}>{help}</p>
-      <div className={classes.divider} />
-      {children}
-    </section>
-  );
-}
 
 function SourceRow({ source, onRemove }: { source: Source; onRemove: (s: Source) => void }) {
   const qc = useQueryClient();
@@ -753,6 +745,7 @@ export function SettingsPage() {
         <div className={classes.inner}>
           {section === 'sources' && <SourcesSection />}
           {section === 'playback' && <PlaybackSection />}
+          {section === 'sports' && <SportsSection />}
           {section === 'metadata' && <MetadataSection />}
           {section === 'mediaserver' && <MediaServerSection />}
           {section === 'appearance' && <AppearanceSection />}

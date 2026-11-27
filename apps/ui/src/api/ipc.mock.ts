@@ -2,6 +2,7 @@
 // names, URLs or EPG. `?mock=empty` in the URL simulates a fresh install with no source;
 // `?mock=offline` simulates a source that is offline.
 import * as vod from './ipc.mock.vod';
+import { MOCK_SPORTS_CATALOG, mockSportsFollow, sportsMatchesFor } from './ipc.mock.sports';
 import type { Backend, CommandName, Commands, EventName, Events, Unlisten } from './ipc';
 import {
   Cap,
@@ -220,6 +221,9 @@ export function createMockBackend(): Backend {
   let tmdbKey = mode === 'tmdb';
   let update: UpdateStatus = { channel: 'stable', current: '0.0.0-mock', available: null, notes: null, lastChecked: null, ready: false };
   let searchIndex: { programme: Programme; channel: Channel; hay: string }[] | null = null;
+  let sportsFollow = mockSportsFollow(mode === 'sports');
+  const sportsBase = Math.floor(nowSec() / 300) * 300;
+  const sportsProgrammes = new Map<string, Programme>();
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let player = idleState();
   const streamInUse = new Map<number, number>();
@@ -696,7 +700,7 @@ export function createMockBackend(): Backend {
       await wait(250);
       if (target.kind === 'programme') {
         const [cid] = target.id.split(':').map(Number);
-        const p = genProgrammes(cid ?? 0, 0, 4e9, scheduled).find((x) => x.id === target.id);
+        const p = sportsProgrammes.get(target.id) ?? genProgrammes(cid ?? 0, 0, 4e9, scheduled).find((x) => x.id === target.id);
         if (!p) throw appError('local', 'That programme is no longer in the guide.');
         return mockDetails({ kind: 'programme', title: p.title ?? 'Programme', episodeTitle: p.subtitle, season: p.season, episode: p.episode, description: p.description, isNew: p.isNew, isLive: p.isLive, isPremiere: p.isPremiere, isFinale: p.isFinale, runtimeMins: Math.round((p.endUtc - p.startUtc) / 60) }, tmdbKey);
       }
@@ -717,6 +721,19 @@ export function createMockBackend(): Backend {
     tmdb_clear_key: () => {
       tmdbKey = false;
       return { configured: false, language: 'en-US' };
+    },
+    sports_catalog: () => MOCK_SPORTS_CATALOG,
+    sports_follow_get: () => structuredClone(sportsFollow),
+    sports_follow_set: async ({ follow }) => {
+      await wait(120);
+      sportsFollow = structuredClone(follow);
+      emit('catalog://updated', { scope: 'sports', sourceId: 1, channels: channels.length, groups: groups.length, programmes: 0 });
+      return null;
+    },
+    sports_matches: ({ startUtc, endUtc }) => {
+      const { matches, programmes } = sportsMatchesFor(sportsFollow, channels, startUtc, endUtc, nowSec(), sportsBase);
+      for (const [id, p] of programmes) sportsProgrammes.set(id, p);
+      return matches;
     },
   };
 

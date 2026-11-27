@@ -15,6 +15,7 @@ pub mod redact;
 pub mod service;
 pub mod sessions;
 pub mod source;
+pub mod sports;
 pub mod store;
 pub mod sync;
 pub mod tls;

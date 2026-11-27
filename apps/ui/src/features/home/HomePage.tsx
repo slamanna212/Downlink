@@ -21,6 +21,7 @@ import { playCatchup, playChannel, playRecording, playVod, restartProgramme } fr
 import classes from './Home.module.css';
 import { episodeLine } from '../../lib/episode';
 import { openInfo } from '../../store/info';
+import { SportsRow } from './SportsRow';
 
 function Focusable({ children, className, onPlay }: { children: React.ReactNode; className: string | undefined; onPlay: () => void }) {
   const { ref, focusProps } = useDLFocusable<object, HTMLButtonElement>({ onEnterPress: onPlay });
@@ -218,6 +219,8 @@ export function HomePage() {
                 <div className={classes.grid}>{rest.slice(0, 8).map((it) => <ContinueCard key={it.id} item={it} />)}</div>
               </section>
             )}
+
+            <SportsRow />
 
             <section className={classes.section}>
               <div className={classes.sectionHead}>

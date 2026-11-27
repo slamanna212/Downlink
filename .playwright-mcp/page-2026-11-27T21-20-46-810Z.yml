@@ -1,0 +1,41 @@
+- generic [ref=e3]:
+  - link "Skip to content" [ref=e4] [cursor=pointer]:
+    - /url: "#main"
+  - complementary [ref=e5]:
+    - navigation "Primary" [ref=e6]:
+      - generic [ref=e7]:
+        - generic [ref=e8]: Downlink
+        - button "Collapse sidebar" [ref=e12] [cursor=pointer]
+      - link "Search Ctrl K" [ref=e17] [cursor=pointer]:
+        - /url: /search
+        - generic [ref=e23]: Search
+        - generic [ref=e24]: Ctrl K
+      - link "Home" [ref=e26] [cursor=pointer]:
+        - /url: /
+      - link "Guide G" [ref=e34] [cursor=pointer]:
+        - /url: /guide
+        - generic [ref=e41]: Guide
+        - generic [ref=e42]: G
+      - link "Channels L" [ref=e44] [cursor=pointer]:
+        - /url: /channels
+        - generic [ref=e50]: Channels
+        - generic [ref=e51]: L
+      - link "Settings" [ref=e54] [cursor=pointer]:
+        - /url: /settings
+      - generic [ref=e61]:
+        - img "No source" [ref=e62]
+        - generic [ref=e63]:
+          - paragraph [ref=e64]: No source
+          - paragraph [ref=e65]: Add a source
+  - generic [ref=e66]:
+    - generic [ref=e68]:
+      - button "Minimize" [ref=e69]
+      - button "Maximize" [ref=e71]
+      - button "Close" [ref=e74]
+    - main [ref=e78]:
+      - generic [ref=e81]:
+        - heading "Home" [level=1] [ref=e82]
+        - button "Search channels, programmes Ctrl K" [ref=e83] [cursor=pointer]:
+          - generic [ref=e89]:
+            - generic [ref=e90]: Search channels, programmes
+            - generic [ref=e91]: Ctrl K

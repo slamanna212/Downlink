@@ -1,6 +1,6 @@
-import { QueryClient, useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invoke, listen } from './ipc';
-import type { Caps, CatalogUpdated, MediaTarget } from './types';
+import type { Caps, CatalogUpdated, MediaTarget, SportsFollow } from './types';
 import { notifyError } from '../components/Notify/notify';
 import { unionCaps } from '../lib/caps';
 
@@ -19,7 +19,8 @@ export function createQueryClient(): QueryClient {
  */
 const EVENT_DRIVEN = 5 * 60_000;
 
-const GUIDE_QUERIES = ['guideProgrammes', 'nowNext', 'programmes', 'home', 'search', 'palette'];
+// Sports matches are re-made from guide and channel data, so anything that changes those refreshes them too.
+const GUIDE_QUERIES = ['guideProgrammes', 'nowNext', 'programmes', 'home', 'search', 'palette', 'sportsMatches'];
 const CHANNEL_QUERIES = ['sources', 'channels', 'channel', 'groups', 'counts', ...GUIDE_QUERIES];
 const FAVOURITE_QUERIES = ['channels', 'channel', 'counts', 'home', 'search', 'palette'];
 const RECORDING_QUERIES = ['recordings', 'recordingRules', ...GUIDE_QUERIES];
@@ -51,6 +52,7 @@ const CATALOG_CHANGES: Record<NonNullable<CatalogUpdated['scope']>, string[] | u
   recordings: RECORDING_QUERIES,
   syncComplete: [...FAVOURITE_QUERIES, 'sources', 'groups', ...GUIDE_QUERIES],
   sources: undefined,
+  sports: ['sportsMatches'],
 };
 
 export async function startCatalogBridge(qc: QueryClient): Promise<() => void> {
@@ -192,5 +194,54 @@ export function useMediaMatch(target: MediaTarget | null) {
     enabled: !!target && !!status.data?.plex.serverId,
     staleTime: 5 * 60_000,
     retry: false,
+  });
+}
+
+// ---- sports tracking (docs/SPORTS.md) ---------------------------------------------------------
+
+/** The embedded catalog only changes with an app update. */
+export const useSportsCatalog = () =>
+  useQuery({ queryKey: ['sports', 'catalog'], queryFn: () => invoke('sports_catalog', {}), staleTime: Infinity });
+
+const SPORTS_FOLLOW_KEY = ['sports', 'follow'];
+const SPORTS_FOLLOW_SET = ['sports', 'follow', 'set'];
+
+export const useSportsFollow = () =>
+  useQuery({ queryKey: SPORTS_FOLLOW_KEY, queryFn: () => invoke('sports_follow_get', {}), staleTime: Infinity });
+
+/**
+ * Saves the whole follow document, optimistically: switches and chips flip at once and roll back on
+ * error. The backend re-matches and emits `catalog://updated` (scope `sports`), which refreshes matches.
+ */
+export function useSetSportsFollow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: SPORTS_FOLLOW_SET,
+    mutationFn: (follow: SportsFollow) => invoke('sports_follow_set', { follow }),
+    onMutate: async (follow) => {
+      await qc.cancelQueries({ queryKey: SPORTS_FOLLOW_KEY, exact: true });
+      const previous = qc.getQueryData<SportsFollow>(SPORTS_FOLLOW_KEY);
+      qc.setQueryData(SPORTS_FOLLOW_KEY, follow);
+      return { previous };
+    },
+    onError: (e, _follow, ctx) => {
+      if (ctx?.previous) qc.setQueryData(SPORTS_FOLLOW_KEY, ctx.previous);
+      notifyError(e);
+    },
+    // Re-read only after the last of a burst of quick toggles, so an early answer never undoes a later click.
+    onSettled: () => {
+      if (qc.isMutating({ mutationKey: SPORTS_FOLLOW_SET }) <= 1) void qc.invalidateQueries({ queryKey: SPORTS_FOLLOW_KEY, exact: true });
+    },
+  });
+}
+
+/** Matches in [startUtc, endUtc). Pass bucketed bounds so the key is stable. Refetched each minute for live state. */
+export function useSportsMatches(startUtc: number, endUtc: number, enabled = true) {
+  return useQuery({
+    queryKey: ['catalog', 'sportsMatches', startUtc, endUtc],
+    queryFn: () => invoke('sports_matches', { startUtc, endUtc }),
+    enabled,
+    placeholderData: (prev) => prev,
+    refetchInterval: 60_000,
   });
 }

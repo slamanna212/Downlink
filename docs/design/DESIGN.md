@@ -143,7 +143,8 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 - **Badges** (20 px, 11/700 caps, radius 4): LIVE/REC = live tint + dot · CATCH-UP = accent tint +
   IconHistory · NEW/HD/4K/RADIO/PREMIERE/FINALE = outline (hairline 18%) text-2 · INTERRUPTED (recording stopped early) = warn
   tint 10% + warn text · content rating (`cert`, text as
-  broadcast, e.g. TV-14) = outline · DRM/REPEAT = surface-3, text-dim.
+  broadcast, e.g. TV-14) = outline · DRM/REPEAT/REPLAY = surface-3, text-dim · LIKELY LIVE (sports: live inferred
+  from a guide without LIVE flags) = outline + live dot.
 - **Episode labels** (`lib/episode.ts`): `S2 E5`, and `S2 E5 · Episode title` wherever a programme, recording or
   episode is listed (guide block time line, preview, channel rows, channel drawer, search, recordings, home, player).
 - **Details modal** (`features/info`, one instance in the shell, opened via `store/info`): 880 px, radius 12,
@@ -176,6 +177,10 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   badges, two-line description, progress with minutes left, Watch live (primary) · From start · More info.
   Then *Pick up where you left off* (16:9 art cards, tag top-left, 3 px progress), *On now in your favorites*
   (96 px art header, logo plate on the edge, LIVE, progress, next), *Recently watched* (148 px logo tiles).
+  *Your sports* sits above *On now* (SPORTS §6): match cards (surface-1, logo plate, LIVE / LIKELY LIVE /
+  REPLAY badge, title, team or series label with an outline session badge, channel and start time or
+  minutes left, 2 px progress while on air). On air plays; upcoming opens the details modal. The row is
+  hidden when nothing is followed or nothing matches. Settings → Sports reuses the card for its preview.
   Four across from 1100 px.
 - **Programme art** (`programme_art`): the guide's own `<icon>` first, then the server's programme details,
   then TMDB (backdrop before poster). The pick is cached per title in core; images in the image cache.

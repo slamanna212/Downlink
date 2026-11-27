@@ -17,6 +17,7 @@ import {
   IconSearch,
   IconStethoscope,
   IconLayoutSidebar,
+  IconTrophy,
 } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
 import { useCaps, useSources } from '../../api/queries';
@@ -82,6 +83,7 @@ export function CommandPalette() {
     const settingsItems = [
       mk('s-sources', t('settings.sources'), go('/settings/sources'), IconPlugConnected),
       mk('s-playback', t('settings.playback'), go('/settings/playback'), IconPlayerPlay),
+      mk('s-sports', t('settings.sports'), go('/settings/sports'), IconTrophy),
       mk('s-appearance', t('settings.appearance'), go('/settings/appearance'), IconPalette),
       mk('s-updates', t('settings.updates'), go('/settings/updates'), IconRefresh),
       mk('s-about', t('settings.about'), go('/settings/about'), IconStethoscope),

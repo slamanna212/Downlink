@@ -1,0 +1,1962 @@
+# Sports catalog (docs/SPORTS.md §2). Data only: roster changes never need code changes.
+#
+# League fields:
+#   key, name, kind = "team" | "motorsport"
+#   group     motorsport only: open_wheel | stock_car | sports_car | motorcycle | rally | drag_dirt
+#   tokens    strong league/series names (match on their own)
+#   context   risky tokens that only count when the league already has context (§2.2)
+#   events    motorsport only: marquee event aliases, strong
+#   exclude   phrases that veto a match for this league (talk shows, more specific series)
+#
+# Team fields:
+#   key, name (full, strong), short (nickname), abbr, city (always weak)
+#   aliases   extra strong aliases
+#   weak      extra weak aliases
+# A `short` that appears in more than one league is treated as weak automatically.
+
+# Session terms (§2.3), checked in order shows, qualifying, practice, race.
+[sessions]
+shows = [
+  "Pre-race", "Pre-Race Show", "Post-race", "Post-Race Show", "Countdown", "Grid Walk", "Hub",
+  "Race Hub", "Notebook", "Highlights", "Review", "Magazine", "Inside", "Raceday", "Race Day",
+  "Preview", "Weekly", "Build-up", "Weekend Warm-up", "Victory Lane", "Trackside", "Debrief",
+  "Press Conference", "Drivers Parade", "Pre-Qualifying", "Post-Qualifying", "Paddock",
+  "Grand Prix Sunday", "Grand Prix Saturday", "Chequered Flag", "Checkered Flag",
+  "Qualifying Build-up", "Race Build-up", "Pre-Show", "Post-Show", "Weekend Preview",
+  "Season Review", "Ted's Notebook", "The F1 Show",
+]
+qualifying = [
+  "Qualifying", "Quali", "Q1", "Q2", "Q3", "Sprint Qualifying", "Sprint Shootout", "Pole",
+  "Pole Day", "Pole Qualifying", "Pole Position", "Qualifying Session", "Qualifier", "Time Trials",
+  "Time Trial", "Hyperpole", "Superpole", "Shootout", "Top 10 Shootout", "Top Ten Shootout",
+  "Last Chance Qualifier", "Last Chance Qualifying", "LCQ", "Fast Six", "Fast Nine", "Fast 12",
+  "Bump Day",
+]
+practice = [
+  "Practice", "Free Practice", "Practice 1", "Practice 2", "Practice 3", "Free Practice 1",
+  "Free Practice 2", "Free Practice 3", "Final Practice", "Opening Practice", "Practice Session",
+  "FP1", "FP2", "FP3", "P1", "P2", "P3", "Warm-up", "Warmup", "Happy Hour", "Carb Day",
+  "Shakedown", "Test", "Testing", "Open Test", "Roar Before the 24",
+]
+race = [
+  "Race", "Grand Prix", "GP", "Sprint", "Sprint Race", "Feature", "Feature Race", "Main Race",
+  "Main Event", "A-Main", "Heat", "Heat Race", "Heats", "Superpole Race", "Duel", "Duels", "Final",
+  "Finals", "Eliminations", "Dash", "24 Hours", "12 Hours", "8 Hours", "6 Hours", "Hours of",
+  "24 Hour", "12 Hour", "1000", "600", "500", "400", "300", "250", "200", "150", "Daytona 500",
+  "Coca-Cola 600", "E-Prix", "Stage", "Power Stage", "Rally", "Moto 1", "Moto 2", "Nationals",
+]
+
+# Shared word lists (§5).
+#   filler  placeholder listings that are never an event (veto)
+#   feeds   secondary event-channel feeds that are never their own match
+[words]
+filler = [
+  "No Game Today", "No Game Scheduled", "No Games Scheduled", "No Game", "No Games", "No Event",
+  "No Events", "No Event Scheduled", "No Programming", "Off Air", "Offseason", "Off Season",
+  "Programming Resumes", "Next Game", "Coming Up", "Coming Soon", "Stay Tuned", "To Be Announced",
+  "Event Not Started", "Event Ended", "Off The Air",
+]
+feeds = [
+  "On-Board", "Onboard", "On Board", "On-Board Camera", "Onboard Camera", "Driver Tracker",
+  "Timing Channel", "Live Timing", "Timing", "Pit Lane", "Pit Lane Channel", "Data Channel",
+  "Tracker", "Multiview", "Multi-View", "Mosaic", "Alternate Feed", "Alt Feed",
+]
+replay = [
+  "Classic", "Classics", "Instant Classic", "Replay", "Encore", "Rewind", "Greatest Games",
+  "Re-air", "Reair", "Rerun", "Re-run", "Rebroadcast", "Condensed", "Condensed Game", "Vault",
+  "Archive", "Memorable Games", "Best of", "The Best of", "Flashback", "Retro",
+]
+talk = [
+  "Postgame", "Post-game", "Pregame", "Pre-game", "Live from", "Tonight", "Countdown", "Insider",
+  "Report", "Draft", "Show", "Podcast", "Preview", "Recap", "Analysis", "Highlights", "Review",
+  "Breakdown", "Roundtable", "Magazine", "Weekly", "Wrap-up", "Debate", "Mailbag", "Rundown",
+  "Film Room", "Fantasy", "Betting", "Predictions", "Power Rankings", "Documentary",
+  "Behind the Scenes", "Press Conference", "Media Day", "Awards", "Hall of Fame", "Trade Deadline",
+  "Free Agency", "This Week in", "Mic'd Up",
+]
+sports_groups = [
+  "Sports", "Sport", "Racing", "Motorsport", "Motorsports", "Motor Sport", "NFL", "MLB", "NBA",
+  "NHL", "MLS", "EPL", "Premier League", "Soccer", "Football", "Fútbol", "Baseball", "Basketball",
+  "Hockey", "NASCAR", "IndyCar", "Formula 1", "F1", "MotoGP", "PPV", "Pay Per View", "Events",
+  "Live Events", "League Pass", "Center Ice", "Extra Innings", "Sunday Ticket", "Season Pass",
+  "Game Pass", "Deportes",
+]
+categories = [
+  "Sports", "Sport", "Sports event", "Sport event", "Football", "American Football",
+  "Football/soccer", "Soccer", "Baseball", "Basketball", "Hockey", "Ice Hockey", "Team sports",
+  "Team sports (excluding football)", "Motorsport", "Motorsports", "Motor sport", "Auto racing",
+  "Motorcycle racing", "Racing", "Special events",
+]
+
+# --------------------------------------------------------------------------------------------------
+# Team leagues (§2.1)
+# --------------------------------------------------------------------------------------------------
+
+[[league]]
+key = "nfl"
+name = "NFL"
+kind = "team"
+tokens = [
+  "NFL", "NFL Football", "National Football League", "Sunday Night Football",
+  "Monday Night Football", "Thursday Night Football", "Super Bowl", "Pro Bowl Games",
+  "AFC Championship", "NFC Championship", "NFL Wild Card", "NFL Playoffs",
+]
+exclude = [
+  "NFL Live", "Inside the NFL", "NFL Total Access", "Good Morning Football", "NFL GameDay",
+  "NFL Countdown", "Sunday NFL Countdown", "Monday Night Countdown", "NFL Primetime",
+  "NFL Matchup", "The NFL Today", "Fox NFL Sunday", "Fox NFL Kickoff", "Football Night in America",
+  "NFL Turning Point", "NFL Top 100", "NFL Honors", "NFL Films", "A Football Life", "Hard Knocks",
+  "NFL Fantasy Live", "NFL 360", "Pro Football Talk",
+]
+
+  [[league.team]]
+  key = "ari"
+  name = "Arizona Cardinals"
+  short = "Cardinals"
+  abbr = "ARI"
+  city = "Arizona"
+  weak = ["Cards", "Big Red"]
+
+  [[league.team]]
+  key = "atl"
+  name = "Atlanta Falcons"
+  short = "Falcons"
+  abbr = "ATL"
+  city = "Atlanta"
+  weak = ["Dirty Birds"]
+
+  [[league.team]]
+  key = "bal"
+  name = "Baltimore Ravens"
+  short = "Ravens"
+  abbr = "BAL"
+  city = "Baltimore"
+
+  [[league.team]]
+  key = "buf"
+  name = "Buffalo Bills"
+  short = "Bills"
+  abbr = "BUF"
+  city = "Buffalo"
+
+  [[league.team]]
+  key = "car"
+  name = "Carolina Panthers"
+  short = "Panthers"
+  abbr = "CAR"
+  city = "Carolina"
+  weak = ["Charlotte"]
+
+  [[league.team]]
+  key = "chi"
+  name = "Chicago Bears"
+  short = "Bears"
+  abbr = "CHI"
+  city = "Chicago"
+  weak = ["Da Bears"]
+
+  [[league.team]]
+  key = "cin"
+  name = "Cincinnati Bengals"
+  short = "Bengals"
+  abbr = "CIN"
+  city = "Cincinnati"
+  weak = ["Bengal"]
+
+  [[league.team]]
+  key = "cle"
+  name = "Cleveland Browns"
+  short = "Browns"
+  abbr = "CLE"
+  city = "Cleveland"
+
+  [[league.team]]
+  key = "dal"
+  name = "Dallas Cowboys"
+  short = "Cowboys"
+  abbr = "DAL"
+  city = "Dallas"
+  weak = ["America's Team"]
+
+  [[league.team]]
+  key = "den"
+  name = "Denver Broncos"
+  short = "Broncos"
+  abbr = "DEN"
+  city = "Denver"
+
+  [[league.team]]
+  key = "det"
+  name = "Detroit Lions"
+  short = "Lions"
+  abbr = "DET"
+  city = "Detroit"
+
+  [[league.team]]
+  key = "gb"
+  name = "Green Bay Packers"
+  short = "Packers"
+  abbr = "GB"
+  city = "Green Bay"
+  weak = ["Pack"]
+
+  [[league.team]]
+  key = "hou"
+  name = "Houston Texans"
+  short = "Texans"
+  abbr = "HOU"
+  city = "Houston"
+
+  [[league.team]]
+  key = "ind"
+  name = "Indianapolis Colts"
+  short = "Colts"
+  abbr = "IND"
+  city = "Indianapolis"
+
+  [[league.team]]
+  key = "jax"
+  name = "Jacksonville Jaguars"
+  short = "Jaguars"
+  abbr = "JAX"
+  city = "Jacksonville"
+  aliases = ["Jags"]
+
+  [[league.team]]
+  key = "kc"
+  name = "Kansas City Chiefs"
+  short = "Chiefs"
+  abbr = "KC"
+  city = "Kansas City"
+
+  [[league.team]]
+  key = "lv"
+  name = "Las Vegas Raiders"
+  short = "Raiders"
+  abbr = "LV"
+  city = "Las Vegas"
+
+  [[league.team]]
+  key = "lac"
+  name = "Los Angeles Chargers"
+  short = "Chargers"
+  abbr = "LAC"
+  city = "Los Angeles"
+  weak = ["Bolts", "LA"]
+
+  [[league.team]]
+  key = "lar"
+  name = "Los Angeles Rams"
+  short = "Rams"
+  abbr = "LAR"
+  city = "Los Angeles"
+  weak = ["LA"]
+
+  [[league.team]]
+  key = "mia"
+  name = "Miami Dolphins"
+  short = "Dolphins"
+  abbr = "MIA"
+  city = "Miami"
+  weak = ["Fins"]
+
+  [[league.team]]
+  key = "min"
+  name = "Minnesota Vikings"
+  short = "Vikings"
+  abbr = "MIN"
+  city = "Minnesota"
+  weak = ["Vikes"]
+
+  [[league.team]]
+  key = "ne"
+  name = "New England Patriots"
+  short = "Patriots"
+  abbr = "NE"
+  city = "New England"
+  aliases = ["Pats"]
+  weak = ["Boston"]
+
+  [[league.team]]
+  key = "no"
+  name = "New Orleans Saints"
+  short = "Saints"
+  abbr = "NO"
+  city = "New Orleans"
+  weak = ["NOLA"]
+
+  [[league.team]]
+  key = "nyg"
+  name = "New York Giants"
+  short = "Giants"
+  abbr = "NYG"
+  city = "New York"
+  weak = ["G-Men", "Big Blue", "NY"]
+
+  [[league.team]]
+  key = "nyj"
+  name = "New York Jets"
+  short = "Jets"
+  abbr = "NYJ"
+  city = "New York"
+  weak = ["Gang Green", "NY"]
+
+  [[league.team]]
+  key = "phi"
+  name = "Philadelphia Eagles"
+  short = "Eagles"
+  abbr = "PHI"
+  city = "Philadelphia"
+  weak = ["Philly", "Birds"]
+
+  [[league.team]]
+  key = "pit"
+  name = "Pittsburgh Steelers"
+  short = "Steelers"
+  abbr = "PIT"
+  city = "Pittsburgh"
+
+  [[league.team]]
+  key = "sf"
+  name = "San Francisco 49ers"
+  short = "49ers"
+  abbr = "SF"
+  city = "San Francisco"
+  aliases = ["Niners", "Forty Niners"]
+
+  [[league.team]]
+  key = "sea"
+  name = "Seattle Seahawks"
+  short = "Seahawks"
+  abbr = "SEA"
+  city = "Seattle"
+  weak = ["Hawks"]
+
+  [[league.team]]
+  key = "tb"
+  name = "Tampa Bay Buccaneers"
+  short = "Buccaneers"
+  abbr = "TB"
+  city = "Tampa Bay"
+  weak = ["Bucs", "Tampa"]
+
+  [[league.team]]
+  key = "ten"
+  name = "Tennessee Titans"
+  short = "Titans"
+  abbr = "TEN"
+  city = "Tennessee"
+  weak = ["Nashville"]
+
+  [[league.team]]
+  key = "was"
+  name = "Washington Commanders"
+  short = "Commanders"
+  abbr = "WAS"
+  city = "Washington"
+  weak = ["Commies", "DC"]
+
+[[league]]
+key = "mlb"
+name = "MLB"
+kind = "team"
+tokens = [
+  "MLB", "MLB Baseball", "Major League Baseball", "Sunday Night Baseball", "Friday Night Baseball",
+  "World Series", "ALCS", "NLCS", "ALDS", "NLDS", "American League Championship Series",
+  "National League Championship Series", "MLB Wild Card", "MLB All-Star Game", "MLB Postseason",
+]
+exclude = [
+  "MLB Tonight", "MLB Central", "MLB Now", "Quick Pitch", "Intentional Talk", "Baseball Tonight",
+  "MLB Big Inning", "Clubhouse Confidential", "MLB The Show", "MLB Network Radio",
+  "Home Run Derby X", "MLB Draft",
+]
+
+  [[league.team]]
+  key = "ari"
+  name = "Arizona Diamondbacks"
+  short = "Diamondbacks"
+  abbr = "ARI"
+  city = "Arizona"
+  aliases = ["D-backs", "Dbacks"]
+  weak = ["Snakes"]
+
+  [[league.team]]
+  key = "atl"
+  name = "Atlanta Braves"
+  short = "Braves"
+  abbr = "ATL"
+  city = "Atlanta"
+
+  [[league.team]]
+  key = "bal"
+  name = "Baltimore Orioles"
+  short = "Orioles"
+  abbr = "BAL"
+  city = "Baltimore"
+  weak = ["O's", "Birds"]
+
+  [[league.team]]
+  key = "bos"
+  name = "Boston Red Sox"
+  short = "Red Sox"
+  abbr = "BOS"
+  city = "Boston"
+  aliases = ["BoSox"]
+  weak = ["Sox"]
+
+  [[league.team]]
+  key = "chc"
+  name = "Chicago Cubs"
+  short = "Cubs"
+  abbr = "CHC"
+  city = "Chicago"
+  weak = ["Cubbies"]
+
+  [[league.team]]
+  key = "cws"
+  name = "Chicago White Sox"
+  short = "White Sox"
+  abbr = "CWS"
+  city = "Chicago"
+  aliases = ["ChiSox"]
+  weak = ["Sox", "Pale Hose"]
+
+  [[league.team]]
+  key = "cin"
+  name = "Cincinnati Reds"
+  short = "Reds"
+  abbr = "CIN"
+  city = "Cincinnati"
+
+  [[league.team]]
+  key = "cle"
+  name = "Cleveland Guardians"
+  short = "Guardians"
+  abbr = "CLE"
+  city = "Cleveland"
+  weak = ["Guards"]
+
+  [[league.team]]
+  key = "col"
+  name = "Colorado Rockies"
+  short = "Rockies"
+  abbr = "COL"
+  city = "Colorado"
+  weak = ["Denver"]
+
+  [[league.team]]
+  key = "det"
+  name = "Detroit Tigers"
+  short = "Tigers"
+  abbr = "DET"
+  city = "Detroit"
+
+  [[league.team]]
+  key = "hou"
+  name = "Houston Astros"
+  short = "Astros"
+  abbr = "HOU"
+  city = "Houston"
+  weak = ["Stros"]
+
+  [[league.team]]
+  key = "kc"
+  name = "Kansas City Royals"
+  short = "Royals"
+  abbr = "KC"
+  city = "Kansas City"
+
+  [[league.team]]
+  key = "laa"
+  name = "Los Angeles Angels"
+  short = "Angels"
+  abbr = "LAA"
+  city = "Los Angeles"
+  weak = ["Halos", "Anaheim", "LA"]
+
+  [[league.team]]
+  key = "lad"
+  name = "Los Angeles Dodgers"
+  short = "Dodgers"
+  abbr = "LAD"
+  city = "Los Angeles"
+  weak = ["LA"]
+
+  [[league.team]]
+  key = "mia"
+  name = "Miami Marlins"
+  short = "Marlins"
+  abbr = "MIA"
+  city = "Miami"
+  weak = ["Fish"]
+
+  [[league.team]]
+  key = "mil"
+  name = "Milwaukee Brewers"
+  short = "Brewers"
+  abbr = "MIL"
+  city = "Milwaukee"
+  weak = ["Brew Crew"]
+
+  [[league.team]]
+  key = "min"
+  name = "Minnesota Twins"
+  short = "Twins"
+  abbr = "MIN"
+  city = "Minnesota"
+  weak = ["Twin Cities"]
+
+  [[league.team]]
+  key = "nym"
+  name = "New York Mets"
+  short = "Mets"
+  abbr = "NYM"
+  city = "New York"
+  weak = ["Amazin's", "NY"]
+
+  [[league.team]]
+  key = "nyy"
+  name = "New York Yankees"
+  short = "Yankees"
+  abbr = "NYY"
+  city = "New York"
+  aliases = ["Bronx Bombers"]
+  weak = ["Yanks", "NY"]
+
+  [[league.team]]
+  key = "ath"
+  name = "Athletics"
+  short = "A's"
+  abbr = "ATH"
+  weak = ["Sacramento", "Oakland", "Las Vegas"]
+
+  [[league.team]]
+  key = "phi"
+  name = "Philadelphia Phillies"
+  short = "Phillies"
+  abbr = "PHI"
+  city = "Philadelphia"
+  weak = ["Phils", "Philly"]
+
+  [[league.team]]
+  key = "pit"
+  name = "Pittsburgh Pirates"
+  short = "Pirates"
+  abbr = "PIT"
+  city = "Pittsburgh"
+  weak = ["Bucs", "Buccos"]
+
+  [[league.team]]
+  key = "sd"
+  name = "San Diego Padres"
+  short = "Padres"
+  abbr = "SD"
+  city = "San Diego"
+  weak = ["Friars"]
+
+  [[league.team]]
+  key = "sf"
+  name = "San Francisco Giants"
+  short = "Giants"
+  abbr = "SF"
+  city = "San Francisco"
+  weak = ["SF Giants"]
+
+  [[league.team]]
+  key = "sea"
+  name = "Seattle Mariners"
+  short = "Mariners"
+  abbr = "SEA"
+  city = "Seattle"
+  weak = ["M's"]
+
+  [[league.team]]
+  key = "stl"
+  name = "St. Louis Cardinals"
+  short = "Cardinals"
+  abbr = "STL"
+  city = "St. Louis"
+  weak = ["Cards", "Redbirds"]
+
+  [[league.team]]
+  key = "tb"
+  name = "Tampa Bay Rays"
+  short = "Rays"
+  abbr = "TB"
+  city = "Tampa Bay"
+  weak = ["Tampa"]
+
+  [[league.team]]
+  key = "tex"
+  name = "Texas Rangers"
+  short = "Rangers"
+  abbr = "TEX"
+  city = "Texas"
+  weak = ["Arlington"]
+
+  [[league.team]]
+  key = "tor"
+  name = "Toronto Blue Jays"
+  short = "Blue Jays"
+  abbr = "TOR"
+  city = "Toronto"
+  weak = ["Jays"]
+
+  [[league.team]]
+  key = "wsh"
+  name = "Washington Nationals"
+  short = "Nationals"
+  abbr = "WSH"
+  city = "Washington"
+  aliases = ["Nats"]
+  weak = ["DC"]
+
+[[league]]
+key = "nba"
+name = "NBA"
+kind = "team"
+tokens = [
+  "NBA", "NBA Basketball", "National Basketball Association", "NBA Finals", "NBA Playoffs",
+  "NBA Cup", "NBA Conference Finals", "NBA Play-In", "NBA All-Star Game",
+]
+exclude = [
+  "Inside the NBA", "NBA Today", "NBA GameTime", "NBA Countdown", "NBA Tip-Off", "NBA Action",
+  "NBA 2K", "NBA Draft", "NBA Inside Stuff", "NBA Rooks", "NBA Summer League", "G League", "WNBA",
+]
+
+  [[league.team]]
+  key = "atl"
+  name = "Atlanta Hawks"
+  short = "Hawks"
+  abbr = "ATL"
+  city = "Atlanta"
+
+  [[league.team]]
+  key = "bos"
+  name = "Boston Celtics"
+  short = "Celtics"
+  abbr = "BOS"
+  city = "Boston"
+  aliases = ["Celts"]
+  weak = ["C's"]
+
+  [[league.team]]
+  key = "bkn"
+  name = "Brooklyn Nets"
+  short = "Nets"
+  abbr = "BKN"
+  city = "Brooklyn"
+
+  [[league.team]]
+  key = "cha"
+  name = "Charlotte Hornets"
+  short = "Hornets"
+  abbr = "CHA"
+  city = "Charlotte"
+  weak = ["Buzz City"]
+
+  [[league.team]]
+  key = "chi"
+  name = "Chicago Bulls"
+  short = "Bulls"
+  abbr = "CHI"
+  city = "Chicago"
+
+  [[league.team]]
+  key = "cle"
+  name = "Cleveland Cavaliers"
+  short = "Cavaliers"
+  abbr = "CLE"
+  city = "Cleveland"
+  aliases = ["Cavs"]
+
+  [[league.team]]
+  key = "dal"
+  name = "Dallas Mavericks"
+  short = "Mavericks"
+  abbr = "DAL"
+  city = "Dallas"
+  aliases = ["Mavs"]
+
+  [[league.team]]
+  key = "den"
+  name = "Denver Nuggets"
+  short = "Nuggets"
+  abbr = "DEN"
+  city = "Denver"
+  weak = ["Nugs"]
+
+  [[league.team]]
+  key = "det"
+  name = "Detroit Pistons"
+  short = "Pistons"
+  abbr = "DET"
+  city = "Detroit"
+
+  [[league.team]]
+  key = "gsw"
+  name = "Golden State Warriors"
+  short = "Warriors"
+  abbr = "GSW"
+  city = "Golden State"
+  weak = ["Dubs", "San Francisco"]
+
+  [[league.team]]
+  key = "hou"
+  name = "Houston Rockets"
+  short = "Rockets"
+  abbr = "HOU"
+  city = "Houston"
+
+  [[league.team]]
+  key = "ind"
+  name = "Indiana Pacers"
+  short = "Pacers"
+  abbr = "IND"
+  city = "Indiana"
+  weak = ["Indianapolis"]
+
+  [[league.team]]
+  key = "lac"
+  name = "LA Clippers"
+  short = "Clippers"
+  abbr = "LAC"
+  city = "Los Angeles"
+  aliases = ["Los Angeles Clippers"]
+  weak = ["Clips", "LA"]
+
+  [[league.team]]
+  key = "lal"
+  name = "Los Angeles Lakers"
+  short = "Lakers"
+  abbr = "LAL"
+  city = "Los Angeles"
+  weak = ["LA"]
+
+  [[league.team]]
+  key = "mem"
+  name = "Memphis Grizzlies"
+  short = "Grizzlies"
+  abbr = "MEM"
+  city = "Memphis"
+  weak = ["Grizz"]
+
+  [[league.team]]
+  key = "mia"
+  name = "Miami Heat"
+  short = "Miami Heat"
+  abbr = "MIA"
+  city = "Miami"
+  weak = ["Heat"]
+
+  [[league.team]]
+  key = "mil"
+  name = "Milwaukee Bucks"
+  short = "Bucks"
+  abbr = "MIL"
+  city = "Milwaukee"
+
+  [[league.team]]
+  key = "min"
+  name = "Minnesota Timberwolves"
+  short = "Timberwolves"
+  abbr = "MIN"
+  city = "Minnesota"
+  weak = ["Wolves", "T-Wolves"]
+
+  [[league.team]]
+  key = "nop"
+  name = "New Orleans Pelicans"
+  short = "Pelicans"
+  abbr = "NOP"
+  city = "New Orleans"
+  weak = ["Pels"]
+
+  [[league.team]]
+  key = "nyk"
+  name = "New York Knicks"
+  short = "Knicks"
+  abbr = "NYK"
+  city = "New York"
+  aliases = ["Knickerbockers"]
+  weak = ["NY"]
+
+  [[league.team]]
+  key = "okc"
+  name = "Oklahoma City Thunder"
+  short = "OKC Thunder"
+  abbr = "OKC"
+  city = "Oklahoma City"
+  weak = ["Thunder"]
+
+  [[league.team]]
+  key = "orl"
+  name = "Orlando Magic"
+  short = "Orlando Magic"
+  abbr = "ORL"
+  city = "Orlando"
+  weak = ["Magic"]
+
+  [[league.team]]
+  key = "phi"
+  name = "Philadelphia 76ers"
+  short = "76ers"
+  abbr = "PHI"
+  city = "Philadelphia"
+  aliases = ["Sixers"]
+  weak = ["Philly"]
+
+  [[league.team]]
+  key = "phx"
+  name = "Phoenix Suns"
+  short = "Suns"
+  abbr = "PHX"
+  city = "Phoenix"
+
+  [[league.team]]
+  key = "por"
+  name = "Portland Trail Blazers"
+  short = "Trail Blazers"
+  abbr = "POR"
+  city = "Portland"
+  aliases = ["Blazers"]
+  weak = ["Rip City"]
+
+  [[league.team]]
+  key = "sac"
+  name = "Sacramento Kings"
+  short = "Kings"
+  abbr = "SAC"
+  city = "Sacramento"
+
+  [[league.team]]
+  key = "sas"
+  name = "San Antonio Spurs"
+  short = "Spurs"
+  abbr = "SAS"
+  city = "San Antonio"
+
+  [[league.team]]
+  key = "tor"
+  name = "Toronto Raptors"
+  short = "Raptors"
+  abbr = "TOR"
+  city = "Toronto"
+  weak = ["Raps"]
+
+  [[league.team]]
+  key = "uta"
+  name = "Utah Jazz"
+  short = "Utah Jazz"
+  abbr = "UTA"
+  city = "Utah"
+  weak = ["Jazz", "Salt Lake City"]
+
+  [[league.team]]
+  key = "was"
+  name = "Washington Wizards"
+  short = "Wizards"
+  abbr = "WAS"
+  city = "Washington"
+  weak = ["Wiz", "DC"]
+
+[[league]]
+key = "nhl"
+name = "NHL"
+kind = "team"
+tokens = [
+  "NHL", "NHL Hockey", "National Hockey League", "Hockey Night in Canada", "Stanley Cup Final",
+  "Stanley Cup Playoffs", "Winter Classic", "Stadium Series", "Heritage Classic",
+]
+exclude = [
+  "NHL Tonight", "NHL on the Fly", "NHL Now", "In the Crease", "Hockey Central", "Hockey Tonight",
+  "NHL Draft", "NHL Awards", "NHL 26", "AHL", "PWHL",
+]
+
+  [[league.team]]
+  key = "ana"
+  name = "Anaheim Ducks"
+  short = "Ducks"
+  abbr = "ANA"
+  city = "Anaheim"
+
+  [[league.team]]
+  key = "bos"
+  name = "Boston Bruins"
+  short = "Bruins"
+  abbr = "BOS"
+  city = "Boston"
+  weak = ["B's"]
+
+  [[league.team]]
+  key = "buf"
+  name = "Buffalo Sabres"
+  short = "Sabres"
+  abbr = "BUF"
+  city = "Buffalo"
+
+  [[league.team]]
+  key = "cgy"
+  name = "Calgary Flames"
+  short = "Flames"
+  abbr = "CGY"
+  city = "Calgary"
+
+  [[league.team]]
+  key = "car"
+  name = "Carolina Hurricanes"
+  short = "Hurricanes"
+  abbr = "CAR"
+  city = "Carolina"
+  weak = ["Canes", "Raleigh"]
+
+  [[league.team]]
+  key = "chi"
+  name = "Chicago Blackhawks"
+  short = "Blackhawks"
+  abbr = "CHI"
+  city = "Chicago"
+  weak = ["Hawks"]
+
+  [[league.team]]
+  key = "col"
+  name = "Colorado Avalanche"
+  short = "Avalanche"
+  abbr = "COL"
+  city = "Colorado"
+  weak = ["Avs", "Denver"]
+
+  [[league.team]]
+  key = "cbj"
+  name = "Columbus Blue Jackets"
+  short = "Blue Jackets"
+  abbr = "CBJ"
+  city = "Columbus"
+  weak = ["Jackets"]
+
+  [[league.team]]
+  key = "dal"
+  name = "Dallas Stars"
+  short = "Dallas Stars"
+  abbr = "DAL"
+  city = "Dallas"
+  weak = ["Stars"]
+
+  [[league.team]]
+  key = "det"
+  name = "Detroit Red Wings"
+  short = "Red Wings"
+  abbr = "DET"
+  city = "Detroit"
+  weak = ["Wings"]
+
+  [[league.team]]
+  key = "edm"
+  name = "Edmonton Oilers"
+  short = "Oilers"
+  abbr = "EDM"
+  city = "Edmonton"
+
+  [[league.team]]
+  key = "fla"
+  name = "Florida Panthers"
+  short = "Panthers"
+  abbr = "FLA"
+  city = "Florida"
+  weak = ["Cats", "Sunrise"]
+
+  [[league.team]]
+  key = "lak"
+  name = "Los Angeles Kings"
+  short = "Kings"
+  abbr = "LAK"
+  city = "Los Angeles"
+  aliases = ["LA Kings"]
+  weak = ["LA"]
+
+  [[league.team]]
+  key = "min"
+  name = "Minnesota Wild"
+  short = "Minnesota Wild"
+  abbr = "MIN"
+  city = "Minnesota"
+  weak = ["Wild", "St. Paul"]
+
+  [[league.team]]
+  key = "mtl"
+  name = "Montreal Canadiens"
+  short = "Canadiens"
+  abbr = "MTL"
+  city = "Montreal"
+  aliases = ["Habs"]
+  weak = ["Les Canadiens"]
+
+  [[league.team]]
+  key = "nsh"
+  name = "Nashville Predators"
+  short = "Predators"
+  abbr = "NSH"
+  city = "Nashville"
+  aliases = ["Preds"]
+
+  [[league.team]]
+  key = "njd"
+  name = "New Jersey Devils"
+  short = "Devils"
+  abbr = "NJD"
+  city = "New Jersey"
+  weak = ["Newark"]
+
+  [[league.team]]
+  key = "nyi"
+  name = "New York Islanders"
+  short = "Islanders"
+  abbr = "NYI"
+  city = "New York"
+  weak = ["Isles", "NY"]
+
+  [[league.team]]
+  key = "nyr"
+  name = "New York Rangers"
+  short = "Rangers"
+  abbr = "NYR"
+  city = "New York"
+  aliases = ["Blueshirts"]
+  weak = ["NY"]
+
+  [[league.team]]
+  key = "ott"
+  name = "Ottawa Senators"
+  short = "Senators"
+  abbr = "OTT"
+  city = "Ottawa"
+  weak = ["Sens"]
+
+  [[league.team]]
+  key = "phi"
+  name = "Philadelphia Flyers"
+  short = "Flyers"
+  abbr = "PHI"
+  city = "Philadelphia"
+  weak = ["Philly"]
+
+  [[league.team]]
+  key = "pit"
+  name = "Pittsburgh Penguins"
+  short = "Penguins"
+  abbr = "PIT"
+  city = "Pittsburgh"
+  weak = ["Pens"]
+
+  [[league.team]]
+  key = "sjs"
+  name = "San Jose Sharks"
+  short = "Sharks"
+  abbr = "SJS"
+  city = "San Jose"
+
+  [[league.team]]
+  key = "sea"
+  name = "Seattle Kraken"
+  short = "Kraken"
+  abbr = "SEA"
+  city = "Seattle"
+
+  [[league.team]]
+  key = "stl"
+  name = "St. Louis Blues"
+  short = "St. Louis Blues"
+  abbr = "STL"
+  city = "St. Louis"
+  weak = ["Blues", "Bluenotes"]
+
+  [[league.team]]
+  key = "tbl"
+  name = "Tampa Bay Lightning"
+  short = "Lightning"
+  abbr = "TBL"
+  city = "Tampa Bay"
+  weak = ["Bolts", "Tampa"]
+
+  [[league.team]]
+  key = "tor"
+  name = "Toronto Maple Leafs"
+  short = "Maple Leafs"
+  abbr = "TOR"
+  city = "Toronto"
+  weak = ["Leafs"]
+
+  [[league.team]]
+  key = "uta"
+  name = "Utah Mammoth"
+  short = "Utah Mammoth"
+  abbr = "UTA"
+  city = "Utah"
+  weak = ["Mammoth", "Salt Lake City"]
+
+  [[league.team]]
+  key = "van"
+  name = "Vancouver Canucks"
+  short = "Canucks"
+  abbr = "VAN"
+  city = "Vancouver"
+  weak = ["Nucks"]
+
+  [[league.team]]
+  key = "vgk"
+  name = "Vegas Golden Knights"
+  short = "Golden Knights"
+  abbr = "VGK"
+  city = "Las Vegas"
+  weak = ["Vegas", "Knights"]
+
+  [[league.team]]
+  key = "wsh"
+  name = "Washington Capitals"
+  short = "Capitals"
+  abbr = "WSH"
+  city = "Washington"
+  weak = ["Caps", "DC"]
+
+  [[league.team]]
+  key = "wpg"
+  name = "Winnipeg Jets"
+  short = "Jets"
+  abbr = "WPG"
+  city = "Winnipeg"
+
+[[league]]
+key = "mls"
+name = "MLS"
+kind = "team"
+tokens = [
+  "MLS", "MLS Soccer", "Major League Soccer", "MLS Cup", "MLS Cup Playoffs", "MLS Season Pass",
+  "MLS All-Star Game", "Leagues Cup",
+]
+exclude = [
+  "MLS 360", "MLS Wrap-Up", "MLS Countdown", "Extratime", "MLS NEXT", "MLS NEXT Pro", "NWSL",
+  "USL",
+]
+
+  [[league.team]]
+  key = "atl"
+  name = "Atlanta United FC"
+  short = "Atlanta United"
+  abbr = "ATL"
+  city = "Atlanta"
+  aliases = ["Atlanta Utd", "ATL UTD"]
+  weak = ["United", "Five Stripes"]
+
+  [[league.team]]
+  key = "clt"
+  name = "Charlotte FC"
+  short = "Charlotte FC"
+  abbr = "CLT"
+  city = "Charlotte"
+  weak = ["The Crown"]
+
+  [[league.team]]
+  key = "chi"
+  name = "Chicago Fire FC"
+  short = "Chicago Fire"
+  abbr = "CHI"
+  city = "Chicago"
+  weak = ["Fire", "Men in Red"]
+
+  [[league.team]]
+  key = "cin"
+  name = "FC Cincinnati"
+  short = "FC Cincinnati"
+  abbr = "CIN"
+  city = "Cincinnati"
+  aliases = ["FCC"]
+  weak = ["The Orange and Blue"]
+
+  [[league.team]]
+  key = "clb"
+  name = "Columbus Crew"
+  short = "Columbus Crew"
+  abbr = "CLB"
+  city = "Columbus"
+  weak = ["Crew", "Black and Gold"]
+
+  [[league.team]]
+  key = "dc"
+  name = "D.C. United"
+  short = "D.C. United"
+  abbr = "DC"
+  city = "Washington"
+  aliases = ["DC United", "DCU"]
+  weak = ["United", "Black-and-Red"]
+
+  [[league.team]]
+  key = "mia"
+  name = "Inter Miami CF"
+  short = "Inter Miami"
+  abbr = "MIA"
+  city = "Miami"
+  weak = ["Herons", "Inter"]
+
+  [[league.team]]
+  key = "mtl"
+  name = "CF Montréal"
+  short = "CF Montréal"
+  abbr = "MTL"
+  city = "Montreal"
+  aliases = ["Club de Foot Montréal"]
+  weak = ["Montréal", "Bleu-blanc-noir"]
+
+  [[league.team]]
+  key = "nsh"
+  name = "Nashville SC"
+  short = "Nashville SC"
+  abbr = "NSH"
+  city = "Nashville"
+  weak = ["Coyotes"]
+
+  [[league.team]]
+  key = "ne"
+  name = "New England Revolution"
+  short = "New England Revolution"
+  abbr = "NE"
+  city = "New England"
+  aliases = ["Revs"]
+  weak = ["Revolution", "Foxborough"]
+
+  [[league.team]]
+  key = "nyc"
+  name = "New York City FC"
+  short = "NYCFC"
+  abbr = "NYC"
+  city = "New York"
+  aliases = ["New York City"]
+  weak = ["Pigeons", "City", "NY"]
+
+  [[league.team]]
+  key = "rbny"
+  name = "New York Red Bulls"
+  short = "NY Red Bulls"
+  abbr = "RBNY"
+  city = "New York"
+  aliases = ["RBNY", "Red Bull New York"]
+  weak = ["Red Bulls", "Harrison", "NY"]
+
+  [[league.team]]
+  key = "orl"
+  name = "Orlando City SC"
+  short = "Orlando City"
+  abbr = "ORL"
+  city = "Orlando"
+  weak = ["Lions", "City"]
+
+  [[league.team]]
+  key = "phi"
+  name = "Philadelphia Union"
+  short = "Philadelphia Union"
+  abbr = "PHI"
+  city = "Philadelphia"
+  weak = ["Union", "Philly"]
+
+  [[league.team]]
+  key = "tor"
+  name = "Toronto FC"
+  short = "Toronto FC"
+  abbr = "TOR"
+  city = "Toronto"
+  aliases = ["TFC"]
+  weak = ["Reds"]
+
+  [[league.team]]
+  key = "atx"
+  name = "Austin FC"
+  short = "Austin FC"
+  abbr = "ATX"
+  city = "Austin"
+  weak = ["Verde"]
+
+  [[league.team]]
+  key = "col"
+  name = "Colorado Rapids"
+  short = "Colorado Rapids"
+  abbr = "COL"
+  city = "Colorado"
+  weak = ["Rapids", "Denver"]
+
+  [[league.team]]
+  key = "dal"
+  name = "FC Dallas"
+  short = "FC Dallas"
+  abbr = "DAL"
+  city = "Dallas"
+  weak = ["Hoops", "Frisco"]
+
+  [[league.team]]
+  key = "hou"
+  name = "Houston Dynamo FC"
+  short = "Houston Dynamo"
+  abbr = "HOU"
+  city = "Houston"
+  weak = ["Dynamo"]
+
+  [[league.team]]
+  key = "la"
+  name = "LA Galaxy"
+  short = "LA Galaxy"
+  abbr = "LA"
+  city = "Los Angeles"
+  aliases = ["Los Angeles Galaxy"]
+  weak = ["Galaxy", "LA"]
+
+  [[league.team]]
+  key = "lafc"
+  name = "Los Angeles FC"
+  short = "LAFC"
+  abbr = "LAFC"
+  city = "Los Angeles"
+  weak = ["Black and Gold", "LA"]
+
+  [[league.team]]
+  key = "min"
+  name = "Minnesota United FC"
+  short = "Minnesota United"
+  abbr = "MIN"
+  city = "Minnesota"
+  weak = ["United", "Loons", "MNUFC"]
+
+  [[league.team]]
+  key = "por"
+  name = "Portland Timbers"
+  short = "Portland Timbers"
+  abbr = "POR"
+  city = "Portland"
+  weak = ["Timbers"]
+
+  [[league.team]]
+  key = "rsl"
+  name = "Real Salt Lake"
+  short = "Real Salt Lake"
+  abbr = "RSL"
+  city = "Salt Lake City"
+  aliases = ["RSL"]
+  weak = ["Real", "Utah"]
+
+  [[league.team]]
+  key = "sd"
+  name = "San Diego FC"
+  short = "San Diego FC"
+  abbr = "SD"
+  city = "San Diego"
+  aliases = ["SDFC"]
+
+  [[league.team]]
+  key = "sj"
+  name = "San Jose Earthquakes"
+  short = "San Jose Earthquakes"
+  abbr = "SJ"
+  city = "San Jose"
+  weak = ["Earthquakes", "Quakes"]
+
+  [[league.team]]
+  key = "sea"
+  name = "Seattle Sounders FC"
+  short = "Seattle Sounders"
+  abbr = "SEA"
+  city = "Seattle"
+  aliases = ["Sounders"]
+  weak = ["Rave Green"]
+
+  [[league.team]]
+  key = "skc"
+  name = "Sporting Kansas City"
+  short = "Sporting KC"
+  abbr = "SKC"
+  city = "Kansas City"
+  weak = ["Sporting"]
+
+  [[league.team]]
+  key = "stl"
+  name = "St. Louis City SC"
+  short = "St. Louis City"
+  abbr = "STL"
+  city = "St. Louis"
+  aliases = ["STL City"]
+  weak = ["City"]
+
+  [[league.team]]
+  key = "van"
+  name = "Vancouver Whitecaps FC"
+  short = "Vancouver Whitecaps"
+  abbr = "VAN"
+  city = "Vancouver"
+  aliases = ["Whitecaps"]
+  weak = ["Caps"]
+
+[[league]]
+key = "epl"
+name = "Premier League"
+kind = "team"
+tokens = ["Premier League", "English Premier League", "EPL", "Barclays Premier League"]
+exclude = [
+  "Indian Premier League", "IPL", "Caribbean Premier League", "Bangladesh Premier League",
+  "Lanka Premier League", "Women's Premier League", "Premier League Darts",
+  "Premier League Snooker", "Premier League 2", "Premier League Cup",
+  "Premier League International Cup", "Northern Premier League", "Canadian Premier League",
+  "National Premier League", "Russian Premier League", "Ukrainian Premier League",
+  "Egyptian Premier League", "Israeli Premier League", "Hong Kong Premier League",
+  "Kazakhstan Premier League", "Match of the Day", "Premier League Review",
+  "Premier League Mornings", "The Premier League Show", "Fantasy Premier League",
+  "Premier League Tonight", "Premier League Productions", "Goal Zone",
+]
+
+  [[league.team]]
+  key = "ars"
+  name = "Arsenal"
+  short = "Arsenal"
+  abbr = "ARS"
+  city = "London"
+  aliases = ["Arsenal FC", "Gunners"]
+
+  [[league.team]]
+  key = "avl"
+  name = "Aston Villa"
+  short = "Aston Villa"
+  abbr = "AVL"
+  city = "Birmingham"
+  weak = ["Villa", "Villans"]
+
+  [[league.team]]
+  key = "bou"
+  name = "AFC Bournemouth"
+  short = "Bournemouth"
+  abbr = "BOU"
+  city = "Bournemouth"
+  weak = ["Cherries"]
+
+  [[league.team]]
+  key = "bre"
+  name = "Brentford"
+  short = "Brentford"
+  abbr = "BRE"
+  city = "London"
+  aliases = ["Brentford FC"]
+  weak = ["Bees"]
+
+  [[league.team]]
+  key = "bha"
+  name = "Brighton & Hove Albion"
+  short = "Brighton"
+  abbr = "BHA"
+  city = "Brighton"
+  aliases = ["Brighton and Hove"]
+  weak = ["Albion", "Seagulls"]
+
+  [[league.team]]
+  key = "che"
+  name = "Chelsea"
+  short = "Chelsea"
+  abbr = "CHE"
+  city = "London"
+  aliases = ["Chelsea FC"]
+  weak = ["Blues"]
+
+  [[league.team]]
+  key = "cov"
+  name = "Coventry City"
+  short = "Coventry"
+  abbr = "COV"
+  city = "Coventry"
+  weak = ["City", "Sky Blues"]
+
+  [[league.team]]
+  key = "cry"
+  name = "Crystal Palace"
+  short = "Crystal Palace"
+  abbr = "CRY"
+  city = "London"
+  weak = ["Palace", "Eagles"]
+
+  [[league.team]]
+  key = "eve"
+  name = "Everton"
+  short = "Everton"
+  abbr = "EVE"
+  city = "Liverpool"
+  aliases = ["Everton FC", "Toffees"]
+
+  [[league.team]]
+  key = "ful"
+  name = "Fulham"
+  short = "Fulham"
+  abbr = "FUL"
+  city = "London"
+  aliases = ["Fulham FC", "Cottagers"]
+
+  [[league.team]]
+  key = "hul"
+  name = "Hull City"
+  short = "Hull"
+  abbr = "HUL"
+  city = "Hull"
+  weak = ["City", "Tigers"]
+
+  [[league.team]]
+  key = "ips"
+  name = "Ipswich Town"
+  short = "Ipswich"
+  abbr = "IPS"
+  city = "Ipswich"
+  aliases = ["Tractor Boys"]
+  weak = ["Town"]
+
+  [[league.team]]
+  key = "lee"
+  name = "Leeds United"
+  short = "Leeds"
+  abbr = "LEE"
+  city = "Leeds"
+  aliases = ["Leeds Utd"]
+  weak = ["United", "Whites"]
+
+  [[league.team]]
+  key = "liv"
+  name = "Liverpool"
+  short = "Liverpool"
+  abbr = "LIV"
+  city = "Liverpool"
+  aliases = ["Liverpool FC", "LFC"]
+  weak = ["Reds"]
+
+  [[league.team]]
+  key = "mci"
+  name = "Manchester City"
+  short = "Man City"
+  abbr = "MCI"
+  city = "Manchester"
+  aliases = ["Manchester City FC"]
+  weak = ["City", "Citizens", "Sky Blues"]
+
+  [[league.team]]
+  key = "mun"
+  name = "Manchester United"
+  short = "Man United"
+  abbr = "MUN"
+  city = "Manchester"
+  aliases = ["Man Utd", "Manchester Utd", "Manchester United FC"]
+  weak = ["United", "Red Devils"]
+
+  [[league.team]]
+  key = "new"
+  name = "Newcastle United"
+  short = "Newcastle"
+  abbr = "NEW"
+  city = "Newcastle"
+  aliases = ["Newcastle Utd"]
+  weak = ["United", "Magpies", "Toon"]
+
+  [[league.team]]
+  key = "nfo"
+  name = "Nottingham Forest"
+  short = "Nott'm Forest"
+  abbr = "NFO"
+  city = "Nottingham"
+  aliases = ["Nottm Forest"]
+  weak = ["Forest"]
+
+  [[league.team]]
+  key = "sun"
+  name = "Sunderland"
+  short = "Sunderland"
+  abbr = "SUN"
+  city = "Sunderland"
+  aliases = ["Sunderland AFC", "Black Cats"]
+
+  [[league.team]]
+  key = "tot"
+  name = "Tottenham Hotspur"
+  short = "Spurs"
+  abbr = "TOT"
+  city = "London"
+  aliases = ["Tottenham"]
+  weak = ["Lilywhites"]
+
+# --------------------------------------------------------------------------------------------------
+# Motorsport (§2.2)
+# --------------------------------------------------------------------------------------------------
+
+# Open wheel
+
+[[league]]
+key = "f1"
+name = "Formula 1"
+kind = "motorsport"
+group = "open_wheel"
+tokens = ["Formula 1", "Formula One", "F1", "FIA Formula One World Championship", "F1 Grand Prix"]
+events = [
+  "Monaco Grand Prix", "Monaco GP", "Las Vegas Grand Prix", "Las Vegas GP", "Bahrain Grand Prix",
+  "Saudi Arabian Grand Prix", "Chinese Grand Prix", "Miami Grand Prix",
+  "Emilia Romagna Grand Prix", "Canadian Grand Prix", "Barcelona-Catalunya Grand Prix",
+  "Madrid Grand Prix", "Belgian Grand Prix", "Dutch Grand Prix", "Azerbaijan Grand Prix",
+  "Singapore Grand Prix", "United States Grand Prix", "Mexico City Grand Prix",
+  "Mexican Grand Prix", "São Paulo Grand Prix", "Abu Dhabi Grand Prix",
+]
+exclude = [
+  "F1 Academy", "F1 TV", "F1 The Movie", "Drive to Survive", "The F1 Show", "F1 Esports",
+  "F1 Sim Racing", "Formula 2", "Formula 3", "Grand Prix of Long Beach", "Long Beach Grand Prix",
+  "Grand Prix of St. Petersburg", "Detroit Grand Prix",
+]
+
+[[league]]
+key = "f2"
+name = "F2"
+kind = "motorsport"
+group = "open_wheel"
+tokens = [
+  "Formula 2", "FIA Formula 2", "FIA F2", "Formula 2 Championship", "FIA Formula 2 Championship",
+]
+context = ["F2"]
+
+[[league]]
+key = "f3"
+name = "F3"
+kind = "motorsport"
+group = "open_wheel"
+tokens = [
+  "Formula 3", "FIA Formula 3", "FIA F3", "Formula 3 Championship", "FIA Formula 3 Championship",
+]
+context = ["F3"]
+exclude = ["Formula Regional", "Euroformula"]
+
+[[league]]
+key = "f1_academy"
+name = "F1 Academy"
+kind = "motorsport"
+group = "open_wheel"
+tokens = ["F1 Academy", "Formula 1 Academy"]
+
+[[league]]
+key = "indycar"
+name = "IndyCar"
+kind = "motorsport"
+group = "open_wheel"
+tokens = ["IndyCar", "Indy Car", "IndyCar Series", "NTT IndyCar Series"]
+context = ["Indy"]
+events = [
+  "Indy 500", "Indianapolis 500", "Indy500", "Greatest Spectacle in Racing",
+  "Grand Prix of Long Beach", "Long Beach Grand Prix", "Grand Prix of St. Petersburg",
+  "Detroit Grand Prix", "Grand Prix of Road America",
+]
+exclude = ["Indy NXT", "Indy Lights", "Indianapolis 8 Hour"]
+
+[[league]]
+key = "indy_nxt"
+name = "Indy NXT"
+kind = "motorsport"
+group = "open_wheel"
+tokens = ["Indy NXT", "INDY NXT by Firestone", "Indy Lights"]
+
+[[league]]
+key = "formula_e"
+name = "Formula E"
+kind = "motorsport"
+group = "open_wheel"
+tokens = [
+  "Formula E", "FIA Formula E", "ABB FIA Formula E", "Formula E World Championship", "E-Prix",
+  "ePrix",
+]
+
+[[league]]
+key = "super_formula"
+name = "Super Formula"
+kind = "motorsport"
+group = "open_wheel"
+tokens = ["Super Formula", "Japanese Super Formula", "Super Formula Championship"]
+exclude = ["Super Formula Lights"]
+
+# Stock car
+
+[[league]]
+key = "nascar_cup"
+name = "NASCAR Cup Series"
+kind = "motorsport"
+group = "stock_car"
+tokens = [
+  "NASCAR", "NASCAR Cup Series", "NASCAR Cup", "Cup Series", "Sprint Cup", "Sprint Cup Series",
+  "Monster Energy NASCAR Cup", "Nextel Cup", "Winston Cup",
+]
+context = ["Cup"]
+events = [
+  "Daytona 500", "Great American Race", "Coca-Cola 600", "Southern 500", "Brickyard 400",
+  "Duel at Daytona", "Daytona Duel", "Busch Light Clash", "Clash at Bowman Gray",
+  "NASCAR All-Star Race", "All-Star Open",
+]
+exclude = [
+  "Xfinity", "O'Reilly", "Busch Series", "Nationwide Series", "Truck", "Trucks", "Craftsman",
+  "ARCA", "Whelen Modified", "Euro Series", "Pinty's", "NASCAR Mexico", "eNASCAR", "iRacing",
+]
+
+[[league]]
+key = "nascar_oreilly"
+name = "NASCAR O'Reilly Auto Parts Series"
+kind = "motorsport"
+group = "stock_car"
+tokens = [
+  "NASCAR O'Reilly Auto Parts Series", "O'Reilly Auto Parts Series", "NASCAR O'Reilly Series",
+  "O'Reilly Series", "NASCAR Xfinity Series", "Xfinity Series", "NASCAR Xfinity", "Busch Series",
+  "NASCAR Busch Series", "Busch Grand National", "Nationwide Series", "NASCAR Nationwide Series",
+]
+context = ["O'Reilly", "Xfinity"]
+
+[[league]]
+key = "nascar_truck"
+name = "NASCAR Craftsman Truck Series"
+kind = "motorsport"
+group = "stock_car"
+tokens = [
+  "NASCAR Craftsman Truck Series", "Craftsman Truck Series", "NASCAR Truck Series", "Truck Series",
+  "NASCAR Trucks", "Camping World Truck Series", "NASCAR Camping World Truck Series",
+  "Gander Outdoors Truck Series", "Gander RV & Outdoors Truck Series",
+]
+context = ["Truck", "Trucks", "Craftsman"]
+exclude = ["Monster Truck", "Monster Trucks", "Monster Jam"]
+
+[[league]]
+key = "arca"
+name = "ARCA"
+kind = "motorsport"
+group = "stock_car"
+tokens = [
+  "ARCA", "ARCA Menards Series", "ARCA Racing Series", "ARCA Menards Series East",
+  "ARCA Menards Series West",
+]
+
+# Sports car, GT and touring
+
+[[league]]
+key = "wec"
+name = "WEC"
+kind = "motorsport"
+group = "sports_car"
+tokens = ["WEC", "FIA WEC", "World Endurance Championship", "FIA World Endurance Championship"]
+events = [
+  "24 Hours of Le Mans", "Le Mans 24 Hours", "24h Le Mans", "Le Mans", "Lone Star Le Mans",
+  "6 Hours of Spa", "6 Hours of Fuji", "8 Hours of Bahrain", "Qatar 1812 km", "1812 km of Qatar",
+]
+exclude = [
+  "Petit Le Mans", "European Le Mans Series", "Asian Le Mans Series", "Le Mans Cup",
+  "Road to Le Mans", "Le Mans Classic", "Le Mans 66",
+]
+
+[[league]]
+key = "imsa"
+name = "IMSA"
+kind = "motorsport"
+group = "sports_car"
+tokens = [
+  "IMSA", "IMSA WeatherTech SportsCar Championship", "WeatherTech SportsCar Championship",
+  "WeatherTech Championship", "IMSA SportsCar Championship", "Michelin Pilot Challenge",
+]
+events = [
+  "Rolex 24", "Rolex 24 at Daytona", "24 Hours of Daytona", "Petit Le Mans", "Motul Petit Le Mans",
+  "Sebring 12 Hours", "12 Hours of Sebring", "Twelve Hours of Sebring", "Six Hours of the Glen",
+  "6 Hours of Watkins Glen",
+]
+
+[[league]]
+key = "supercars"
+name = "Australian Supercars"
+kind = "motorsport"
+group = "sports_car"
+tokens = [
+  "Supercars", "Supercars Championship", "Repco Supercars Championship", "Australian Supercars",
+  "V8 Supercars",
+]
+events = ["Bathurst 1000", "Bathurst", "Gold Coast 500", "Adelaide 500", "Sandown 500"]
+exclude = ["Bathurst 12 Hour", "Bathurst 12 Hours", "Supercars Unleashed"]
+
+[[league]]
+key = "btcc"
+name = "BTCC"
+kind = "motorsport"
+group = "sports_car"
+tokens = [
+  "BTCC", "British Touring Car Championship", "Kwik Fit British Touring Car Championship",
+  "British Touring Cars",
+]
+
+[[league]]
+key = "dtm"
+name = "DTM"
+kind = "motorsport"
+group = "sports_car"
+tokens = ["DTM", "Deutsche Tourenwagen Masters"]
+
+[[league]]
+key = "gtwc"
+name = "GT World Challenge"
+kind = "motorsport"
+group = "sports_car"
+tokens = [
+  "GT World Challenge", "GTWC", "Fanatec GT World Challenge", "GT World Challenge Europe",
+  "GT World Challenge America", "GT World Challenge Asia", "GT World Challenge Australia",
+  "Intercontinental GT Challenge",
+]
+context = ["GT"]
+events = ["24 Hours of Spa", "Spa 24 Hours", "Bathurst 12 Hour", "Indianapolis 8 Hour"]
+exclude = ["Super GT", "GT4"]
+
+[[league]]
+key = "super_gt"
+name = "Super GT"
+kind = "motorsport"
+group = "sports_car"
+tokens = ["Super GT", "Autobacs Super GT", "Super GT Series"]
+
+# Motorcycles
+
+[[league]]
+key = "motogp"
+name = "MotoGP"
+kind = "motorsport"
+group = "motorcycle"
+tokens = ["MotoGP", "Moto GP", "MotoGP World Championship"]
+events = [
+  "Dutch TT", "TT Assen", "Grand Prix of the Americas", "San Marino Grand Prix",
+  "Valencian Community Grand Prix", "Valencia Grand Prix", "Aragon Grand Prix",
+  "Catalan Grand Prix", "French Grand Prix", "German Grand Prix", "Czech Grand Prix",
+  "Thai Grand Prix", "Indonesian Grand Prix", "Malaysian Grand Prix", "Portuguese Grand Prix",
+]
+exclude = ["Moto2", "Moto3", "MotoE", "Moto E", "Red Bull Rookies Cup", "Rookies Cup", "JuniorGP"]
+
+[[league]]
+key = "moto2"
+name = "Moto2"
+kind = "motorsport"
+group = "motorcycle"
+tokens = ["Moto2", "Moto2 World Championship"]
+
+[[league]]
+key = "moto3"
+name = "Moto3"
+kind = "motorsport"
+group = "motorcycle"
+tokens = ["Moto3", "Moto3 World Championship"]
+
+[[league]]
+key = "wsbk"
+name = "WorldSBK"
+kind = "motorsport"
+group = "motorcycle"
+tokens = [
+  "WorldSBK", "WSBK", "World Superbike", "World Superbikes", "Superbike World Championship",
+  "FIM Superbike World Championship",
+]
+context = ["Superbike", "Superbikes", "SBK"]
+exclude = [
+  "WorldSSP", "World Supersport", "British Superbike", "British Superbikes", "BSB", "MotoAmerica",
+  "Australian Superbike", "ASBK",
+]
+
+[[league]]
+key = "supercross"
+name = "AMA Supercross"
+kind = "motorsport"
+group = "motorcycle"
+tokens = [
+  "Supercross", "AMA Supercross", "Monster Energy Supercross", "Monster Energy AMA Supercross",
+  "SuperMotocross", "SMX World Championship",
+]
+exclude = ["World Supercross", "WSX", "Australian Supercross", "Arenacross"]
+
+[[league]]
+key = "pro_motocross"
+name = "Pro Motocross"
+kind = "motorsport"
+group = "motorcycle"
+tokens = [
+  "Pro Motocross", "AMA Pro Motocross", "Lucas Oil Pro Motocross", "Pro Motocross Championship",
+  "AMA Motocross",
+]
+context = ["Motocross"]
+exclude = ["MXGP", "Motocross of Nations"]
+
+[[league]]
+key = "motoamerica"
+name = "MotoAmerica"
+kind = "motorsport"
+group = "motorcycle"
+tokens = ["MotoAmerica", "MotoAmerica Superbike", "MotoAmerica Superbike Championship"]
+
+# Rally and off-road
+
+[[league]]
+key = "wrc"
+name = "WRC"
+kind = "motorsport"
+group = "rally"
+tokens = ["WRC", "World Rally Championship", "FIA World Rally Championship"]
+events = [
+  "Rallye Monte-Carlo", "Monte Carlo Rally", "Rally Sweden", "Safari Rally", "Rally Mexico",
+  "Rally Croatia", "Rally Islas Canarias", "Rally de Portugal", "Rally Italia Sardegna",
+  "Acropolis Rally", "Rally Finland", "Rally Chile", "Central European Rally", "Rally Japan",
+  "Rally Saudi Arabia",
+]
+exclude = ["European Rally Championship"]
+
+[[league]]
+key = "dakar"
+name = "Dakar"
+kind = "motorsport"
+group = "rally"
+tokens = ["Dakar Rally", "Rally Dakar", "Rallye Dakar"]
+context = ["Dakar"]
+
+[[league]]
+key = "nrx"
+name = "Nitro Rallycross"
+kind = "motorsport"
+group = "rally"
+tokens = ["Nitro Rallycross", "Nitro RX", "NRX", "Nitrocross"]
+exclude = ["World Rallycross", "World RX"]
+
+[[league]]
+key = "extreme_h"
+name = "Extreme H"
+kind = "motorsport"
+group = "rally"
+tokens = ["Extreme H", "FIA Extreme H World Cup", "Extreme E"]
+
+# Drag and dirt
+
+[[league]]
+key = "nhra"
+name = "NHRA"
+kind = "motorsport"
+group = "drag_dirt"
+tokens = [
+  "NHRA", "NHRA Drag Racing", "NHRA Mission Foods Drag Racing Series",
+  "Mission Foods Drag Racing Series", "NHRA Camping World Drag Racing Series",
+]
+context = ["Top Fuel", "Funny Car", "Pro Stock"]
+events = ["U.S. Nationals", "US Nationals", "Winternationals", "Gatornationals", "NHRA Finals"]
+exclude = ["Street Outlaws"]
+
+[[league]]
+key = "woo"
+name = "World of Outlaws"
+kind = "motorsport"
+group = "drag_dirt"
+tokens = [
+  "World of Outlaws", "World of Outlaws Sprint Cars", "World of Outlaws Late Models",
+  "World of Outlaws Sprint Car Series", "World of Outlaws Late Model Series",
+]
+context = ["WoO", "Outlaws", "DIRTcar", "Sprint Cars", "Late Models"]
+events = ["Knoxville Nationals", "Kings Royal", "Dirt Late Model Dream", "World Finals"]
+exclude = ["High Limit", "Street Outlaws"]
+
+[[league]]
+key = "high_limit"
+name = "High Limit Racing"
+kind = "motorsport"
+group = "drag_dirt"
+tokens = ["High Limit Racing", "High Limit Sprint Car Series", "High Limit Sprint Cars"]
+context = ["High Limit"]

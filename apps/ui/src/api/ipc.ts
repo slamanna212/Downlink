@@ -49,6 +49,9 @@ import type {
   TmdbStatus,
   PlexPin,
   PlexServer,
+  SportsCatalog,
+  SportsFollow,
+  SportsMatch,
 } from './types';
 
 /** Command name -> args/result. Keep in sync with the Rust `#[tauri::command]` set (PLAN §2.5). */
@@ -153,6 +156,13 @@ export interface Commands {
   get_release_notes: { args: { version: string }; result: ReleaseNotes };
   /** Opens a web link from release notes in the system browser. */
   open_external_link: { args: { url: string }; result: null };
+  /** Leagues, teams, series and session types from the embedded catalog (SPORTS §2). */
+  sports_catalog: { args: Record<string, never>; result: SportsCatalog };
+  sports_follow_get: { args: Record<string, never>; result: SportsFollow };
+  /** Saves the follow, re-matches, then emits `catalog://updated` with scope `sports`. */
+  sports_follow_set: { args: { follow: SportsFollow }; result: null };
+  /** Matches overlapping [startUtc, endUtc) (UTC seconds), live first, then start time. */
+  sports_matches: { args: { startUtc: number; endUtc: number }; result: SportsMatch[] };
 }
 export type CommandName = keyof Commands;
 

@@ -86,7 +86,7 @@ be refused; the picker then shows no provider names (the refusal is cached for 1
 video_quality, aspect_ratio, stereo, is_previously_shown, country, language, production_date (XMLTV <date>), original_air_date,
 content_advisory[], content_ratings[], event_details, runtime, runtime_units, imdb_id, tmdb_id, tvdb_id (from <episode-num system=…>),
 icon, images[], poster_url` [`epg_program_detail`; `epg_program_detail_rich` is a hand-written synthetic example of a full guide].
-How much is filled depends entirely on the EPG source (a plain XMLTV dump often has none of it; Schedules Direct fills most). `poster_url`
+How much is filled depends entirely on the EPG source (a plain XMLTV dump often has none of it; richer EPG sources fill most). `poster_url`
 is absolute and built from the request Host: map it onto the configured base. A status endpoint; Downlink calls it only when a details
 view opens, cached for 6 h.
 

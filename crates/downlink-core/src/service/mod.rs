@@ -8,6 +8,7 @@ pub mod dto;
 mod logtail;
 mod media;
 mod mediaserver;
+mod sports;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -195,6 +196,10 @@ pub struct Service {
     #[allow(clippy::option_option)]
     tmdb: tokio::sync::Mutex<Option<Option<Arc<crate::tmdb::TmdbClient>>>>,
     tmdb_api: std::sync::RwLock<String>,
+    /// One sports match rebuild at a time.
+    sports_rebuild: Arc<tokio::sync::Mutex<()>>,
+    /// Set when a background rebuild is asked for while one runs; the running one goes again.
+    sports_dirty: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Service {
@@ -251,6 +256,8 @@ impl Service {
             plex_tv_url: std::sync::RwLock::new(crate::mediaserver::plex::PLEX_TV.to_owned()),
             tmdb: tokio::sync::Mutex::new(None),
             tmdb_api: std::sync::RwLock::new(crate::tmdb::TMDB_API.to_owned()),
+            sports_rebuild: Arc::new(tokio::sync::Mutex::new(())),
+            sports_dirty: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
 
@@ -991,6 +998,8 @@ impl Service {
         self.emit(Event::CatalogUpdated(
             self.counts(source_id, CatalogChange::SyncComplete).await?,
         ));
+        // Guide and channels are final: re-match followed sports (docs/SPORTS.md §4).
+        self.rebuild_sports_logged().await;
         Ok(())
     }
 
@@ -1255,6 +1264,7 @@ impl Service {
                     self.emit(Event::CatalogUpdated(
                         self.counts(r.id, CatalogChange::Guide).await?,
                     ));
+                    self.rebuild_sports_logged().await;
                 }
                 Err(e) => tracing::warn!(source_id = r.id, error = %e, "guide refresh failed"),
             }
@@ -1289,6 +1299,7 @@ impl Service {
         self.emit(Event::CatalogUpdated(
             self.counts(source_id, CatalogChange::Guide).await?,
         ));
+        self.rebuild_sports_logged().await;
         Ok(r)
     }
 
@@ -1301,20 +1312,7 @@ impl Service {
     // ---- content filters / settings ---------------------------------------------------------
 
     async fn filter(&self) -> Result<ChannelFilter> {
-        let flag = |k: &'static str| {
-            let store = self.store.clone();
-            async move {
-                store
-                    .kv_get(k)
-                    .await
-                    .map(|v| v.is_some_and(|(v, _)| v == "1"))
-            }
-        };
-        Ok(ChannelFilter {
-            include_adult: flag(PREF_ADULT).await?,
-            include_radio: flag(PREF_RADIO).await?,
-            ..Default::default()
-        })
+        channel_filter(&self.store).await
     }
 
     /// Show/hide adult and radio channels (enforced in `catalog/`).
@@ -1329,7 +1327,10 @@ impl Service {
             .await?;
         self.store
             .kv_set(PREF_RADIO, if include_radio { "1" } else { "0" }, now)
-            .await
+            .await?;
+        // Matches only cover visible channels.
+        self.rebuild_sports_logged().await;
+        Ok(())
     }
 
     fn default_settings() -> Map<String, Value> {
@@ -2424,4 +2425,23 @@ impl ImageFetcher for ServiceFetcher<'_> {
 fn is_tmdb_artwork(url: &str) -> bool {
     reqwest::Url::parse(url)
         .is_ok_and(|u| u.scheme() == "https" && u.host_str() == Some(crate::tmdb::IMAGE_HOST))
+}
+
+/// The content filter from settings (adult/radio visibility). A free function so background
+/// tasks holding only a `Store` can use it.
+async fn channel_filter(store: &Store) -> Result<ChannelFilter> {
+    let flag = |k: &'static str| {
+        let store = store.clone();
+        async move {
+            store
+                .kv_get(k)
+                .await
+                .map(|v| v.is_some_and(|(v, _)| v == "1"))
+        }
+    };
+    Ok(ChannelFilter {
+        include_adult: flag(PREF_ADULT).await?,
+        include_radio: flag(PREF_RADIO).await?,
+        ..Default::default()
+    })
 }

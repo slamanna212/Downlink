@@ -1,6 +1,8 @@
 //! DTOs crossing the IPC boundary. Field names follow `apps/ui/src/api/types.ts` (the UI owns that
 //! contract); everything is camelCase and all timestamps are UTC epoch seconds.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -211,6 +213,8 @@ pub enum CatalogChange {
     Recordings,
     SyncComplete,
     Sources,
+    /// `sports_match` was rebuilt.
+    Sports,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -611,4 +615,94 @@ pub struct RecordingRuleDto {
     pub channel_name: String,
     pub kind: &'static str,
     pub schedule: String,
+}
+
+// ---- Sports ---------------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SportsCatalogDto {
+    pub leagues: Vec<SportsLeagueDto>,
+    /// `race`, `qualifying`, `practice`, `shows`.
+    pub sessions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SportsLeagueDto {
+    pub key: String,
+    pub name: String,
+    /// `team` | `motorsport`.
+    pub kind: String,
+    /// Motorsport group key; null for team leagues.
+    pub group: Option<String>,
+    pub teams: Vec<SportsTeamDto>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SportsTeamDto {
+    pub key: String,
+    pub name: String,
+    pub short: String,
+    pub abbr: String,
+}
+
+/// The `sports.follow` document. Keys the catalog no longer knows are kept but ignored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SportsFollowDto {
+    #[serde(default = "sports_follow_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub include_replays: bool,
+    #[serde(default)]
+    pub leagues: BTreeMap<String, SportsLeagueFollowDto>,
+    #[serde(default)]
+    pub series: BTreeMap<String, SportsSeriesFollowDto>,
+}
+
+fn sports_follow_version() -> u32 {
+    1
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SportsLeagueFollowDto {
+    /// Empty = all games.
+    #[serde(default)]
+    pub teams: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SportsSeriesFollowDto {
+    #[serde(default)]
+    pub sessions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SportsMatchDto {
+    pub channel: ChannelDto,
+    /// Null for channel-name matches.
+    pub programme: Option<ProgrammeDto>,
+    pub league: String,
+    pub league_name: String,
+    /// Matched team keys (followed or not).
+    pub teams: Vec<String>,
+    /// The subset of `teams` the user follows.
+    pub followed_teams: Vec<String>,
+    /// Motorsport only.
+    pub session: Option<String>,
+    pub live: bool,
+    /// Live was inferred because the guide never sets LIVE flags ("likely live").
+    pub live_inferred: bool,
+    /// `programme` | `channel`.
+    pub source: String,
+    pub score: i64,
+    /// Event channels only: the start time read from the channel name, when it has one.
+    pub event_start_utc: Option<i64>,
+    /// Other channels showing the same event, best first (docs/SPORTS.md §5.1).
+    pub alternates: Vec<ChannelDto>,
 }
