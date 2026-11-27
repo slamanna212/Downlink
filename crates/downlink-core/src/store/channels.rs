@@ -78,14 +78,16 @@ impl Store {
     ) -> Result<HashMap<String, i64>> {
         let mut tx = self.pool().begin().await?;
         let mut map = HashMap::new();
-        for (ext_id, name) in groups {
+        for (position, (ext_id, name)) in groups.iter().enumerate() {
             let id: i64 = sqlx::query_scalar(
-                "INSERT INTO channel_group (source_id, ext_id, name) VALUES (?, ?, ?)
-                 ON CONFLICT(source_id, ext_id) DO UPDATE SET name = excluded.name RETURNING id",
+                "INSERT INTO channel_group (source_id, ext_id, name, position) VALUES (?, ?, ?, ?)
+                 ON CONFLICT(source_id, ext_id) DO UPDATE SET
+                     name = excluded.name, position = excluded.position RETURNING id",
             )
             .bind(source_id)
             .bind(ext_id)
             .bind(name)
+            .bind(position as i64)
             .fetch_one(&mut *tx)
             .await?;
             map.insert(ext_id.clone(), id);

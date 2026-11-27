@@ -88,6 +88,7 @@ pub struct GroupDto {
     pub source_id: i64,
     pub name: String,
     pub channel_count: i64,
+    pub position: i64,
     /// Same value as `channel_count` (the newer UI contract calls it `count`).
     pub count: i64,
 }

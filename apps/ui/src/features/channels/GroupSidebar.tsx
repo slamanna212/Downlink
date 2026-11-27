@@ -1,4 +1,7 @@
 import { UnstyledButton } from '@mantine/core';
+import { useLocalStorage } from '@mantine/hooks';
+import { DLButton } from '../../components/DLButton/DLButton';
+import { orderGroups, type GroupOrder } from './groupOrder';
 import type { Group } from '../../api/types';
 import { setFocus } from '@noriginmedia/norigin-spatial-navigation';
 import { useDLFocusable } from '../../lib/spatial';
@@ -38,15 +41,21 @@ export interface GroupSidebarProps {
 }
 
 export function GroupSidebar({ groups, total, favourites, selection, onSelect }: GroupSidebarProps) {
+  const [order, setOrder] = useLocalStorage<GroupOrder>({ key: 'dl.groupOrder', defaultValue: 'alphabetical' });
+  const providerOrder = order === 'provider';
   const isActive = (s: GroupSelection) => selectionKey(s) === selectionKey(selection);
   const entries: { key: string; label: string; count: number; sel: GroupSelection }[] = [
     { key: 'favourites', label: t('channels.favourites'), count: favourites, sel: { kind: 'favourites' } },
     { key: 'all', label: t('channels.all'), count: total, sel: { kind: 'all' } },
-    ...groups.map((g) => ({ key: `g${g.id}`, label: g.name, count: g.count, sel: { kind: 'group', id: g.id } as GroupSelection })),
+    ...orderGroups(groups, order).map((g) => ({ key: `g${g.id}`, label: g.name, count: g.count, sel: { kind: 'group', id: g.id } as GroupSelection })),
   ];
   return (
     <nav className={classes.sidebar} aria-label={t('channels.groups')}>
       <div className={classes.sidebarLabel}>{t('channels.groups')}</div>
+      <DLButton variant="subtle" size="xs" aria-label={t('channels.groupOrder')} aria-pressed={providerOrder}
+        onClick={() => setOrder(providerOrder ? 'alphabetical' : 'provider')}>
+        {t(providerOrder ? 'channels.groupOrder.provider' : 'channels.groupOrder.alpha')}
+      </DLButton>
       {entries.map((e) => (
         <GroupItem key={e.key} focusKey={`GROUP_${e.key}`} label={e.label} count={e.count} active={isActive(e.sel)} onSelect={() => onSelect(e.sel)} />
       ))}
