@@ -288,9 +288,10 @@ fn word_boundaries_keep_f1_out_of_f150() {
         ..prog("F150 Truck Show: Live Race Build")
     };
     assert!(score_programme(cat(), &c, true).is_empty());
-    // The same channel with the real series token does match.
+    // "F1" (a context token here) matches once the series is named on the channel.
     let c = Candidate {
         group_name: Some("Sports"),
+        channel_name: "Formula One",
         flags: LIVE,
         ..prog("F1: Monaco Practice")
     };
@@ -712,4 +713,29 @@ fn channel_time_uses_a_date_in_the_name() {
         ),
         Some(at(2027, 1, 1, 19, 0))
     );
+}
+
+#[test]
+fn generic_cup_titles_are_not_nascar() {
+    for title in [
+        "UCI Cyclo-Cross World Cup: Race",
+        "FIL Luge World Cup: Winterberg",
+        "2026 Davis Cup Tennis: Semifinal",
+    ] {
+        let c = Candidate {
+            flags: LIVE,
+            group_name: Some("Sports"),
+            categories: &[String::from("Sports")],
+            channel_name: "Sports 1",
+            ..prog(title)
+        };
+        assert!(score_programme(cat(), &c, true).is_empty(), "{title}");
+    }
+    // The series name on the channel still lets "Cup" count.
+    let c = Candidate {
+        flags: LIVE,
+        channel_name: "NASCAR Channel",
+        ..prog("Cup: Race at the Speedway")
+    };
+    assert_eq!(leagues(&score_programme(cat(), &c, true)), ["nascar_cup"]);
 }

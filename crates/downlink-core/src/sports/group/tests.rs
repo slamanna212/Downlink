@@ -438,3 +438,70 @@ fn event_channel_joins_the_airing_its_named_time_falls_in() {
     let later = out.iter().find(|g| g.channel.id == 3).unwrap();
     assert_eq!(later.alternates[0].id, 2);
 }
+
+#[test]
+fn tape_delayed_live_session_folds_into_the_live_one() {
+    // Live at 17:15 on one channel; a free-to-air delay at 21:30 the guide also marks live.
+    let out = group_events(
+        vec![
+            motor(channel(1, 1.0, None, false), NOW, "qualifying"),
+            motor(
+                channel(2, 2.0, None, false),
+                NOW + 4 * 3600 + 15 * 60,
+                "qualifying",
+            ),
+        ],
+        NOW,
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].channel.id, 1);
+}
+
+#[test]
+fn a_different_race_the_same_day_is_not_a_tape_delay() {
+    let mut support = motor(channel(1, 1.0, None, false), NOW, "race");
+    support.programme.as_mut().unwrap().title = Some("Supercars Adelaide: Supports".into());
+    support.programme.as_mut().unwrap().end_utc = NOW + 3600;
+    let mut main = motor(channel(2, 2.0, None, false), NOW + 2 * 3600, "race");
+    main.programme.as_mut().unwrap().title = Some("Supercars: Race 36: Adelaide ᴸᶦᵛᵉ".into());
+    let out = group_events(vec![support, main], NOW);
+    assert_eq!(out.len(), 2);
+}
+
+#[test]
+fn tape_delay_titles_may_differ_by_words_and_live_marker() {
+    let mut live = motor(channel(1, 1.0, None, false), NOW, "qualifying");
+    live.programme.as_mut().unwrap().title =
+        Some("Formula 1 : Qatar Grand Prix: Qualifying ᴸᶦᵛᵉ".into());
+    let mut delay = motor(channel(2, 2.0, None, false), NOW + 4 * 3600, "qualifying");
+    delay.programme.as_mut().unwrap().title = Some("Formula 1: Qatar Qualifying".into());
+    let out = group_events(vec![live, delay], NOW);
+    assert_eq!(out.len(), 1);
+}
+
+#[test]
+fn next_days_session_is_not_a_tape_delay() {
+    // Sprint qualifying Friday, qualifying Saturday: same session kind, a day apart.
+    let out = group_events(
+        vec![
+            motor(channel(1, 1.0, None, false), NOW, "qualifying"),
+            motor(channel(2, 2.0, None, false), NOW + 24 * 3600, "qualifying"),
+        ],
+        NOW,
+    );
+    assert_eq!(out.len(), 2);
+}
+
+#[test]
+fn a_replay_is_not_folded_as_a_tape_delay() {
+    let mut replay = motor(channel(2, 2.0, None, false), NOW + 4 * 3600, "qualifying");
+    replay.live = false;
+    let out = group_events(
+        vec![
+            motor(channel(1, 1.0, None, false), NOW, "qualifying"),
+            replay,
+        ],
+        NOW,
+    );
+    assert_eq!(out.len(), 2);
+}

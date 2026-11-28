@@ -16,6 +16,10 @@ use crate::source::flags;
 
 pub const THRESHOLD: i64 = 50;
 
+/// Bump on any change to scoring or session rules here: stored matches are rebuilt at startup
+/// when this (or the catalog text) changes. See `catalog::fingerprint`.
+pub const MATCHER_VERSION: u32 = 2;
+
 const TOKEN_TITLE: i64 = 40;
 const TOKEN_OTHER: i64 = 25;
 const EVENT: i64 = 40;
@@ -156,15 +160,18 @@ fn from_year(words: &[String]) -> bool {
 
 /// Session of a motorsport title (§2.3). A term inside a longer matched term does not count
 /// ("Superpole" inside "Superpole Race", "Race" inside "Pre-race", "Sprint" inside "Sprint
-/// Qualifying"); of the rest, the first in the order shows, qualifying, practice, race wins.
+/// Qualifying", "Final" inside the neutral "Grand Final"); of the rest, the first in the order
+/// shows, qualifying, practice, race wins. Neutral event names never classify.
 fn classify_session(cat: &Catalog, title: &[String], subtitle: &[String]) -> Option<&'static str> {
     let s = &cat.sessions;
-    let lists: [(&'static str, &[Phrase]); 4] = [
+    let lists: [(&'static str, &[Phrase]); 5] = [
         ("shows", &s.shows),
         ("qualifying", &s.qualifying),
         ("practice", &s.practice),
         ("race", &s.race),
+        ("", &s.neutral),
     ];
+    let neutral = lists.len() - 1;
     // (order, field, start, end)
     let mut occ: Vec<(usize, usize, usize, usize)> = Vec::new();
     for (field_idx, field) in [title, subtitle].into_iter().enumerate() {
@@ -181,6 +188,7 @@ fn classify_session(cat: &Catalog, title: &[String], subtitle: &[String]) -> Opt
                 .any(|p| p.1 == o.1 && p.2 <= o.2 && o.3 <= p.3 && (p.3 - p.2) > (o.3 - o.2))
         })
         .map(|o| o.0)
+        .filter(|&i| i != neutral)
         .min()
         .map(|i| lists[i].0)
 }
@@ -324,7 +332,10 @@ fn score_league(
     let event = std::iter::once(&h.title[..])
         .chain(others)
         .any(|o| any(o, &league.events));
-    let has_context = title_tok || other_tok || event || f.sports_group || f.category;
+    // Risky context tokens ("Cup", "Indy", "GT") need this league's own name or an event
+    // somewhere. A generic sports group or category is not enough: "UCI World Cup" and "Davis
+    // Cup" air on sports channels too.
+    let has_context = title_tok || other_tok || event;
     let own_text: [&[String]; 2] = [&h.title, &h.subtitle];
     let own_league = own_text.iter().any(|o| {
         any(o, &league.tokens) || any(o, &league.events) || (has_context && any(o, &league.context))

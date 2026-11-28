@@ -44,6 +44,8 @@ struct RawSessions {
     practice: Vec<String>,
     #[serde(default)]
     race: Vec<String>,
+    #[serde(default)]
+    neutral: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -159,6 +161,9 @@ pub struct SessionTerms {
     pub qualifying: Vec<Phrase>,
     pub practice: Vec<Phrase>,
     pub race: Vec<Phrase>,
+    /// Event names that contain a session term but are not a session ("Grand Final"): terms
+    /// inside them do not count, and they classify as nothing themselves.
+    pub neutral: Vec<Phrase>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -342,6 +347,7 @@ pub fn parse(text: &str) -> std::result::Result<Catalog, String> {
             qualifying: phrases(&raw.sessions.qualifying),
             practice: phrases(&raw.sessions.practice),
             race: phrases(&raw.sessions.race),
+            neutral: phrases(&raw.sessions.neutral),
         },
         words: Words {
             replay: phrases(&raw.words.replay),
@@ -355,6 +361,18 @@ pub fn parse(text: &str) -> std::result::Result<Catalog, String> {
 }
 
 static CATALOG: LazyLock<std::result::Result<Catalog, String>> = LazyLock::new(|| parse(EMBEDDED));
+
+/// Identifies the stored `sports_match` rows' rules: the catalog text plus the matcher version.
+/// When it changes (an app update with new aliases or scoring), the rows are rebuilt at startup
+/// instead of waiting for the next guide refresh. FNV-1a: stable across builds and toolchains.
+pub fn fingerprint() -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in EMBEDDED.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{}:{h:016x}", super::matcher::MATCHER_VERSION)
+}
 
 /// The embedded catalog, parsed once.
 pub fn catalog() -> Result<&'static Catalog> {
@@ -474,6 +492,27 @@ replay = ["Classic"]
 
     /// Listing shapes seen in real guides (invented titles and channels): live markers, filler
     /// on team channels, pre/post shows, "Best of" repeats and event-channel feeds.
+    #[test]
+    fn grand_final_is_an_event_name_not_a_session() {
+        use crate::sports::matcher::{Candidate, score_programme};
+        let c = catalog().unwrap();
+        let on = |title: &str| {
+            let cand = Candidate {
+                title,
+                ..Default::default()
+            };
+            score_programme(c, &cand, true)
+        };
+        let q = on("Supercars Harbor Grand Final : Qualifying & Top 10 Shootout ᴸᶦᵛᵉ");
+        assert_eq!(q[0].session, Some("qualifying"));
+        let r = on("Supercars Championship : Race 36: Harbor Grand Final ᴸᶦᵛᵉ");
+        assert_eq!(r[0].session, Some("race"));
+        // The pre-race show is a show, and the support categories are not Supercars.
+        let g = on("Supercars Harbor Grand Final : The Grid ᴸᶦᵛᵉ");
+        assert_eq!(g[0].session, Some("shows"));
+        assert!(on("Supercars Harbor Grand Final : Supports ᴸᶦᵛᵉ").is_empty());
+    }
+
     #[test]
     fn embedded_catalog_guide_shapes() {
         use crate::sports::matcher::{Candidate, live_marker, score_channel, score_programme};

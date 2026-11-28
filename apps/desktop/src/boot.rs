@@ -130,6 +130,9 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
                 Ok(_) => {}
                 Err(e) => tracing::warn!("startup cleanup failed: {}", e.message),
             }
+            if let Err(e) = s.rebuild_sports_if_stale().await {
+                tracing::warn!("sports rebuild check failed: {}", e.message);
+            }
             if let Err(e) = s.probe_sources().await {
                 tracing::warn!("source probe failed: {}", e.message);
             }

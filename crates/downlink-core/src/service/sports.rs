@@ -16,6 +16,9 @@ use crate::sports::{self, store};
 use crate::store::Store;
 use crate::sync::now_utc;
 
+/// The `catalog::fingerprint` of the rules the stored `sports_match` rows were built with.
+const KV_FINGERPRINT: &str = "sports.rules";
+
 impl Service {
     pub fn sports_catalog(&self) -> Result<SportsCatalogDto> {
         let cat = sports::catalog()?;
@@ -87,6 +90,17 @@ impl Service {
                 }
             }
         });
+    }
+
+    /// At startup: stored matches made by older rules (an update changed the catalog or the
+    /// matcher) are rebuilt now, in the background, rather than at the next guide refresh.
+    pub async fn rebuild_sports_if_stale(&self) -> Result<()> {
+        let stored = self.store.kv_get(KV_FINGERPRINT).await?.map(|(v, _)| v);
+        if stored.as_deref() != Some(sports::catalog::fingerprint().as_str()) {
+            tracing::info!("sports rules changed: rebuilding matches");
+            self.rebuild_sports_logged().await;
+        }
+        Ok(())
     }
 
     /// Followed matches: programmes overlapping `[start_utc, end_utc)` plus channel-name matches,
@@ -196,7 +210,11 @@ async fn rebuild_and_emit(
 ) -> Result<store::RebuildReport> {
     let cat = sports::catalog()?;
     let filter = super::channel_filter(store).await?;
-    let report = store::rebuild(store, cat, &filter, now_utc()).await?;
+    let now = now_utc();
+    let report = store::rebuild(store, cat, &filter, now).await?;
+    store
+        .kv_set(KV_FINGERPRINT, &sports::catalog::fingerprint(), now)
+        .await?;
     tracing::debug!(
         candidates = report.candidates,
         matches = report.matches,
@@ -210,4 +228,31 @@ async fn rebuild_and_emit(
         programmes: 0,
     }));
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::auth::MemorySecretStore;
+
+    #[tokio::test]
+    async fn a_rebuild_records_the_rules_it_used() {
+        let store = Store::open_memory().await.unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let svc = Service::with_store(
+            store.clone(),
+            Arc::new(MemorySecretStore::new()),
+            dir.path().join("images"),
+            "t".into(),
+        );
+        assert!(store.kv_get(KV_FINGERPRINT).await.unwrap().is_none());
+        svc.rebuild_sports().await.unwrap();
+        let (v, _) = store.kv_get(KV_FINGERPRINT).await.unwrap().unwrap();
+        assert_eq!(v, sports::catalog::fingerprint());
+        // Up to date: the startup check has nothing to do.
+        svc.rebuild_sports_if_stale().await.unwrap();
+        assert!(!svc.sports_dirty.load(Ordering::SeqCst));
+    }
 }

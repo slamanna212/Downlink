@@ -2,6 +2,7 @@
 //! match. The best channel leads; the rest ride along as `alternates`.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 
 use super::matcher::normalize;
 use crate::service::dto::{ChannelDto, SportsMatchDto};
@@ -23,6 +24,12 @@ pub fn group_events(mut matches: Vec<SportsMatchDto>, now: i64) -> Vec<SportsMat
             None => groups.push(m),
         }
     }
+    let delayed: Vec<bool> = groups
+        .iter()
+        .map(|g| groups.iter().any(|e| is_delay_of(g, e)))
+        .collect();
+    let mut keep = delayed.into_iter().map(|d| !d);
+    groups.retain(|_| keep.next().unwrap_or(true));
     groups.sort_by(|a, b| display_order(a, b, now));
     groups
 }
@@ -89,6 +96,42 @@ fn same_event(group: &SportsMatchDto, m: &SportsMatchDto, now: i64) -> bool {
         }
         (None, None) => same_identity_untimed(group, m),
     }
+}
+
+/// A motorsport session runs once a weekend; sprint and main sessions are a day apart.
+const TAPE_DELAY_WINDOW: i64 = 12 * 3600;
+
+/// `g` is a later, non-overlapping "live" airing of the session `e` already carries live: a
+/// broadcaster's tape delay the guide still marks live (a free-to-air delayed qualifying). It
+/// folds into `e`; once `e` ends and leaves the list, the delayed airing shows on its own. The
+/// titles must agree (one's words within the other's), so "Race 2" is never a delay of "Race 1".
+fn is_delay_of(g: &SportsMatchDto, e: &SportsMatchDto) -> bool {
+    let (Some(gp), Some(ep)) = (&g.programme, &e.programme) else {
+        return false;
+    };
+    g.session.is_some()
+        && g.teams.is_empty()
+        && e.teams.is_empty()
+        && g.league == e.league
+        && g.session == e.session
+        && g.live
+        && e.live
+        && ep.start_utc < gp.start_utc
+        && gp.start_utc - ep.start_utc < TAPE_DELAY_WINDOW
+        && titles_agree(g, e)
+}
+
+fn titles_agree(a: &SportsMatchDto, b: &SportsMatchDto) -> bool {
+    // The live marker ("Live", superscript "ᴸᶦᵛᵉ" folds to "lɪve") says nothing about the event.
+    let words = |m: &SportsMatchDto| -> HashSet<String> {
+        title_key(m)
+            .split(' ')
+            .filter(|w| !w.is_empty() && *w != "live" && *w != "lɪve")
+            .map(str::to_owned)
+            .collect()
+    };
+    let (x, y) = (words(a), words(b));
+    !x.is_empty() && !y.is_empty() && (x.is_subset(&y) || y.is_subset(&x))
 }
 
 /// Team leagues: overlapping teams (equal sets when both name two or more). Without teams on

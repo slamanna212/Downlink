@@ -82,8 +82,8 @@ Bathurst 1000 → Supercars; Monaco GP → F1.
 
 Former names stay in the catalog as aliases (Xfinity → O'Reilly, Extreme E → Extreme H).
 
-**Tokens that are risky alone** need league context (the series name, a sports group or channel,
-or a matching event alias): "Cup", "Indy", "F2", "F3", "GT", "Final", "Truck", "Superbike".
+**Tokens that are risky alone** need league context (the series name in any field, including the
+channel name, or a matching event alias; a generic sports group or category is not enough): "Cup", "Indy", "F2", "F3", "GT", "Final", "Truck", "Superbike".
 
 ### 2.3 Session types (motorsport)
 
@@ -95,11 +95,17 @@ shows are off.
 | Race | Race, Grand Prix, GP, Sprint, Sprint Race, Feature, Feature Race, Main Event, Heat, Heat Race, "24 Hours", "6 Hours", "12 Hours", "Hours of", Duel, Final, and number names ("500", "400", "Daytona 500", "Coca-Cola 600") |
 | Qualifying | Qualifying, Quali, Q1, Q2, Q3, Sprint Qualifying, Sprint Shootout, Pole, Pole Day, Pole Qualifying, Time Trials, Hyperpole, Superpole, Top 10 Shootout, Last Chance Qualifier, LCQ |
 | Practice | Practice, Free Practice, FP1, FP2, FP3, P1, P2, P3, Warm-up, Happy Hour, Carb Day, Shakedown, Test, Testing |
-| Shows | Pre-race, Pre-Race Show, Countdown, Grid Walk, Post-race, Hub, Race Hub, Notebook, Highlights, Review, Magazine, Inside, Raceday, Preview, Weekly |
+| Shows | Pre-race, Pre-Race Show, Countdown, Grid Walk, The Grid, Post-race, Hub, Race Hub, Notebook, Highlights, Review, Magazine, Inside, Raceday, Preview, Weekly |
+| Neutral | Grand Final, Grand Finale, Season Final, Season Finale: event names, never a session; terms inside them ("Final") don't count |
 
 Terms are checked in this order: shows, qualifying, practice, race. That stops "Sprint Qualifying"
 landing in race and "Pre-race" landing in race. A title that matches a series but has no session
 term counts as **race** when the programme is flagged `LIVE`, and is otherwise left out.
+
+Stored matches record the rules that built them (`sports.rules` in `app_kv`: the catalog text hash
+plus `matcher::MATCHER_VERSION`). At startup a mismatch triggers a background rebuild, so an update
+that changes aliases or scoring takes effect at once, not at the next guide refresh. Bump
+`MATCHER_VERSION` with any scoring or session change.
 
 ## 3. Settings
 
@@ -221,6 +227,10 @@ one match, and later one alert:
   Teams must overlap; when both name two or more teams, the sets must be equal. Teamless listings
   need equal normalized titles. An event channel joins the airing its named start falls in, or
   the one on air now when its name has no time.
+- **Tape delays (motorsport):** a later, non-overlapping airing of a series session the guide
+  marks live, starting within 12 hours of an earlier live airing of that session, is a
+  broadcaster's delay and folds away. Once the original ends and leaves the list, the delayed
+  airing shows on its own. Sessions a day apart (sprint vs. main qualifying) stay separate.
 - **Which channel leads:** favorite, then quality (4K > FHD > HD > unknown > SD), then guide data
   over a name-only match, then score, then the lowest channel number.
 - The rest go in `alternates` (best first). The card shows "+N"; its menu ("Also on") plays any

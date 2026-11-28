@@ -23,7 +23,7 @@ shows = [
   "Press Conference", "Drivers Parade", "Pre-Qualifying", "Post-Qualifying", "Paddock",
   "Grand Prix Sunday", "Grand Prix Saturday", "Chequered Flag", "Checkered Flag",
   "Qualifying Build-up", "Race Build-up", "Pre-Show", "Post-Show", "Weekend Preview",
-  "Season Review", "Ted's Notebook", "The F1 Show",
+  "Season Review", "Ted's Notebook", "The F1 Show", "The Grid",
 ]
 qualifying = [
   "Qualifying", "Quali", "Q1", "Q2", "Q3", "Sprint Qualifying", "Sprint Shootout", "Pole",
@@ -45,6 +45,8 @@ race = [
   "24 Hour", "12 Hour", "1000", "600", "500", "400", "300", "250", "200", "150", "Daytona 500",
   "Coca-Cola 600", "E-Prix", "Stage", "Power Stage", "Rally", "Moto 1", "Moto 2", "Nationals",
 ]
+# Event names holding a session term that say nothing about the session ("Adelaide Grand Final").
+neutral = ["Grand Final", "Grand Finale", "Season Final", "Season Finale"]
 
 # Shared word lists (§5).
 #   filler  placeholder listings that are never an event (veto)
@@ -1771,7 +1773,10 @@ tokens = [
   "V8 Supercars",
 ]
 events = ["Bathurst 1000", "Bathurst", "Gold Coast 500", "Adelaide 500", "Sandown 500"]
-exclude = ["Bathurst 12 Hour", "Bathurst 12 Hours", "Supercars Unleashed"]
+exclude = [
+  "Bathurst 12 Hour", "Bathurst 12 Hours", "Supercars Unleashed", "Supports", "Support Races",
+  "Support Categories",
+]
 
 [[league]]
 key = "btcc"
