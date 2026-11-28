@@ -281,6 +281,19 @@ fn normalize_folds_case_diacritics_ampersand_and_punctuation() {
 }
 
 #[test]
+fn superscript_marker_glued_to_a_word_splits_off() {
+    assert_eq!(
+        normalize("NFL: Bears at Packersᴸᶦᵛᵉ"),
+        ["nfl", "bears", "at", "packers", "lɪve"]
+    );
+    assert!(live_marker("NFL: Bears at Packersᴸᶦᵛᵉ", None));
+    assert!(live_marker("NFL: Bears at Packers ᴸᶦᵛᵉ", None));
+    let m = one("NFL: Bears at Packersᴸᶦᵛᵉ", 0, true).unwrap();
+    assert_eq!(m.teams, ["chi", "gb"]);
+    assert!(m.live);
+}
+
+#[test]
 fn word_boundaries_keep_f1_out_of_f150() {
     let c = Candidate {
         group_name: Some("Sports"),

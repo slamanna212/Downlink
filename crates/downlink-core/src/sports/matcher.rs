@@ -18,7 +18,7 @@ pub const THRESHOLD: i64 = 50;
 
 /// Bump on any change to scoring or session rules here: stored matches are rebuilt at startup
 /// when this (or the catalog text) changes. See `catalog::fingerprint`.
-pub const MATCHER_VERSION: u32 = 2;
+pub const MATCHER_VERSION: u32 = 3;
 
 const TOKEN_TITLE: i64 = 40;
 const TOKEN_OTHER: i64 = 25;
@@ -41,11 +41,37 @@ const CONTEXT: i64 = 25;
 
 const CONNECTORS: [&str; 4] = ["at", "vs", "v", "@"];
 
-/// Lowercase, strip diacritics, fold compatibility forms (superscript "ᴸᶦᵛᵉ" -> "live"),
-/// "&" -> "and", keep "@" as its own word, punctuation -> spaces.
+/// Superscript and modifier letters: the "ᴸᶦᵛᵉ" / "ᴺᵉʷ" guide markers.
+fn is_superscript(c: char) -> bool {
+    matches!(c,
+        '\u{02B0}'..='\u{02FF}'
+        | '\u{1D2C}'..='\u{1D6A}'
+        | '\u{1D78}'
+        | '\u{1D9B}'..='\u{1DBF}'
+        | '\u{2070}'..='\u{209F}')
+}
+
+/// Put a space before each superscript run, so a marker glued to the last word
+/// ("Rocketsᴸᶦᵛᵉ") folds to its own word ("Rockets Live") instead of "RocketsLive".
+fn split_superscripts(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    let mut prev_super = true;
+    for c in s.chars() {
+        let sup = is_superscript(c);
+        if sup && !prev_super {
+            out.push(' ');
+        }
+        prev_super = sup || c.is_whitespace();
+        out.push(c);
+    }
+    out
+}
+
+/// Lowercase, strip diacritics, fold compatibility forms (superscript "ᴸᶦᵛᵉ" -> "live", split
+/// from a word it is glued to), "&" -> "and", keep "@" as its own word, punctuation -> spaces.
 pub fn normalize(s: &str) -> Vec<String> {
     let mut out = String::with_capacity(s.len() + 8);
-    for ch in s.nfkd() {
+    for ch in split_superscripts(s).nfkd() {
         if is_combining_mark(ch) {
             continue;
         }
@@ -71,7 +97,10 @@ pub fn live_marker(title: &str, subtitle: Option<&str>) -> bool {
     };
     [Some(title), subtitle].into_iter().flatten().any(|t| {
         // NFKC folds "ᴸᶦᵛᵉ" to "Lɪve" (the superscript i is a small capital): fold that too.
-        let folded: String = t.nfkc().map(|c| if c == 'ɪ' { 'i' } else { c }).collect();
+        let folded: String = split_superscripts(t)
+            .nfkc()
+            .map(|c| if c == 'ɪ' { 'i' } else { c })
+            .collect();
         re.is_match(folded.trim())
     })
 }
