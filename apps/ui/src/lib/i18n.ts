@@ -199,6 +199,7 @@ export const en = {
   'player.info.rtxHdrSkipped': 'RTX HDR skipped (HDR source)',
   'player.info.rtxHdrOff': 'RTX HDR not engaged',
   'player.info.rtxHdrPending': 'RTX HDR requested',
+  'player.info.rtxHdrSdrDisplay': 'RTX HDR off (SDR display)',
   'player.info.colour': 'Colour',
   'player.info.bitDepth': '{n}-bit',
   'player.info.container': 'Container',

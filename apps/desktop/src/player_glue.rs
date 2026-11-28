@@ -382,6 +382,7 @@ impl SinkContext {
                         "rtxUpscale": s.rtx_upscale,
                         "rtxHdrRequested": s.rtx_hdr_requested,
                         "rtxHdrActive": s.rtx_hdr_active,
+                        "rtxHdrSdrDisplay": s.rtx_hdr_sdr_display,
                         "bitDepth": s.bit_depth,
                         "audioChannels": s.audio_channels,
                         "audioSampleRate": s.audio_sample_rate,

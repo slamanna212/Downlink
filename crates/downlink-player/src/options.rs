@@ -395,7 +395,9 @@ pub fn rtx_scale(video: (i64, i64), output: (i64, i64)) -> Option<f64> {
 /// The `vf` chain for NVIDIA RTX Video (mpv `d3d11vpp`), or an empty string for none.
 ///
 /// Super Resolution only applies to the single player (`profile` not a multiview tile) and only
-/// when the video is upscaled (`scale`). RTX HDR needs HDR output on; the filter itself skips
+/// when the video is upscaled (`scale`). RTX HDR needs HDR output on and the window on a monitor
+/// with HDR turned on (`display_hdr`); on an SDR monitor mpv would only tone-map the RTX HDR
+/// output straight back to SDR. The filter itself skips
 /// sources that are already HDR. Output format is left to mpv, which picks the 10-bit RGB format
 /// RTX HDR requires. Callers pass `rtx_available` from [`crate::gpu::video_caps`]; the filter is
 /// never built on platforms without a D3D11 renderer.
@@ -404,17 +406,28 @@ pub fn rtx_video_filter(
     profile: Profile,
     scale: Option<f64>,
     rtx_available: bool,
+    display_hdr: bool,
 ) -> String {
     if !rtx_available || !cfg!(target_os = "windows") {
         return String::new();
     }
-    rtx_filter_string(prefs, profile, scale)
+    rtx_filter_string(prefs, profile, scale, display_hdr)
 }
 
-fn rtx_filter_string(prefs: &Preferences, profile: Profile, scale: Option<f64>) -> String {
+/// Whether the preferences ask for RTX HDR (before checking the display).
+pub fn rtx_hdr_wanted(prefs: &Preferences) -> bool {
+    prefs.rtx_hdr && prefs.hdr_output == HdrOutput::Auto
+}
+
+fn rtx_filter_string(
+    prefs: &Preferences,
+    profile: Profile,
+    scale: Option<f64>,
+    display_hdr: bool,
+) -> String {
     let tile = matches!(profile, Profile::Multiview | Profile::MultiviewDense);
     let scale = scale.filter(|_| prefs.rtx_super_resolution && !tile);
-    let hdr = prefs.rtx_hdr && prefs.hdr_output == HdrOutput::Auto;
+    let hdr = rtx_hdr_wanted(prefs) && display_hdr;
     let mut opts: Vec<String> = Vec::new();
     if let Some(s) = scale {
         opts.push(format!("scale={s:.2}"));
@@ -701,18 +714,18 @@ mod tests {
             ..Preferences::default()
         };
         assert_eq!(
-            rtx_filter_string(&both, Profile::Live, Some(2.0)),
+            rtx_filter_string(&both, Profile::Live, Some(2.0), true),
             "@rtx:d3d11vpp=scale=2.00:scaling-mode=nvidia:nvidia-true-hdr=yes"
         );
         // No upscaling needed: HDR only.
         assert_eq!(
-            rtx_filter_string(&both, Profile::Seekable, None),
+            rtx_filter_string(&both, Profile::Seekable, None, true),
             "@rtx:d3d11vpp=nvidia-true-hdr=yes"
         );
         // Multiview tiles never get Super Resolution, but keep RTX HDR.
         for p in [Profile::Multiview, Profile::MultiviewDense] {
             assert_eq!(
-                rtx_filter_string(&both, p, Some(2.0)),
+                rtx_filter_string(&both, p, Some(2.0), true),
                 "@rtx:d3d11vpp=nvidia-true-hdr=yes"
             );
         }
@@ -722,10 +735,20 @@ mod tests {
             ..both.clone()
         };
         assert_eq!(
-            rtx_filter_string(&sdr, Profile::Live, Some(1.5)),
+            rtx_filter_string(&sdr, Profile::Live, Some(1.5), true),
             "@rtx:d3d11vpp=scale=1.50:scaling-mode=nvidia"
         );
-        assert_eq!(rtx_filter_string(&sdr, Profile::Multiview, Some(1.5)), "");
+        assert_eq!(
+            rtx_filter_string(&sdr, Profile::Multiview, Some(1.5), true),
+            ""
+        );
+        // An SDR monitor never gets RTX HDR (mpv would tone-map it straight back to SDR), but
+        // Super Resolution still runs.
+        assert_eq!(
+            rtx_filter_string(&both, Profile::Live, Some(2.0), false),
+            "@rtx:d3d11vpp=scale=2.00:scaling-mode=nvidia"
+        );
+        assert_eq!(rtx_filter_string(&both, Profile::Seekable, None, false), "");
         // The info panel reads the chain back.
         assert_eq!(
             rtx_filter_parts("@rtx:d3d11vpp=scale=2.00:scaling-mode=nvidia:nvidia-true-hdr=yes"),
@@ -738,13 +761,19 @@ mod tests {
         assert_eq!(rtx_filter_parts(""), (None, false));
         // Both off: no filter.
         assert_eq!(
-            rtx_filter_string(&Preferences::default(), Profile::Live, Some(2.0)),
+            rtx_filter_string(&Preferences::default(), Profile::Live, Some(2.0), true),
             ""
         );
         // No RTX adapter, or not Windows: never a filter.
-        assert_eq!(rtx_video_filter(&both, Profile::Live, Some(2.0), false), "");
+        assert_eq!(
+            rtx_video_filter(&both, Profile::Live, Some(2.0), false, true),
+            ""
+        );
         if !cfg!(target_os = "windows") {
-            assert_eq!(rtx_video_filter(&both, Profile::Live, Some(2.0), true), "");
+            assert_eq!(
+                rtx_video_filter(&both, Profile::Live, Some(2.0), true, true),
+                ""
+            );
         }
     }
 

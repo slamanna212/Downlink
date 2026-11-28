@@ -63,3 +63,17 @@ pub(crate) fn set_hdr_output(h: HdrOutput) {
 pub(crate) fn hdr_output_auto() -> bool {
     HDR_AUTO.load(Ordering::Relaxed)
 }
+
+/// Whether the monitor the main window is on has HDR turned on. Kept current by the Windows
+/// surface; gates RTX HDR so SDR monitors don't get SDR -> RTX HDR -> tone-mapped back to SDR.
+/// Always false elsewhere (no RTX Video outside Windows).
+static DISPLAY_HDR: AtomicBool = AtomicBool::new(false);
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn set_display_hdr(hdr: bool) -> bool {
+    DISPLAY_HDR.swap(hdr, Ordering::Relaxed) != hdr
+}
+
+pub(crate) fn display_hdr() -> bool {
+    DISPLAY_HDR.load(Ordering::Relaxed)
+}

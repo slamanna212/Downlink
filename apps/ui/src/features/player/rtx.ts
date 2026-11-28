@@ -13,6 +13,8 @@ export function rtxSummary(stats: SessionStats | null | undefined): string | nul
       : stats.rtxHdrActive === false ? t('player.info.rtxHdrOff')
       : t('player.info.rtxHdrPending'),
     );
+  } else if (stats.rtxHdrSdrDisplay && stats.hdr !== true) {
+    parts.push(t('player.info.rtxHdrSdrDisplay'));
   }
   return parts.length ? parts.join(' · ') : null;
 }

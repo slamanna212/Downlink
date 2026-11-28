@@ -239,6 +239,8 @@ pub struct StatsSnapshot {
     pub rtx_upscale: Option<f64>,
     /// RTX HDR was requested for this video.
     pub rtx_hdr_requested: bool,
+    /// RTX HDR is on in the preferences but held off because the window is on an SDR monitor.
+    pub rtx_hdr_sdr_display: bool,
     /// RTX HDR is converting this SDR video to HDR: the filter tagged its output HDR, which it
     /// only does once the driver accepted the request. `None` unless requested and params known.
     pub rtx_hdr_active: Option<bool>,
@@ -549,6 +551,8 @@ struct Shared {
     rtx_vf: String,
     /// mpv accepted `rtx_vf`.
     rtx_applied: bool,
+    /// [`crate::surface::display_hdr`] when the RTX filter was last evaluated.
+    display_hdr_seen: bool,
 }
 
 struct Inner {
@@ -702,6 +706,7 @@ impl Player {
                 output_size: (0, 0),
                 rtx_vf: String::new(),
                 rtx_applied: false,
+                display_hdr_seen: false,
             }),
             cv: Condvar::new(),
             stop: AtomicBool::new(false),
@@ -1159,7 +1164,9 @@ fn apply_rtx_filter(inner: &Inner, s: &mut Shared) {
 fn rtx_filter_for(inner: &Inner, s: &mut Shared, prefs: &Preferences, profile: Profile) {
     let caps = crate::gpu::video_caps();
     let scale = options::rtx_scale(s.video_size, s.output_size);
-    let vf = options::rtx_video_filter(prefs, profile, scale, caps.rtx_video);
+    let display_hdr = crate::surface::display_hdr();
+    s.display_hdr_seen = display_hdr;
+    let vf = options::rtx_video_filter(prefs, profile, scale, caps.rtx_video, display_hdr);
     if vf == s.rtx_vf {
         return;
     }
@@ -1502,6 +1509,11 @@ fn handle_property(inner: &Inner, s: &mut Shared, name: &str, value: PropValue) 
 fn tick(inner: &Inner) {
     let mut s = lock(inner);
     let now = Instant::now();
+    // The window moved to a monitor with HDR on/off (or HDR was toggled): RTX HDR follows.
+    if crate::surface::display_hdr() != s.display_hdr_seen {
+        apply_rtx_filter(inner, &mut s);
+        s.throttle.mark_dirty();
+    }
     if let Some(t) = s.retry_at
         && now >= t
     {
@@ -1619,6 +1631,13 @@ fn collect_stats(inner: &Inner, s: &Shared) -> StatsSnapshot {
         rtx_upscale,
         rtx_hdr_requested,
         rtx_hdr_active,
+        rtx_hdr_sdr_display: crate::gpu::video_caps().rtx_video
+            && cfg!(target_os = "windows")
+            && !crate::surface::display_hdr()
+            && match inner.prefs.lock() {
+                Ok(p) => options::rtx_hdr_wanted(&p),
+                Err(p) => options::rtx_hdr_wanted(&p.into_inner()),
+            },
         bit_depth: e
             .get_property("video-params/hw-pixelformat")
             .or_else(|| e.get_property("video-params/pixelformat"))

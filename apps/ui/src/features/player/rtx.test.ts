@@ -19,4 +19,11 @@ describe('rtxSummary', () => {
     expect(rtxSummary({ ...base, rtxHdrRequested: true, hdr: null })).toBe('RTX HDR requested');
     expect(rtxSummary({ ...base, rtxHdrRequested: true, hdr: true })).toBe('RTX HDR skipped (HDR source)');
   });
+
+  it('says when RTX HDR is held off on an SDR monitor', () => {
+    expect(rtxSummary({ ...base, rtxUpscale: 2, rtxHdrSdrDisplay: true })).toBe(
+      'Super Resolution 2× requested · RTX HDR off (SDR display)',
+    );
+    expect(rtxSummary({ ...base, rtxHdrSdrDisplay: true, hdr: true })).toBeNull();
+  });
 });

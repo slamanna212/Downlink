@@ -10,19 +10,32 @@
 //! The main window is subclassed so every move/resize/z-order/minimise change re-syncs the
 //! popups: same position (client → screen), inserted right below the main window, hidden while
 //! the main window is minimised or hidden (tray).
+//!
+//! It also tracks whether the monitor the main window is on has HDR turned on
+//! ([`super::set_display_hdr`]), so RTX HDR only runs where it can be shown.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use windows_sys::Win32::Devices::Display::{
+    DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+    DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO, DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO,
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME, DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes,
+    QDC_ONLY_ACTIVE_PATHS, QueryDisplayConfig,
+};
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows_sys::Win32::Graphics::Gdi::{BLACK_BRUSH, ClientToScreen, GetStockObject, HBRUSH};
+use windows_sys::Win32::Graphics::Gdi::{
+    BLACK_BRUSH, ClientToScreen, GetMonitorInfoW, GetStockObject, HBRUSH, HMONITOR,
+    MONITOR_DEFAULTTONEAREST, MONITORINFO, MONITORINFOEXW, MonitorFromWindow,
+};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyWindow, IsIconic, IsWindowVisible, MA_NOACTIVATE,
     RegisterClassW, SW_HIDE, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_SHOWWINDOW, SetWindowPos,
-    ShowWindow, WM_MOUSEACTIVATE, WM_MOVE, WM_SHOWWINDOW, WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW,
-    WS_CLIPCHILDREN, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
+    ShowWindow, WM_DISPLAYCHANGE, WM_MOUSEACTIVATE, WM_MOVE, WM_SETTINGCHANGE, WM_SHOWWINDOW,
+    WM_SIZE, WM_WINDOWPOSCHANGED, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    WS_POPUP,
 };
 
 use super::{MainThreadDispatch, SurfaceBounds, VideoSurface};
@@ -47,6 +60,8 @@ static ENTRIES: Mutex<Vec<Entry>> = Mutex::new(Vec::new());
 static MAIN: AtomicIsize = AtomicIsize::new(0);
 static CLASS_REGISTERED: AtomicBool = AtomicBool::new(false);
 static SYNCING: AtomicBool = AtomicBool::new(false);
+/// The monitor the main window was last seen on, or 0.
+static LAST_MONITOR: AtomicIsize = AtomicIsize::new(0);
 
 fn entries() -> std::sync::MutexGuard<'static, Vec<Entry>> {
     ENTRIES.lock().unwrap_or_else(|p| p.into_inner())
@@ -91,6 +106,112 @@ fn sync() {
         }
     }
     SYNCING.store(false, Ordering::Relaxed);
+    refresh_display_hdr(false);
+}
+
+/// Re-check whether the main window's monitor has HDR on: only when the window changed monitor,
+/// or always with `force` (display settings changed, e.g. HDR toggled). Main thread only.
+fn refresh_display_hdr(force: bool) {
+    let main = MAIN.load(Ordering::Relaxed);
+    if main == 0 {
+        return;
+    }
+    // SAFETY: `main` is the live top-level HWND we subclassed.
+    let mon = unsafe { MonitorFromWindow(main as HWND, MONITOR_DEFAULTTONEAREST) };
+    if mon.is_null() {
+        return;
+    }
+    if LAST_MONITOR.swap(mon as isize, Ordering::Relaxed) == mon as isize && !force {
+        return;
+    }
+    let hdr = monitor_hdr(mon);
+    if super::set_display_hdr(hdr) {
+        tracing::info!(hdr, "video monitor HDR state");
+    }
+}
+
+fn wide(buf: &[u16]) -> &[u16] {
+    let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    &buf[..end]
+}
+
+/// Whether Windows HDR is on for `mon`. Advanced colour on an SDR panel (Windows 11 Auto Color
+/// Management) reports `wideColorEnforced` and is not HDR. Any failure counts as SDR.
+fn monitor_hdr(mon: HMONITOR) -> bool {
+    // SAFETY: MONITORINFOEXW is plain data; `cbSize` tells the API which variant it got.
+    let mut mi: MONITORINFOEXW = unsafe { std::mem::zeroed() };
+    mi.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+    // SAFETY: `mon` came from MonitorFromWindow; `mi` is a valid, sized MONITORINFOEXW.
+    if unsafe { GetMonitorInfoW(mon, (&raw mut mi).cast::<MONITORINFO>()) } == 0 {
+        return false;
+    }
+    let gdi_name = wide(&mi.szDevice);
+
+    let (mut n_paths, mut n_modes) = (0u32, 0u32);
+    // SAFETY: valid out-pointers for the two counts.
+    if unsafe { GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut n_paths, &mut n_modes) }
+        != 0
+    {
+        return false;
+    }
+    // SAFETY: both are plain data; zeroed is valid before QueryDisplayConfig fills them.
+    let mut paths: Vec<DISPLAYCONFIG_PATH_INFO> =
+        vec![unsafe { std::mem::zeroed() }; n_paths as usize];
+    let mut modes: Vec<DISPLAYCONFIG_MODE_INFO> =
+        vec![unsafe { std::mem::zeroed() }; n_modes as usize];
+    // SAFETY: the buffers hold exactly the counts passed; the topology id is optional here.
+    let r = unsafe {
+        QueryDisplayConfig(
+            QDC_ONLY_ACTIVE_PATHS,
+            &mut n_paths,
+            paths.as_mut_ptr(),
+            &mut n_modes,
+            modes.as_mut_ptr(),
+            std::ptr::null_mut(),
+        )
+    };
+    if r != 0 {
+        return false;
+    }
+    paths.truncate(n_paths as usize);
+
+    for p in &paths {
+        // SAFETY: plain data; the header says which request this is and how big the buffer is.
+        let mut src: DISPLAYCONFIG_SOURCE_DEVICE_NAME = unsafe { std::mem::zeroed() };
+        src.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+        src.header.size = std::mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32;
+        src.header.adapterId = p.sourceInfo.adapterId;
+        src.header.id = p.sourceInfo.id;
+        // SAFETY: `src` is a correctly sized and typed request packet.
+        if unsafe { DisplayConfigGetDeviceInfo(&mut src.header) } != 0
+            || wide(&src.viewGdiDeviceName) != gdi_name
+        {
+            continue;
+        }
+        // SAFETY: as above.
+        let mut color: DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO = unsafe { std::mem::zeroed() };
+        color.header.r#type = DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO;
+        color.header.size = std::mem::size_of::<DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO>() as u32;
+        color.header.adapterId = p.targetInfo.adapterId;
+        color.header.id = p.targetInfo.id;
+        // SAFETY: `color` is a correctly sized and typed request packet.
+        if unsafe { DisplayConfigGetDeviceInfo(&mut color.header) } != 0 {
+            return false;
+        }
+        // SAFETY: the union is a bitfield over one u32; reading `value` is always valid.
+        let bits = unsafe { color.Anonymous.value };
+        return advanced_color_is_hdr(bits);
+    }
+    false
+}
+
+/// `DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO` bits: 0 supported, 1 enabled, 2 wide colour enforced
+/// (Auto Color Management on SDR), 3 force disabled.
+fn advanced_color_is_hdr(bits: u32) -> bool {
+    let supported = bits & 0b0001 != 0;
+    let enabled = bits & 0b0010 != 0;
+    let wide_enforced = bits & 0b0100 != 0;
+    supported && enabled && !wide_enforced
 }
 
 unsafe extern "system" fn main_subclass(
@@ -105,6 +226,10 @@ unsafe extern "system" fn main_subclass(
     let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
     if matches!(msg, WM_WINDOWPOSCHANGED | WM_MOVE | WM_SIZE | WM_SHOWWINDOW) {
         sync();
+    }
+    // Resolution, monitor layout or HDR toggled in Windows settings.
+    if matches!(msg, WM_DISPLAYCHANGE | WM_SETTINGCHANGE) {
+        refresh_display_hdr(true);
     }
     r
 }
@@ -220,6 +345,7 @@ impl VideoSurface for WindowsSurface {
             return Err(e);
         }
         self.child = hwnd as isize;
+        refresh_display_hdr(true);
         Ok(())
     }
 
@@ -257,5 +383,20 @@ impl VideoSurface for WindowsSurface {
             unsafe { DestroyWindow(self.child as HWND) };
             self.child = 0;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::advanced_color_is_hdr;
+
+    #[test]
+    fn advanced_color_bits() {
+        assert!(advanced_color_is_hdr(0b0011));
+        // Auto Color Management on an SDR panel.
+        assert!(!advanced_color_is_hdr(0b0111));
+        // HDR capable but off.
+        assert!(!advanced_color_is_hdr(0b0001));
+        assert!(!advanced_color_is_hdr(0));
     }
 }

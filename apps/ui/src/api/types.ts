@@ -351,6 +351,8 @@ export interface SessionStats {
   rtxHdrRequested?: boolean;
   /** RTX HDR is turning this SDR video into HDR; null unless requested and known. */
   rtxHdrActive?: boolean | null;
+  /** RTX HDR is on in settings but held off because the window is on an SDR monitor. Missing on older builds. */
+  rtxHdrSdrDisplay?: boolean;
   /** e.g. "bt.709", "bt.2020". */
   primaries: string | null;
   bitDepth: number | null;
