@@ -102,8 +102,8 @@ Hanken Grotesk 400/500/600/700 (UI), Geist Mono 400/500 (diagnostics, keys, URLs
 - Spacing 4 px base: xs 4 · sm 8 · md 12 · lg 16 · xl 24 (32, 40 for page padding).
 - Radius: 4 badges · 6 buttons, inputs, rows · 8–10 tiles, menus · 12 panels, modals, popovers.
   Round only for status dots and the scrub thumb.
-- Density (`theme.other.density`): channel row 44 / 64 / 88, guide row 48 / 64 / 96, logo 48×24 / 72×36 /
-  112×56, control 32 / 36 / 56 (compact / comfortable / 10-foot).
+- Density (`theme.other.density`): channel row 44 / 64 / 88, guide row 68 / 84 / 120, logo 48×24 / 72×36 /
+  112×56, guide logo 72×44 / 88×56 / 108×72 (bare, no plate), control 32 / 36 / 56 (compact / comfortable / 10-foot).
 
 ## 5. Focus and motion
 - Ring `--dl-focus-ring` (2 px accent + 6 px glow). On primary fills: 2 px surface gap + 2 px accent. On
@@ -207,8 +207,8 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   with LIVE and a 2 px progress bar for live playback, plus hover controls (mute, mini window, fullscreen).
   The hero describes the active playback, and its primary action is *Full screen* (OS fullscreen).
   With no active playback the hero follows grid focus after a 300 ms dwell. Below: a 52 px toolbar (day stepper with
-  menu, Now, channel filter, 3/6/12/24 h). 40 px sticky time header · 200 px sticky channel column · 64 px
-  rows · red now line + time pill. Blocks: past+archive `--dl-guide-past` + history icon · past no archive
+  menu, Now, channel filter, 3/6/12/24 h). 40 px sticky time header · 224 px sticky channel column · 84 px
+  rows (title, description line when present, time) · red now line + time pill. Blocks: past+archive `--dl-guide-past` + history icon · past no archive
   dashed, disabled text · now `--dl-guide-now` + 10% fill + 2 px bar · future `--dl-guide-future` ·
   scheduled red dot · focused = `--dl-guide-focus`, no ring.
 - **Player**: full-bleed video, top scrim + back pill top-left named after where the player was opened from

@@ -118,12 +118,12 @@ const GuideControls = memo(function GuideControls({ span, onSpan, groupId, group
   );
 });
 
-const GuideLabel = memo(function GuideLabel({ ch, row, y, h }: { ch: Channel | undefined; row: number; y: number; h: number }) {
+const GuideLabel = memo(function GuideLabel({ ch, row, y, h, logoW, logoH }: { ch: Channel | undefined; row: number; y: number; h: number; logoW: number; logoH: number }) {
   return (
     <div className={classes.label} style={{ top: y, height: h }} aria-hidden={!ch} data-tune={ch ? row : undefined} title={ch ? t('guide.tune') : undefined}>
       {ch && (
         <>
-          <ChannelLogo channelId={ch.id} name={ch.name} src={ch.logo} density="compact" />
+          <ChannelLogo channelId={ch.id} name={ch.name} src={ch.logo} size={[logoW, logoH]} bare />
           <span className={classes.labelText}>
             <span className={classes.labelNumber}>{ch.number}</span>
             <span className={classes.labelName}>{ch.name}</span>
@@ -215,6 +215,7 @@ export function GuidePage() {
   const [focus, setFocusState] = useState<Focus>(restore?.focus ?? { row: 0, t: nowEpoch() });
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollPos = useRef({ left: 0, top: 0 });
+  const lastSl = useRef<number | null>(null);
   const raf = useRef(0);
   const cached = useRef<RenderRange | null>(null);
   const pendingFocus = useRef(false);
@@ -224,6 +225,7 @@ export function GuidePage() {
   useInteractive(!!counts.data);
   const backDays = Math.max(1, sources.data?.[0]?.archiveDays ?? 1);
   const rowH = dl.density[density].guideRow;
+  const [logoW, logoH] = dl.density[density].guideLogo;
   const scale = density === 'tv' ? dl.density.tv.typeScale : 1;
   const COL_W = Math.round(dl.guide.channelColumn * scale);
   const HEADER_H = Math.round(dl.guide.headerHeight * scale);
@@ -242,6 +244,12 @@ export function GuidePage() {
   // Recompute the render range only when the visible area leaves the cached one.
   const update = useCallback(() => {
     raf.current = 0;
+    // Blocks size their sticky text to their visible part through this CSS var (no React render).
+    const el = scrollRef.current;
+    if (el && lastSl.current !== scrollPos.current.left) {
+      lastSl.current = scrollPos.current.left;
+      el.style.setProperty('--gsl', `${lastSl.current}px`);
+    }
     const vis = visibleRange(geo, viewport(), totalRows);
     setLeftTime((prev) => (startOfDay(prev) === startOfDay(vis.t0) ? prev : vis.t0));
     if (!isCovered(cached.current, vis)) {
@@ -553,7 +561,7 @@ export function GuidePage() {
     for (let row = range.r0; row <= range.r1; row++) {
       const y = row * rowH;
       const ch = rowChannel.get(row);
-      labels.push(<GuideLabel key={`l${row}`} ch={ch} row={row} y={y} h={rowH} />);
+      labels.push(<GuideLabel key={`l${row}`} ch={ch} row={row} y={y} h={rowH} logoW={logoW} logoH={logoH} />);
       if (!ch) {
         fillers.push(
           <div key={`s${row}`} className={classes.skeleton} style={{ top: y, height: rowH, left: timeToX(geo, range.t0 + (range.t1 - range.t0) / 3), width: 320 }}>

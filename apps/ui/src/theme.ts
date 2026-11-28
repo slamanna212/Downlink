@@ -39,11 +39,11 @@ const dlOther = {
     /** Channel-change overlay (player): fades this long after the last zap or digit. */
     zapOverlayMs: 3000,
     density: {
-      compact: { channelRow: 44, guideRow: 48, logo: [48, 24] as [number, number], control: 32 },
-      comfortable: { channelRow: 64, guideRow: 64, logo: [72, 36] as [number, number], control: 36 },
-      tv: { channelRow: 88, guideRow: 96, logo: [112, 56] as [number, number], control: 56, typeScale: 1.25, focusRing: 3 },
+      compact: { channelRow: 44, guideRow: 68, logo: [48, 24] as [number, number], guideLogo: [72, 44] as [number, number], control: 32 },
+      comfortable: { channelRow: 64, guideRow: 84, logo: [72, 36] as [number, number], guideLogo: [88, 56] as [number, number], control: 36 },
+      tv: { channelRow: 88, guideRow: 120, logo: [112, 56] as [number, number], guideLogo: [108, 72] as [number, number], control: 56, typeScale: 1.25, focusRing: 3 },
     },
-    guide: { channelColumn: 200, headerHeight: 40, tickMinutes: 30 },
+    guide: { channelColumn: 224, headerHeight: 40, tickMinutes: 30 },
     multiview: { maxTiles: 4, maxTilesCapable: 9, tileGap: 4, layouts: ['2-up', '2x2', '1+3', '3x3'] as const },
     buttonSizes: {
       xs: { h: 28, fz: 12, px: 10, icon: 14, gap: 6, r: 4 },

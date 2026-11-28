@@ -17,11 +17,13 @@ export interface ChannelLogoProps {
   bare?: boolean;
   /** Fit the image to the space reserved by the parent. */
   fill?: boolean;
+  /** Explicit [width, height] in px; overrides the density size. */
+  size?: [number, number];
 }
 
-export function ChannelLogo({ channelId, name, src, density, bare, fill }: ChannelLogoProps) {
+export function ChannelLogo({ channelId, name, src, density, bare, fill, size: fixed }: ChannelLogoProps) {
   const current = useUiStore((s) => s.density);
-  const [w, h] = dl.density[density ?? current].logo;
+  const [w, h] = fixed ?? dl.density[density ?? current].logo;
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const showImage = !!src && failedSrc !== src;
 

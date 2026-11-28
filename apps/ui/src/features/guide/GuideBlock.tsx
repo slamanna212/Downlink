@@ -38,11 +38,11 @@ export const GuideBlock = memo(function GuideBlock({ p, row, state, x, y, w, h, 
       data-row={row}
       data-state={state}
       data-focused={focused || undefined}
-      style={{ left: x, top: y, width: w, height: h }}
+      style={{ left: x, top: y, width: w, height: h, ['--bend' as string]: `${x + w}px` }}
     >
       <div className={classes.face}>
         {state === 'now' && <div className={classes.fill} style={{ width: `${pct * 100}%` }} />}
-        <div className={classes.inner} style={{ maxWidth: Math.max(w - 8, 0) }}>
+        <div className={classes.inner}>
           <div className={classes.blockTitle}>
             {state === 'past-archive' && (
               <span className={classes.histIcon}>
@@ -55,6 +55,7 @@ export const GuideBlock = memo(function GuideBlock({ p, row, state, x, y, w, h, 
             {p.isFinale && w > 260 && <span className={classes.newTag}>{t('badge.finale')}</span>}
             {p.isNew && w > 220 && <span className={classes.newTag}>{t('badge.new')}</span>}
           </div>
+          {p.description && <div className={classes.blockDesc}>{p.description}</div>}
           <div className={classes.blockTime}>
             {code && w > 150 && <span className={classes.blockCode}>{code}</span>}
             {formatRange(p.startUtc, p.endUtc)}

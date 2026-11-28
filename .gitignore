@@ -12,3 +12,6 @@ apps/desktop/gen/
 
 # pnpm may create a local store when the home store is on another filesystem
 .pnpm-store/
+
+# Playwright MCP screenshots/snapshots
+.playwright-mcp/
