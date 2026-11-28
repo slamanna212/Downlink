@@ -780,12 +780,17 @@ export interface SportsTeam {
 /** Motorsport grouping (SPORTS §2.2); display names come from `t('sports.group.*')`. */
 export type SportsGroup = 'open_wheel' | 'stock_car' | 'sports_car' | 'motorcycle' | 'rally' | 'drag_dirt';
 
+/** Catalog sport (picker tabs); display names come from `t('sports.sport.*')`. */
+export type SportsSport = 'football' | 'basketball' | 'hockey' | 'baseball' | 'soccer' | 'motorsport' | 'other';
+
 export interface SportsLeague {
   key: string;
   name: string;
   kind: 'team' | 'motorsport';
   /** Motorsport only. A string so a newer catalog group never breaks the UI. */
   group: SportsGroup | (string & {}) | null;
+  /** Settings picker tab. A string so a newer catalog sport never breaks the UI. */
+  sport: SportsSport | (string & {});
   teams: SportsTeam[];
 }
 

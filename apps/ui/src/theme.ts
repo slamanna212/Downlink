@@ -174,6 +174,7 @@ export const cssVariablesResolver: CSSVariablesResolver = () => ({
     '--dl-player-scrim': 'linear-gradient(to top, rgb(5 6 7 / 0.94), rgb(5 6 7 / 0.8) 45%, rgb(5 6 7 / 0))',
     '--dl-player-top-scrim': 'linear-gradient(to bottom, rgb(5 6 7 / 0.7), rgb(5 6 7 / 0))',
     '--dl-tile-scrim': 'linear-gradient(to top, rgb(5 6 7 / 0.85), rgb(5 6 7 / 0))', // guide mini player controls
+    '--dl-art-hover': 'rgb(5 6 7 / 0.35)',      // home continue card: wash behind the hover play disc
     // window chrome
     '--dl-titlebar-close': '#E5484D', // close button hover only
     '--dl-on-titlebar-close': '#FFFFFF',

@@ -70,7 +70,8 @@ catch-up, playing row, links) · `--dl-on-accent #120A33` (text on accent fill, 
 - `--dl-titlebar-close` (`#E5484D`) + `--dl-on-titlebar-close`: the title bar's close button on hover only.
 - `--dl-scrollbar-thumb` (ink 22%) / `--dl-scrollbar-thumb-hover` (36%): overlay scrollbars (global.css).
 - `--dl-guide-focus` (`#2A3140`): the focused guide block (no ring).
-- `--dl-hero-scrim`: fades hero art into surface-0 (left, bottom, top). Home, Guide and Recordings heroes only.
+- `--dl-hero-scrim`: fades hero art into surface-0 (left, bottom, top). Guide and Recordings heroes only.
+- `--dl-art-hover` (ink 35%): the wash behind the play disc on a hovered or focused home continue card.
 - `--dl-player-scrim` / `--dl-player-top-scrim`: the player overlay's bottom and top scrims.
   `--dl-tile-scrim`: the guide mini player's control strip.
 - Programme art fallback (no picture): a radial + linear gradient tinted with the channel's logo palette
@@ -172,16 +173,24 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
   under the strip (nothing interactive in it); other pages get it as its own row. Hidden in fullscreen and
   the mini window.
 - **Scrollbars**: overlay style everywhere: no track or arrows, 6 px thumb inset 3 px, 10 px and brighter on hover.
-- **Home**: 460 px hero for the first continue-watching item: programme art (or gradient) under
-  `--dl-hero-scrim`, caps label + search field top, then LIVE + logo + slot line, 72/800 title, episode line +
-  badges, two-line description, progress with minutes left, Watch live (primary) · From start · More info.
-  Then *Pick up where you left off* (16:9 art cards, tag top-left, 3 px progress), *On now in your favorites*
-  (96 px art header, logo plate on the edge, LIVE, progress, next), *Recently watched* (148 px logo tiles).
-  *Your sports* sits above *On now* (SPORTS §6): match cards (surface-1, logo plate, LIVE / LIKELY LIVE /
-  REPLAY badge, title, team or series label with an outline session badge, channel and start time or
-  minutes left, 2 px progress while on air). On air plays; upcoming opens the details modal. The row is
-  hidden when nothing is followed or nothing matches. Settings → Sports reuses the card for its preview.
-  Four across from 1100 px.
+- **Home**: no hero. Page header (28/650 *Home* + search field, under the title bar strip), then
+  *Continue watching* (count, prev/next icon buttons when it overflows): an even row of 16:9 art cards,
+  four across from 1100 px (three from 700, else two), scroll-snapped and paged by the arrows, up to
+  nine. Card one is the last thing played. Art: badge top-left (LIVE, CATCH-UP, or a MOVIE / EPISODE /
+  RECORDING tag), channel logo bottom-left for live and catch-up, 3 px progress; hover or focus shows a
+  52 px accent play disc over `--dl-art-hover`. Title 15/600 and subtitle 13 text-dim below.
+  *Your sports* (SPORTS §6) next, up to nine time-first match cards three across from 1100 px. Then
+  *On now in your favorites* (96 px art header, logo plate on the edge, LIVE, progress, next), *Recently
+  watched* (148 px logo tiles).
+- **Sports match card** (time-first ticket, 84 px, surface-1): a 96 px time column on the left (on air:
+  LIVE / LIKELY / REPLAY badge over the time left, or "On today" for event channels; upcoming: start
+  time 19/650 over the day), then the programme title 15/600 (subtitle after a dot in text-2, REPLAY
+  badge when an upcoming broadcast is a replay) over a meta line (small channel logo, followed team or
+  series, session, channel). 2 px progress along the bottom while on air. When other channels carry
+  the event, a +N default button on the right opens *Choose a stream* (each channel with its logo,
+  "Listed in guide" / "Same event", quality badge); picking one plays it. On air plays; upcoming opens
+  the details modal. Settings → Sports reuses the card in its preview, grouped On now / Later today /
+  Tomorrow beside a 120 px label column, two across.
 - **Programme art** (`programme_art`): the guide's own `<icon>` first, then the server's programme details,
   then TMDB (backdrop before poster). The pick is cached per title in core; images in the image cache.
 - **Rail** 224 expanded / 68 collapsed / 96 10-foot. Same size on every route for a given density; it collapses only when the user toggles it. Order:

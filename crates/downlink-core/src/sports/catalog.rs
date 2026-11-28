@@ -21,6 +21,10 @@ pub const GROUPS: [&str; 6] = [
     "drag_dirt",
 ];
 
+/// Team-league sports, in the order the settings picker lists them. Motorsport leagues are
+/// always `motorsport`; a team league without a `sport` is `other`.
+pub const SPORTS: [&str; 5] = ["football", "basketball", "hockey", "baseball", "soccer"];
+
 /// Session types (§2.3), in the order the settings page lists them.
 pub const SESSIONS: [&str; 4] = ["race", "qualifying", "practice", "shows"];
 
@@ -71,6 +75,8 @@ struct RawLeague {
     kind: String,
     #[serde(default)]
     group: Option<String>,
+    #[serde(default)]
+    sport: Option<String>,
     #[serde(default)]
     tokens: Vec<String>,
     #[serde(default)]
@@ -148,6 +154,8 @@ pub struct League {
     pub name: String,
     pub kind: Kind,
     pub group: Option<String>,
+    /// One of [`SPORTS`], `motorsport`, or `other`.
+    pub sport: String,
     pub tokens: Vec<Phrase>,
     pub context: Vec<Phrase>,
     pub events: Vec<Phrase>,
@@ -217,6 +225,14 @@ pub fn parse(text: &str) -> std::result::Result<Catalog, String> {
                 if l.group.is_some() {
                     return Err(format!("team league `{}` has a group", l.key));
                 }
+                if let Some(s) = l.sport.as_deref()
+                    && !SPORTS.contains(&s)
+                {
+                    return Err(format!("league `{}` has unknown sport `{s}`", l.key));
+                }
+            }
+            "motorsport" if l.sport.as_deref().is_some_and(|s| s != "motorsport") => {
+                return Err(format!("motorsport league `{}` has a sport", l.key));
             }
             "motorsport" => match l.group.as_deref() {
                 Some(g) if GROUPS.contains(&g) => {}
@@ -288,6 +304,11 @@ pub fn parse(text: &str) -> std::result::Result<Catalog, String> {
                 Kind::Motorsport
             },
             group: l.group.clone(),
+            sport: if l.kind == "team" {
+                l.sport.clone().unwrap_or_else(|| "other".to_owned())
+            } else {
+                "motorsport".to_owned()
+            },
             tokens: phrases(&l.tokens),
             context: phrases(&l.context),
             events: phrases(&l.events),
@@ -410,6 +431,7 @@ replay = ["Classic"]
             let l = c.league(k).unwrap_or_else(|| panic!("missing {k}"));
             assert_eq!(l.kind, Kind::Team, "{k}");
             assert!(!l.teams.is_empty(), "{k} has no teams");
+            assert!(SPORTS.contains(&l.sport.as_str()), "{k} has no sport");
         }
         for k in [
             "f1",
@@ -672,6 +694,31 @@ tokens = ["X"]
         )
         .unwrap_err();
         assert!(e.contains("no group"), "{e}");
+        let e = with(
+            r#"
+[[league]]
+key = "x"
+name = "X"
+kind = "team"
+sport = "curling"
+tokens = ["X"]
+"#,
+        )
+        .unwrap_err();
+        assert!(e.contains("unknown sport"), "{e}");
+        let e = with(
+            r#"
+[[league]]
+key = "x"
+name = "X"
+kind = "motorsport"
+group = "rally"
+sport = "soccer"
+tokens = ["X"]
+"#,
+        )
+        .unwrap_err();
+        assert!(e.contains("has a sport"), "{e}");
     }
 
     #[test]

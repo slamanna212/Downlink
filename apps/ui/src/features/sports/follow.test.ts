@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { Channel, Programme, SportsFollow, SportsMatch } from '../../api/types';
 import { MOCK_SPORTS_CATALOG } from '../../api/ipc.mock.sports';
+import { startOfDay } from '../../lib/time';
 import {
   allGames,
+  catalogSports,
+  groupByWhen,
+  matchWhen,
+  pickerBlocks,
+  removeSession,
+  removeTeam,
   DEFAULT_SESSIONS,
   emptyFollow,
   filterTeams,
@@ -131,8 +138,8 @@ describe('catalog helpers', () => {
 
   it('puts unknown groups after the known ones', () => {
     const groups = motorsportGroups([
-      { key: 'x', name: 'X', kind: 'motorsport', group: 'hovercraft', teams: [] },
-      { key: 'f1', name: 'F1', kind: 'motorsport', group: 'open_wheel', teams: [] },
+      { key: 'x', name: 'X', kind: 'motorsport', group: 'hovercraft', sport: 'motorsport', teams: [] },
+      { key: 'f1', name: 'F1', kind: 'motorsport', group: 'open_wheel', sport: 'motorsport', teams: [] },
     ]);
     expect(groups.map((g) => g.group)).toEqual(['open_wheel', 'hovercraft']);
   });
@@ -217,5 +224,59 @@ describe('command center rank', () => {
     expect(f.priority).toEqual(['nfl:chi', 'nfl:gb', 'f1', 'epl']);
     expect(moveRank(f, MOCK_SPORTS_CATALOG, 'nfl:chi', -1)).toBe(f);
     expect(moveRank(f, MOCK_SPORTS_CATALOG, 'epl', 1)).toBe(f);
+  });
+});
+
+describe('preview time groups', () => {
+  // 10:00 in the display zone, so "later today" and "tomorrow" are unambiguous.
+  const at10 = startOfDay(NOW) + 10 * H;
+  it('buckets on air, later today, tomorrow and later days', () => {
+    expect(matchWhen(match(1, at10 - H, at10 + H), at10)).toBe('now');
+    expect(matchWhen(match(2, at10 + 2 * H, at10 + 3 * H), at10)).toBe('today');
+    expect(matchWhen(match(3, at10 + 24 * H, at10 + 25 * H), at10)).toBe('tomorrow');
+    expect(matchWhen(match(4, at10 + 48 * H, at10 + 49 * H), at10)).toBe('later');
+    // An event channel with no start is on now.
+    expect(matchWhen(match(5, null, null), at10)).toBe('now');
+  });
+
+  it('groups in order and leaves out empty groups', () => {
+    const groups = groupByWhen([match(3, at10 + 24 * H, at10 + 25 * H), match(1, at10 - H, at10 + H), match(6, at10 + 25 * H, at10 + 26 * H)], at10);
+    expect(groups.map((g) => g.when)).toEqual(['now', 'tomorrow']);
+    expect(groups[1]?.matches.map((m) => m.channel.id)).toEqual([3, 6]);
+  });
+});
+
+describe('add dialog', () => {
+  const leagues = MOCK_SPORTS_CATALOG.leagues;
+  it('lists sports in picker order', () => {
+    expect(catalogSports(leagues)).toEqual(['football', 'basketball', 'hockey', 'baseball', 'soccer', 'motorsport']);
+    expect(catalogSports([...leagues, { key: 'x', name: 'X', kind: 'team', group: null, sport: 'curling', teams: [] }]).at(-1)).toBe('curling');
+  });
+
+  it('filters by sport and by search', () => {
+    expect(pickerBlocks(leagues, 'soccer', '').map((b) => b.league.key)).toEqual(['mls', 'epl']);
+    // A team search keeps only leagues with a matching team, and only those teams.
+    const kraken = pickerBlocks(leagues, null, 'kraken');
+    expect(kraken.map((b) => b.league.key)).toEqual(['nhl']);
+    expect(kraken[0]?.teams.map((x) => x.key)).toEqual(['sea']);
+    // Naming the league keeps all of its teams; series match by name.
+    expect(pickerBlocks(leagues, null, 'nfl')[0]?.teams.length).toBe(leagues.find((l) => l.key === 'nfl')?.teams.length);
+    expect(pickerBlocks(leagues, null, 'formula 1').map((b) => b.league.key)).toEqual(['f1']);
+  });
+});
+
+describe('removing from the following list', () => {
+  it('unfollows the league when its last team goes', () => {
+    let f: SportsFollow = { ...emptyFollow(), leagues: { nfl: { teams: ['chi', 'gb'] } } };
+    f = removeTeam(f, 'nfl', 'chi');
+    expect(f.leagues).toEqual({ nfl: { teams: ['gb'] } });
+    expect(removeTeam(f, 'nfl', 'gb').leagues).toEqual({});
+  });
+
+  it('unfollows the series when its last session goes', () => {
+    let f: SportsFollow = { ...emptyFollow(), series: { f1: { sessions: ['race', 'qualifying'] } } };
+    f = removeSession(f, 'f1', 'race');
+    expect(f.series).toEqual({ f1: { sessions: ['qualifying'] } });
+    expect(removeSession(f, 'f1', 'qualifying').series).toEqual({});
   });
 });

@@ -139,9 +139,12 @@ export function addDays(epoch: Epoch, n: number): Epoch {
   return dayjs.tz(naive, zone).unix();
 }
 
+/** Calendar days from `now` to `epoch` in the display zone: 0 today, 1 tomorrow, -1 yesterday. */
+export const dayOffset = (epoch: Epoch, now: Epoch = nowEpoch()): number => Math.round((startOfDay(epoch) - startOfDay(now)) / 86400);
+
 /** "Today", "Tomorrow", "Yesterday" or "Thu 20 Nov". */
 export function dayLabel(epoch: Epoch, now: Epoch = nowEpoch()): string {
-  const diff = Math.round((startOfDay(epoch) - startOfDay(now)) / 86400);
+  const diff = dayOffset(epoch, now);
   if (diff === 0) return 'Today';
   if (diff === 1) return 'Tomorrow';
   if (diff === -1) return 'Yesterday';

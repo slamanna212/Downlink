@@ -8,6 +8,8 @@ import { SportsMatchCard, SportsMatchCardSkeleton } from './SportsMatchCard';
 import classes from './Sports.module.css';
 
 // Synthetic matches from the mock backend: live, likely live, an event channel, upcoming and a replay.
+// The card is the time-first ticket: time column, title, meta line, and a +N stream button when other
+// channels carry the event.
 const NOW = Math.floor(Date.now() / 1000);
 const BASE = Math.floor(NOW / 300) * 300;
 const follow = { ...mockSportsFollow(true), includeReplays: true, leagues: { nfl: { teams: ['chi'] }, epl: { teams: [] } } };
@@ -49,14 +51,14 @@ export const States: Story = {
     <Stack gap="xl">
       <StateRow title="on air">
         {(s) => (
-          <div style={{ width: 240 }}>
+          <div style={{ width: 440 }}>
             {s === 'loading' ? <SportsMatchCardSkeleton /> : <SportsMatchCard {...args} {...(demoStateProps(s) as object)} disabled={s === 'disabled'} />}
           </div>
         )}
       </StateRow>
       <StateRow title="upcoming">
         {(s) => (
-          <div style={{ width: 240 }}>
+          <div style={{ width: 440 }}>
             {s === 'loading' ? <SportsMatchCardSkeleton /> : <SportsMatchCard {...args} match={qualifying} {...(demoStateProps(s) as object)} disabled={s === 'disabled'} />}
           </div>
         )}

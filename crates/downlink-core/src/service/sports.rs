@@ -31,6 +31,7 @@ impl Service {
                     name: l.name.clone(),
                     kind: l.kind.as_str().to_owned(),
                     group: l.group.clone(),
+                    sport: l.sport.clone(),
                     teams: l
                         .teams
                         .iter()

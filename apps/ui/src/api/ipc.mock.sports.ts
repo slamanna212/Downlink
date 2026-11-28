@@ -3,34 +3,34 @@
 import type { Channel, Programme, SportsCatalog, SportsFollow, SportsLeague, SportsMatch, SportsSession, SportsTeam } from './types';
 
 const team = (key: string, name: string, short: string, abbr: string): SportsTeam => ({ key, name, short, abbr });
-const teamLeague = (key: string, name: string, teams: SportsTeam[]): SportsLeague => ({ key, name, kind: 'team', group: null, teams });
-const series = (key: string, name: string, group: string): SportsLeague => ({ key, name, kind: 'motorsport', group, teams: [] });
+const teamLeague = (key: string, name: string, sport: string, teams: SportsTeam[]): SportsLeague => ({ key, name, kind: 'team', group: null, sport, teams });
+const series = (key: string, name: string, group: string): SportsLeague => ({ key, name, kind: 'motorsport', group, sport: 'motorsport', teams: [] });
 
 export const MOCK_SPORTS_CATALOG: SportsCatalog = {
   sessions: ['race', 'qualifying', 'practice', 'shows'],
   leagues: [
-    teamLeague('nfl', 'NFL', [
+    teamLeague('nfl', 'NFL', 'football', [
       team('chi', 'Chicago Bears', 'Bears', 'CHI'), team('gb', 'Green Bay Packers', 'Packers', 'GB'),
       team('det', 'Detroit Lions', 'Lions', 'DET'), team('min', 'Minnesota Vikings', 'Vikings', 'MIN'),
       team('kc', 'Kansas City Chiefs', 'Chiefs', 'KC'), team('buf', 'Buffalo Bills', 'Bills', 'BUF'),
     ]),
-    teamLeague('mlb', 'MLB', [
+    teamLeague('mlb', 'MLB', 'baseball', [
       team('chc', 'Chicago Cubs', 'Cubs', 'CHC'), team('stl', 'St. Louis Cardinals', 'Cardinals', 'STL'),
       team('sea', 'Seattle Mariners', 'Mariners', 'SEA'), team('ath', 'Athletics', 'Athletics', 'ATH'),
     ]),
-    teamLeague('nba', 'NBA', [
+    teamLeague('nba', 'NBA', 'basketball', [
       team('bos', 'Boston Celtics', 'Celtics', 'BOS'), team('den', 'Denver Nuggets', 'Nuggets', 'DEN'),
       team('lal', 'Los Angeles Lakers', 'Lakers', 'LAL'), team('mia', 'Miami Heat', 'Heat', 'MIA'),
     ]),
-    teamLeague('nhl', 'NHL', [
+    teamLeague('nhl', 'NHL', 'hockey', [
       team('uta', 'Utah Mammoth', 'Mammoth', 'UTA'), team('sea', 'Seattle Kraken', 'Kraken', 'SEA'),
       team('lak', 'Los Angeles Kings', 'Kings', 'LAK'), team('nyr', 'New York Rangers', 'Rangers', 'NYR'),
     ]),
-    teamLeague('mls', 'MLS', [
+    teamLeague('mls', 'MLS', 'soccer', [
       team('atl', 'Atlanta United', 'Atlanta', 'ATL'), team('sd', 'San Diego FC', 'San Diego', 'SD'),
       team('sea', 'Seattle Sounders', 'Sounders', 'SEA'), team('clb', 'Columbus Crew', 'Crew', 'CLB'),
     ]),
-    teamLeague('epl', 'Premier League', [
+    teamLeague('epl', 'Premier League', 'soccer', [
       team('ars', 'Arsenal', 'Arsenal', 'ARS'), team('che', 'Chelsea', 'Chelsea', 'CHE'),
       team('liv', 'Liverpool', 'Liverpool', 'LIV'), team('sun', 'Sunderland', 'Sunderland', 'SUN'),
       team('hul', 'Hull City', 'Hull', 'HUL'), team('cov', 'Coventry City', 'Coventry', 'COV'),

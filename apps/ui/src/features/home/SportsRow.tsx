@@ -11,8 +11,8 @@ import classes from './Home.module.css';
 const HORIZON_HOURS = 48;
 
 /**
- * "Your sports" (SPORTS §6 phase 2): followed matches on now, then the next 48 hours, each card labeled
- * with the team or series it is for. Hidden entirely when nothing is followed or nothing matches.
+ * "Your sports" (SPORTS §6 phase 2): followed matches on now, then the next 48 hours, up to nine
+ * time-first cards three across. Hidden entirely when nothing is followed or nothing matches.
  */
 export function SportsRow() {
   const navigate = useNavigate();
@@ -31,7 +31,7 @@ export function SportsRow() {
         <button type="button" className={classes.link} onClick={() => void navigate('/multiview/sports')}>{t('command.sports.open')}</button>
         <button type="button" className={classes.link} onClick={() => void navigate('/settings/sports')}>{t('home.editSports')}</button>
       </div>
-      <div className={`${sports.grid} ${sports.homeGrid}`} data-testid="home-sports">
+      <div className={sports.homeGrid} data-testid="home-sports">
         {items.map((m) => (
           <SportsMatchCard key={`${m.channel.id}:${m.programme?.id ?? m.league}`} match={m} catalog={catalog.data} now={now} onSelect={select} onSelectChannel={selectChannel} />
         ))}

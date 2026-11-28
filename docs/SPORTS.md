@@ -23,7 +23,9 @@ code change.
 
 The header comment in `catalog.toml` is the format reference. In short:
 
-- **League:** `key`, `name`, `kind` (team | motorsport), `group` (motorsport), `tokens` (strong),
+- **League:** `key`, `name`, `kind` (team | motorsport), `group` (motorsport), `sport` (team leagues:
+  football | basketball | hockey | baseball | soccer; missing = other; motorsport leagues are always
+  `motorsport`; it only drives the settings picker tabs), `tokens` (strong),
   `context` (risky tokens that need league context), `events` (marquee aliases, strong),
   `exclude` (veto phrases, also used to hand off to a more specific series).
 - **Team:** `key`, `name` (strong), `short`, `abbr` (versus patterns only), `city` (weak),
@@ -111,15 +113,19 @@ that changes aliases or scoring takes effect at once, not at the next guide refr
 
 A new **Sports** section on the settings page, placed after Playback.
 
-- **Leagues.** One row per league with a switch. Turning a team league on expands a team picker:
-  a searchable chip grid of abbreviation + name, plus "All games" (the default when nothing is
-  picked).
-- **Motorsport.** Grouped by §2.2 group. Each series has a switch. A series that's on shows
-  session checkboxes (race, qualifying, practice, shows).
 - **Include replays.** Off by default.
-- **Preview.** "In your guide now": the next 24 hours of matches for the current selections, with
-  the matched team or series, the session, live or replay, the channel and the start time. It
-  exists for tuning, and phase 2's home row reuses the list component.
+- **Following.** Only what is followed is listed: one row per league or series with its name, sport
+  and team count, removable chips (teams, "All games", or sessions), Edit and Unfollow. Removing the
+  last team or session unfollows it. Empty: "Nothing followed yet."
+- **Add teams** (the section's primary) opens a dialog: search, sport tabs (All plus the catalog's
+  sports), and one block per league or series. A league block has an "All games" toggle and a grid
+  of team checkbox tiles; with All games on every tile shows checked, and picking one narrows the
+  league to that team. A series block has Follow plus session tiles (race, qualifying, practice,
+  shows; a newly followed series gets race, qualifying and practice). Edit opens the dialog
+  searched to that league.
+- **Command center order** (COMMAND_CENTER §3), then the **Preview**: "In your guide now", the next
+  24 hours of matches grouped On now / Later today / Tomorrow, using the same time-first match card as
+  the home row.
 
 Selections are stored as one JSON document in `app_kv` under `sports.follow`:
 

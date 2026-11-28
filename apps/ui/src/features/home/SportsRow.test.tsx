@@ -60,8 +60,8 @@ describe('home: Your sports', () => {
     // The Bears event channel and the live Bears game are on now; both come before the F1 qualifying.
     expect(cards[0]).toHaveAccessibleName(/^Watch /);
     expect(cards.at(-1)).toHaveAccessibleName(/^Details for /);
-    expect(within(row).getAllByText('Bears · NFL').length).toBeGreaterThan(0);
-    expect(within(row).getByText('Qualifying')).toBeInTheDocument();
+    expect(within(row).getAllByText(/^Bears · NFL/).length).toBeGreaterThan(0);
+    expect(within(row).getByText(/· Qualifying ·/)).toBeInTheDocument();
     expect(within(row).getAllByText('Live').length).toBeGreaterThan(0);
     // Replays stay out unless asked for.
     expect(within(row).queryByText('Replay')).not.toBeInTheDocument();
@@ -76,8 +76,11 @@ describe('home: Your sports', () => {
     expect(more).toHaveTextContent('+2');
     fireEvent.click(more);
     // jsdom leaves Mantine's open transition at display:none, so query hidden nodes too.
-    const menu = await screen.findByRole('menu', { hidden: true });
-    expect(within(menu).getByText('Also on')).toBeInTheDocument();
-    expect(await within(menu).findAllByRole('menuitem', { hidden: true })).toHaveLength(2);
+    const dialog = await screen.findByRole('dialog', { name: /Choose a stream/, hidden: true });
+    // The guide's pick first, then the two others.
+    const rows = within(dialog).getAllByRole('listitem', { hidden: true });
+    expect(rows).toHaveLength(3);
+    expect(within(rows[0]!).getByText('Listed in guide')).toBeInTheDocument();
+    expect(within(rows[1]!).getByText('Same event')).toBeInTheDocument();
   });
 });

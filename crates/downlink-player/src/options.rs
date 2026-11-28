@@ -356,6 +356,8 @@ impl Preferences {
 ///   FFmpeg's non-bit-exact shortcuts and skips the H.264 loop filter on non-key frames, at some
 ///   cost in picture quality. Both are ignored by hardware decoders.
 pub const PERFORMANCE_OPTIONS: &[(&str, &str)] = &[
+    // Let the decoder skip late frames as well as letting the renderer drop them.
+    ("framedrop", "decoder+vo"),
     ("scale", "bilinear"),
     ("dscale", "bilinear"),
     ("cscale", "bilinear"),

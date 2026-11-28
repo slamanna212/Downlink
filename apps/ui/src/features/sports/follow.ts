@@ -1,7 +1,7 @@
 // Pure helpers for the sports follow document and match lists (SPORTS §3, §6). No React, no IPC, so the
 // toggling rules, session defaults and home-row ordering are unit-tested on their own.
 import type { SportsCatalog, SportsFollow, SportsGroup, SportsLeague, SportsMatch, SportsSession, SportsTeam } from '../../api/types';
-import { isLiveNow } from '../../lib/time';
+import { dayOffset, isLiveNow } from '../../lib/time';
 
 /** Race, qualifying and practice are on for a newly followed series; shows are off (SPORTS §2.3). */
 export const DEFAULT_SESSIONS: readonly SportsSession[] = ['race', 'qualifying', 'practice'];
@@ -167,7 +167,7 @@ export function followLabel(m: SportsMatch, catalog: SportsCatalog | undefined):
  * Home row content (SPORTS §6 phase 2): what is on now, then what starts within `horizon` seconds,
  * on-air first. One card per channel + programme (a programme matched for two leagues shows once).
  */
-export function homeSportsItems(list: SportsMatch[], now: number, horizon: number, limit = 12): SportsMatch[] {
+export function homeSportsItems(list: SportsMatch[], now: number, horizon: number, limit = 9): SportsMatch[] {
   const seen = new Set<string>();
   const out: SportsMatch[] = [];
   for (const m of sortMatches(list, now)) {
@@ -180,4 +180,73 @@ export function homeSportsItems(list: SportsMatch[], now: number, horizon: numbe
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/** Which time group a match falls in (settings preview): on air, later today, tomorrow, or a later day. */
+export type MatchWhen = 'now' | 'today' | 'tomorrow' | 'later';
+
+export function matchWhen(m: SportsMatch, now: number): MatchWhen {
+  if (onAirNow(m, now)) return 'now';
+  const days = dayOffset(matchStart(m) ?? now, now);
+  return days <= 0 ? 'today' : days === 1 ? 'tomorrow' : 'later';
+}
+
+/** Sorted matches split into time groups, in order; empty groups are left out. */
+export function groupByWhen(list: SportsMatch[], now: number): { when: MatchWhen; matches: SportsMatch[] }[] {
+  const order: MatchWhen[] = ['now', 'today', 'tomorrow', 'later'];
+  const by = new Map<MatchWhen, SportsMatch[]>();
+  for (const m of sortMatches(list, now)) {
+    const w = matchWhen(m, now);
+    by.set(w, [...(by.get(w) ?? []), m]);
+  }
+  return order.filter((w) => by.has(w)).map((when) => ({ when, matches: by.get(when) ?? [] }));
+}
+
+/** Picker tab order (SPORTS §2): team sports in catalog sport order, motorsport, then anything newer. */
+export const SPORT_ORDER: readonly string[] = ['football', 'basketball', 'hockey', 'baseball', 'soccer', 'motorsport', 'other'];
+
+/** The sports present in the catalog, in picker order (unknown sports after, in catalog order). */
+export function catalogSports(leagues: SportsLeague[]): string[] {
+  const present = [...new Set(leagues.map((l) => l.sport))];
+  return [...SPORT_ORDER.filter((s) => present.includes(s)), ...present.filter((s) => !SPORT_ORDER.includes(s))];
+}
+
+/** One league block in the add dialog: the league, and the teams that match the search. */
+export interface PickerBlock {
+  league: SportsLeague;
+  teams: SportsTeam[];
+}
+
+/**
+ * Add-dialog content: leagues in `sport` (or all), filtered by `query`. A query that names the league
+ * keeps every team; otherwise only matching teams show, and leagues with none drop out. Series match
+ * on their name only.
+ */
+export function pickerBlocks(leagues: SportsLeague[], sport: string | null, query: string): PickerBlock[] {
+  const q = query.trim().toLowerCase();
+  const out: PickerBlock[] = [];
+  for (const league of leagues) {
+    if (sport && league.sport !== sport) continue;
+    const leagueHit = !q || league.name.toLowerCase().includes(q) || league.key.toLowerCase() === q;
+    if (league.kind === 'motorsport') {
+      if (leagueHit) out.push({ league, teams: [] });
+      continue;
+    }
+    const teams = leagueHit ? league.teams : filterTeams(league.teams, q);
+    if (teams.length) out.push({ league, teams });
+  }
+  return out;
+}
+
+/** Removes one followed team; removing the last one unfollows the league (the chip list never shows "all"). */
+export function removeTeam(f: SportsFollow, league: string, team: string): SportsFollow {
+  const current = f.leagues[league]?.teams ?? [];
+  const teams = current.filter((x) => x !== team);
+  return teams.length ? { ...f, leagues: { ...f.leagues, [league]: { teams } } } : setLeagueFollowed(f, league, false);
+}
+
+/** Removes one session; removing the last one unfollows the series. */
+export function removeSession(f: SportsFollow, series: string, session: SportsSession): SportsFollow {
+  const sessions = (f.series[series]?.sessions ?? []).filter((x) => x !== session);
+  return sessions.length ? { ...f, series: { ...f.series, [series]: { sessions } } } : setSeriesFollowed(f, series, false);
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Checkbox, Switch, TextInput } from '@mantine/core';
-import { IconArrowDown, IconArrowUp, IconSearch } from '@tabler/icons-react';
+import { Modal, SegmentedControl, Switch, TextInput } from '@mantine/core';
+import { IconArrowDown, IconArrowUp, IconPlus, IconSearch, IconTrash } from '@tabler/icons-react';
 import { useSetSportsFollow, useSportsCatalog, useSportsFollow } from '../../api/queries';
 import type { SportsCatalog, SportsFollow, SportsLeague, SportsSession } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
@@ -12,24 +12,31 @@ import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { t, type MessageKey } from '../../lib/i18n';
 import {
   allGames,
-  filterTeams,
+  catalogSports,
   GROUP_ORDER,
-  motorsportGroups,
+  groupByWhen,
+  type MatchWhen,
   moveRank,
+  pickerBlocks,
   rankEntries,
   type RankEntry,
+  removeSession,
+  removeTeam,
   setIncludeReplays,
   setLeagueFollowed,
   setSeriesFollowed,
   SESSION_ORDER,
+  SPORT_ORDER,
   sortMatches,
   toggleSession,
   toggleTeam,
 } from '../sports/follow';
+import { FollowChip, PickerTile } from '../sports/FollowChip';
 import { SportsMatchCard } from '../sports/SportsMatchCard';
 import { TeamChip } from '../sports/TeamChip';
 import { useFollowedMatches } from '../sports/useFollowedMatches';
 import { useSelectChannel, useSelectMatch } from '../sports/useSelectMatch';
+import { dayLabel } from '../../lib/time';
 import sports from '../sports/Sports.module.css';
 import { Section } from './Section';
 
@@ -40,90 +47,163 @@ const sessionLabel = (s: SportsSession) => t(`sports.session.${s}`);
 export const groupLabel = (group: string): string =>
   (GROUP_ORDER as readonly string[]).includes(group) ? t(`sports.group.${group}` as MessageKey) : t('sports.group.other');
 
+export const sportLabel = (sport: string): string => t(`sports.sport.${SPORT_ORDER.includes(sport) ? sport : 'other'}` as MessageKey);
+
 function teamSummary(teams: string[], league: SportsLeague): string {
   const known = teams.filter((k) => league.teams.some((x) => x.key === k)).length;
   if (known === 0) return t('sports.league.allGames');
   return known === 1 ? t('sports.league.oneTeam') : t('sports.league.teams', { n: known });
 }
 
-/** Searchable chip grid of a followed league's teams, led by "All games" (on while no team is picked). */
-function TeamPicker({ league, teams, follow, update }: { league: SportsLeague; teams: string[]; follow: SportsFollow; update: Update }) {
-  const [query, setQuery] = useState('');
-  const shown = filterTeams(league.teams, query);
+/** Leagues and series the follow names that the catalog still knows, in catalog order. */
+const followedLeagues = (catalog: SportsCatalog, f: SportsFollow): SportsLeague[] =>
+  catalog.leagues.filter((l) => (l.kind === 'motorsport' ? !!f.series[l.key] : !!f.leagues[l.key]));
+
+/** One followed league or series: its name, removable chips (teams or sessions), Edit and Unfollow. */
+function FollowRow({ league, follow, update, onEdit }: { league: SportsLeague; follow: SportsFollow; update: Update; onEdit: () => void }) {
+  const series = league.kind === 'motorsport';
+  const teamKeys = follow.leagues[league.key]?.teams ?? [];
+  const teams = league.teams.filter((x) => teamKeys.includes(x.key));
+  const sessions = SESSION_ORDER.filter((s) => follow.series[league.key]?.sessions.includes(s));
+  const meta = series ? sportLabel('motorsport') : t('sports.following.meta', { sport: sportLabel(league.sport), detail: teamSummary(teamKeys, league) });
+  const unfollow = () => update(series ? setSeriesFollowed(follow, league.key, false) : setLeagueFollowed(follow, league.key, false));
   return (
-    <div className={sports.picker} role="group" aria-label={t('sports.teams.label', { league: league.name })}>
-      {league.teams.length > 8 && (
-        <TextInput
-          className={sports.search}
-          aria-label={t('sports.teams.search')}
-          placeholder={t('sports.teams.search')}
-          leftSection={<Icon icon={IconSearch} size={16} />}
-          value={query}
-          onChange={(e) => setQuery(e.currentTarget.value)}
-        />
-      )}
-      <div className={sports.chips}>
-        <TeamChip label={t('sports.league.allGames')} pressed={teams.length === 0} onToggle={() => update(allGames(follow, league.key))} />
-        {shown.map((team) => (
-          <TeamChip
-            key={team.key}
-            abbr={team.abbr}
-            label={team.short}
-            pressed={teams.includes(team.key)}
-            onToggle={() => update(toggleTeam(follow, league.key, team.key))}
-          />
-        ))}
+    <div className={sports.followRow}>
+      <div className={sports.followName}>
+        <div className={sports.followTitle}>{league.name}</div>
+        <div className={sports.followMeta}>{meta}</div>
       </div>
-      {shown.length === 0 && <p className={sports.muted}>{t('sports.teams.none', { query: query.trim() })}</p>}
+      <div className={sports.followChips}>
+        {series ? (
+          sessions.length ? (
+            sessions.map((s) => <FollowChip key={s} label={sessionLabel(s)} onRemove={() => update(removeSession(follow, league.key, s))} />)
+          ) : (
+            <span className={sports.followMeta}>{t('sports.series.noSessions')}</span>
+          )
+        ) : teams.length ? (
+          teams.map((x) => <FollowChip key={x.key} abbr={x.abbr} label={x.short} onRemove={() => update(removeTeam(follow, league.key, x.key))} />)
+        ) : (
+          <FollowChip label={t('sports.league.allGames')} onRemove={unfollow} />
+        )}
+      </div>
+      <div className={sports.followActions}>
+        <DLButton size="xs" variant="subtle" aria-label={t('sports.following.editAria', { name: league.name })} onClick={onEdit}>
+          {t('sports.following.edit')}
+        </DLButton>
+        <DLIconButton size="sm" variant="subtle" icon={IconTrash} label={t('sports.following.unfollow', { name: league.name })} onClick={unfollow} />
+      </div>
     </div>
   );
 }
 
-function LeagueRow({ league, follow, update }: { league: SportsLeague; follow: SportsFollow; update: Update }) {
-  const picked = follow.leagues[league.key];
+/**
+ * "Add teams and series": every league and series by sport, searchable. Teams and sessions are checkbox
+ * tiles; a league's "All games" follows every game, and picking a team while it is on narrows to that team.
+ */
+function AddTeamsModal({ opened, initialQuery, catalog, follow, update, onClose }: {
+  opened: boolean;
+  initialQuery: string;
+  catalog: SportsCatalog;
+  follow: SportsFollow;
+  update: Update;
+  onClose: () => void;
+}) {
   return (
-    <>
-      <SettingRow label={league.name} help={picked ? teamSummary(picked.teams, league) : t('sports.league.off')} wide>
-        <Switch
-          aria-label={t('sports.league.toggle', { league: league.name })}
-          checked={!!picked}
-          onChange={(e) => update(setLeagueFollowed(follow, league.key, e.currentTarget.checked))}
-        />
-      </SettingRow>
-      {/* Unfollowed leagues render no chips, so 40 leagues and ~175 teams stay cheap. */}
-      {picked && <TeamPicker league={league} teams={picked.teams} follow={follow} update={update} />}
-    </>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title={t('sports.picker.title')}
+      size={760}
+      withinPortal
+      classNames={{ content: sports.pickerContent, body: sports.pickerBody }}
+    >
+      {/* Keyed so each opening starts from its own search. */}
+      {opened && <Picker key={initialQuery} initialQuery={initialQuery} catalog={catalog} follow={follow} update={update} onClose={onClose} />}
+    </Modal>
   );
 }
 
-function SeriesRow({ series, sessions, follow, update }: { series: SportsLeague; sessions: SportsSession[]; follow: SportsFollow; update: Update }) {
-  const picked = follow.series[series.key];
-  const help = !picked
-    ? t('sports.league.off')
-    : picked.sessions.length
-      ? SESSION_ORDER.filter((s) => picked.sessions.includes(s)).map(sessionLabel).join(', ')
-      : t('sports.series.noSessions');
+function Picker({ initialQuery, catalog, follow, update, onClose }: { initialQuery: string; catalog: SportsCatalog; follow: SportsFollow; update: Update; onClose: () => void }) {
+  const [query, setQuery] = useState(initialQuery);
+  const [tab, setTab] = useState('all');
+  const sessions = SESSION_ORDER.filter((s) => catalog.sessions.includes(s));
+  const blocks = pickerBlocks(catalog.leagues, tab === 'all' ? null : tab, query);
+  const n = followedLeagues(catalog, follow).length;
   return (
     <>
-      <SettingRow label={series.name} help={help} wide>
-        <Switch
-          aria-label={t('sports.series.toggle', { series: series.name })}
-          checked={!!picked}
-          onChange={(e) => update(setSeriesFollowed(follow, series.key, e.currentTarget.checked))}
+      <div className={sports.pickerTop}>
+        <TextInput
+          data-autofocus
+          aria-label={t('sports.picker.search')}
+          placeholder={t('sports.picker.search')}
+          leftSection={<Icon icon={IconSearch} size={16} />}
+          value={query}
+          onChange={(e) => setQuery(e.currentTarget.value)}
         />
-      </SettingRow>
-      {picked && (
-        <div className={sports.sessions} role="group" aria-label={t('sports.series.sessions', { series: series.name })}>
-          {sessions.map((s) => (
-            <Checkbox
-              key={s}
-              label={sessionLabel(s)}
-              checked={picked.sessions.includes(s)}
-              onChange={() => update(toggleSession(follow, series.key, s))}
-            />
-          ))}
-        </div>
-      )}
+        <SegmentedControl
+          className={sports.pickerTabs}
+          aria-label={t('sports.picker.tabs')}
+          value={tab}
+          onChange={setTab}
+          data={[{ value: 'all', label: t('sports.picker.all') }, ...catalogSports(catalog.leagues).map((s) => ({ value: s, label: sportLabel(s) }))]}
+        />
+      </div>
+      <div className={sports.pickerScroll}>
+        {blocks.map(({ league, teams }) => {
+          if (league.kind === 'motorsport') {
+            const picked = follow.series[league.key];
+            return (
+              <div key={league.key} role="group" aria-label={league.name}>
+                <div className={sports.blockHead}>
+                  <span className={sports.blockName}>{league.name}</span>
+                  <span className={sports.blockSport}>{groupLabel(league.group ?? 'other')}</span>
+                  <TeamChip
+                    label={picked ? t('sports.picker.following') : t('sports.picker.follow')}
+                    pressed={!!picked}
+                    onToggle={() => update(setSeriesFollowed(follow, league.key, !picked))}
+                  />
+                </div>
+                <div className={sports.tiles}>
+                  {sessions.map((s) => (
+                    <PickerTile key={s} label={sessionLabel(s)} selected={!!picked?.sessions.includes(s)} onToggle={() => update(picked?.sessions.includes(s) ? removeSession(follow, league.key, s) : toggleSession(follow, league.key, s))} />
+                  ))}
+                </div>
+              </div>
+            );
+          }
+          const picked = follow.leagues[league.key];
+          const all = !!picked && picked.teams.length === 0;
+          return (
+            <div key={league.key} role="group" aria-label={league.name}>
+              <div className={sports.blockHead}>
+                <span className={sports.blockName}>{league.name}</span>
+                <span className={sports.blockSport}>{sportLabel(league.sport)}</span>
+                <TeamChip
+                  label={t('sports.picker.allGames')}
+                  pressed={all}
+                  onToggle={() => update(all ? setLeagueFollowed(follow, league.key, false) : allGames(follow, league.key))}
+                />
+              </div>
+              <div className={sports.tiles}>
+                {teams.map((x) => (
+                  <PickerTile
+                    key={x.key}
+                    abbr={x.abbr}
+                    label={x.name}
+                    selected={all || !!picked?.teams.includes(x.key)}
+                    onToggle={() => update(!all && picked?.teams.includes(x.key) ? removeTeam(follow, league.key, x.key) : toggleTeam(follow, league.key, x.key))}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {blocks.length === 0 && <p className={sports.muted}>{t('sports.picker.none')}</p>}
+      </div>
+      <div className={sports.pickerFoot}>
+        <span className={sports.pickerSummary}>{n === 1 ? t('sports.picker.summaryOne') : t('sports.picker.summary', { n })}</span>
+        <DLButton variant="filled" onClick={onClose}>{t('sports.picker.done')}</DLButton>
+      </div>
     </>
   );
 }
@@ -160,6 +240,10 @@ function RankList({ catalog, follow, update }: { catalog: SportsCatalog; follow:
 }
 
 const PREVIEW_HOURS = 24;
+
+/** A preview group's heading: On now, Later today, Tomorrow, or the day for anything later. */
+const whenLabel = (when: MatchWhen, start: number | null, now: number): string =>
+  when === 'later' ? dayLabel(start ?? now, now) : t(`sports.when.${when}`);
 const PREVIEW_FIRST = 24;
 
 /** "In your guide now": the next 24 h of matches, for tuning the picks above (SPORTS §3). */
@@ -184,9 +268,19 @@ function Preview() {
         <p className={sports.muted}>{t('sports.preview.empty')}</p>
       ) : (
         <>
-          <div className={sports.grid} data-testid="sports-preview">
-            {shown.map((m) => (
-              <SportsMatchCard key={`${m.channel.id}:${m.league}:${m.programme?.id ?? ''}`} match={m} catalog={catalog.data} now={now} onSelect={select} onSelectChannel={selectChannel} />
+          <div data-testid="sports-preview">
+            {groupByWhen(shown, now).map(({ when, matches: group }) => (
+              <div key={when} className={sports.whenGroup} role="group" aria-label={whenLabel(when, group[0]?.programme?.startUtc ?? null, now)}>
+                <div className={sports.whenLabel}>
+                  <span className={sports.whenName}>{whenLabel(when, group[0]?.programme?.startUtc ?? null, now)}</span>
+                  <span className={sports.whenCount}>{group.length === 1 ? t('sports.when.countOne') : t('sports.when.count', { n: group.length })}</span>
+                </div>
+                <div className={sports.grid}>
+                  {group.map((m) => (
+                    <SportsMatchCard key={`${m.channel.id}:${m.league}:${m.programme?.id ?? ''}`} match={m} catalog={catalog.data} now={now} onSelect={select} onSelectChannel={selectChannel} />
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
           {shown.length < list.length && (
@@ -194,6 +288,28 @@ function Preview() {
           )}
         </>
       )}
+    </>
+  );
+}
+
+/** What is followed, with the Add teams dialog. Only followed things are listed; the rest live in the dialog. */
+function Following({ catalog, follow, update }: { catalog: SportsCatalog; follow: SportsFollow; update: Update }) {
+  // null = closed; otherwise the search the dialog opens with ("" from Add teams, the league name from Edit).
+  const [picker, setPicker] = useState<string | null>(null);
+  const followed = followedLeagues(catalog, follow);
+  return (
+    <>
+      <div className={sports.followHead}>
+        <h3 className={sports.subhead}>{t('sports.following')}</h3>
+        <span className={sports.followCount}>{followed.length}</span>
+        <span className={sports.followSpacer} />
+        <DLButton variant="filled" icon={IconPlus} onClick={() => setPicker('')}>{t('sports.following.add')}</DLButton>
+      </div>
+      <div className={sports.followList}>
+        {followed.map((l) => <FollowRow key={l.key} league={l} follow={follow} update={update} onEdit={() => setPicker(l.name)} />)}
+        {followed.length === 0 && <p className={sports.followEmpty}>{t('sports.following.empty')}</p>}
+      </div>
+      <AddTeamsModal opened={picker !== null} initialQuery={picker ?? ''} catalog={catalog} follow={follow} update={update} onClose={() => setPicker(null)} />
     </>
   );
 }
@@ -208,8 +324,6 @@ export function SportsSection() {
   if (!catalog.data || !follow.data) return <SkeletonList rows={4} label={t('loading.generic')} />;
   const f = follow.data;
   const update: Update = (next) => set.mutate(next);
-  const teamLeagues = catalog.data.leagues.filter((l) => l.kind === 'team');
-  const sessions = SESSION_ORDER.filter((s) => catalog.data.sessions.includes(s));
   return (
     <Section title={t('settings.sports')} help={t('settings.sports.help')}>
       <SettingRow label={t('sports.replays')} help={t('sports.replays.help')} wide>
@@ -220,16 +334,7 @@ export function SportsSection() {
         />
       </SettingRow>
 
-      <h3 className={sports.subhead}>{t('sports.leagues')}</h3>
-      {teamLeagues.map((l) => <LeagueRow key={l.key} league={l} follow={f} update={update} />)}
-
-      <h3 className={sports.subhead}>{t('sports.motorsport')}</h3>
-      {motorsportGroups(catalog.data.leagues).map(({ group, series }) => (
-        <div key={group} role="group" aria-label={groupLabel(group)}>
-          <h4 className={sports.groupLabel}>{groupLabel(group)}</h4>
-          {series.map((s) => <SeriesRow key={s.key} series={s} sessions={sessions} follow={f} update={update} />)}
-        </div>
-      ))}
+      <Following catalog={catalog.data} follow={f} update={update} />
 
       <RankList catalog={catalog.data} follow={f} update={update} />
 

@@ -3,6 +3,7 @@
 # League fields:
 #   key, name, kind = "team" | "motorsport"
 #   group     motorsport only: open_wheel | stock_car | sports_car | motorcycle | rally | drag_dirt
+#   sport     team only: football | basketball | hockey | baseball | soccer (missing = other)
 #   tokens    strong league/series names (match on their own)
 #   context   risky tokens that only count when the league already has context (§2.2)
 #   events    motorsport only: marquee event aliases, strong
@@ -98,6 +99,7 @@ categories = [
 key = "nfl"
 name = "NFL"
 kind = "team"
+sport = "football"
 tokens = [
   "NFL", "NFL Football", "National Football League", "Sunday Night Football",
   "Monday Night Football", "Thursday Night Football", "Super Bowl", "Pro Bowl Games",
@@ -362,6 +364,7 @@ exclude = [
 key = "mlb"
 name = "MLB"
 kind = "team"
+sport = "baseball"
 tokens = [
   "MLB", "MLB Baseball", "Major League Baseball", "Sunday Night Baseball", "Friday Night Baseball",
   "World Series", "ALCS", "NLCS", "ALDS", "NLDS", "American League Championship Series",
@@ -617,6 +620,7 @@ exclude = [
 key = "nba"
 name = "NBA"
 kind = "team"
+sport = "basketball"
 tokens = [
   "NBA", "NBA Basketball", "National Basketball Association", "NBA Finals", "NBA Playoffs",
   "NBA Cup", "NBA Conference Finals", "NBA Play-In", "NBA All-Star Game",
@@ -866,6 +870,7 @@ exclude = [
 key = "nhl"
 name = "NHL"
 kind = "team"
+sport = "hockey"
 tokens = [
   "NHL", "NHL Hockey", "National Hockey League", "Hockey Night in Canada", "Stanley Cup Final",
   "Stanley Cup Playoffs", "Winter Classic", "Stadium Series", "Heritage Classic",
@@ -1131,6 +1136,7 @@ exclude = [
 key = "mls"
 name = "MLS"
 kind = "team"
+sport = "soccer"
 tokens = [
   "MLS", "MLS Soccer", "Major League Soccer", "MLS Cup", "MLS Cup Playoffs", "MLS Season Pass",
   "MLS All-Star Game", "Leagues Cup",
@@ -1397,6 +1403,7 @@ exclude = [
 key = "epl"
 name = "Premier League"
 kind = "team"
+sport = "soccer"
 tokens = ["Premier League", "English Premier League", "EPL", "Barclays Premier League"]
 exclude = [
   "Indian Premier League", "IPL", "Caribbean Premier League", "Bangladesh Premier League",

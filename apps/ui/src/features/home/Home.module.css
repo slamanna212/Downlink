@@ -1,104 +1,12 @@
-/* Home (DESIGN §8): a full-width hero for the first continue-watching item, then card rows. The hero runs
-   under the title bar strip; nothing interactive sits in its top 36 px. */
+/* Home (DESIGN §8): page title + search, then card rows led by Continue watching. The header runs
+   under the title bar strip; its top padding keeps it clear of the 36 px drag region. */
 .page { min-height: 100%; }
-
-/* ---------- hero ---------- */
-.hero {
-  position: relative;
-  height: 460px;
-  min-height: 420px;
-  flex: none;
-}
-.heroArt { position: absolute; inset: 0; }
-.heroScrim { position: absolute; inset: 0; background: var(--dl-hero-scrim); pointer-events: none; }
-.heroTop {
-  position: absolute;
-  top: 52px;
-  left: 2.5rem;
-  right: 2.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--mantine-spacing-lg);
-}
-.capsLabel {
-  font-size: var(--mantine-font-size-sm);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--dl-text-2);
-}
-.heroBody {
-  position: absolute;
-  left: 2.5rem;
-  bottom: 2.25rem;
-  width: min(600px, calc(100% - 5rem));
-  display: flex;
-  flex-direction: column;
-  gap: var(--mantine-spacing-md);
-}
-.heroMeta {
-  display: flex;
-  align-items: center;
-  gap: var(--mantine-spacing-sm);
-  font-size: var(--mantine-font-size-md);
-  color: var(--dl-text-2);
-}
-.heroTitle {
-  margin: 0;
-  font-size: 4.5rem;
-  line-height: 1;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  color: var(--dl-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.heroEp {
-  display: flex;
-  align-items: center;
-  gap: var(--mantine-spacing-sm);
-  font-size: var(--mantine-font-size-xl);
-  font-weight: 600;
-  color: var(--dl-text-2);
-}
-.heroDesc {
-  margin: 0;
-  max-width: 520px;
-  font-size: var(--mantine-font-size-lg);
-  line-height: 1.5;
-  color: var(--dl-text-dim);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.heroTimeline {
-  display: flex;
-  align-items: center;
-  gap: var(--mantine-spacing-md);
-  margin-top: var(--mantine-spacing-xs);
-  font-size: var(--mantine-font-size-sm);
-  color: var(--dl-text-2);
-}
-.heroTrack {
-  position: relative;
-  width: 300px;
-  max-width: 40%;
-  height: 3px;
-  border-radius: var(--mantine-radius-xs);
-  background: var(--dl-outline-badge);
-  overflow: hidden;
-}
-.heroActions { display: flex; gap: var(--mantine-spacing-sm); margin-top: var(--mantine-spacing-sm); }
 
 .searchBtn { width: 22rem; }
 .searchLabel { text-align: left; margin-right: var(--mantine-spacing-md); color: var(--dl-text-dim); font-weight: 500; }
 .kbd { font-family: var(--mantine-font-family-monospace); font-size: 0.6875rem; color: var(--dl-text-dim); }
 :global([data-density='tv']) .searchBtn { width: 28rem; }
 
-/* No continue item: a plain header instead of the hero. */
 .top {
   display: flex;
   align-items: center;
@@ -127,10 +35,29 @@
 
 @media (width >= 1100px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
-@media (width < 1100px) { .heroTitle { font-size: 3rem; } }
 .dim { color: var(--dl-text-dim); }
 .muted { margin: 0; color: var(--dl-text-dim); font-size: var(--mantine-font-size-md); }
 .fill { display: block; height: 100%; background: var(--dl-accent); }
+
+/* continue row: four across from 1100 px, paged by the arrows; the padding keeps focus rings unclipped */
+.pager { display: flex; gap: var(--mantine-spacing-xs); align-self: center; }
+.row {
+  --row-gap: var(--mantine-spacing-lg);
+  --row-per: 2;
+  display: flex;
+  gap: var(--row-gap);
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  margin: -0.25rem;
+  padding: 0.25rem;
+}
+.row::-webkit-scrollbar { display: none; }
+.row > .card { flex: 0 0 calc((100% - (var(--row-per) - 1) * var(--row-gap)) / var(--row-per)); scroll-snap-align: start; }
+
+@media (width >= 700px) { .row { --row-per: 3; } }
+
+@media (width >= 1100px) { .row { --row-per: 4; } }
 
 /* continue cards */
 .card { display: flex; flex-direction: column; gap: var(--mantine-spacing-sm); text-align: left; width: 100%; border-radius: var(--mantine-radius-lg); color: var(--dl-text); }
@@ -156,7 +83,32 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
-.track { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--dl-outline-badge); z-index: 1; }
+.artLogo { position: absolute; left: 0.625rem; bottom: 0.75rem; z-index: 1; }
+.playOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dl-art-hover);
+  opacity: 0;
+  transition: opacity 120ms var(--dl-ease);
+}
+.card:hover .playOverlay, .card:focus-visible .playOverlay, .card[data-focused] .playOverlay { opacity: 1; }
+.playDisc {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dl-accent);
+  color: var(--dl-on-accent);
+}
+
+@media (prefers-reduced-motion: reduce) { .playOverlay { transition: none; } }
+.track { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--dl-outline-badge); z-index: 2; }
 .cardTitle { font-size: var(--mantine-font-size-lg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cardSub { margin-top: calc(var(--mantine-spacing-xs) * -1); font-size: var(--mantine-font-size-sm); color: var(--dl-text-dim); }
 

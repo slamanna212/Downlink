@@ -4,7 +4,7 @@ import { t, type MessageKey } from '../../lib/i18n';
 import { Icon } from '../Icon/Icon';
 import classes from './StatusBadge.module.css';
 
-export type StatusBadgeKind = 'live' | 'rec' | 'catchup' | 'new' | 'hd' | '4k' | 'radio' | 'drm' | 'premiere' | 'finale' | 'repeat' | 'interrupted' | 'cert' | 'likelyLive' | 'replay';
+export type StatusBadgeKind = 'live' | 'rec' | 'catchup' | 'new' | 'hd' | '4k' | 'radio' | 'drm' | 'premiere' | 'finale' | 'repeat' | 'interrupted' | 'cert' | 'likelyLive' | 'likelyLiveShort' | 'replay';
 
 const LABEL: Record<StatusBadgeKind, MessageKey> = {
   live: 'badge.live',
@@ -21,6 +21,7 @@ const LABEL: Record<StatusBadgeKind, MessageKey> = {
   interrupted: 'badge.interrupted',
   cert: 'badge.hd', // always replaced by `label`
   likelyLive: 'badge.likelyLive',
+  likelyLiveShort: 'badge.likelyLiveShort',
   replay: 'badge.replay',
 };
 
@@ -39,6 +40,7 @@ const TONE: Record<StatusBadgeKind, string> = {
   interrupted: classes.warn ?? '',
   cert: classes.outline ?? '',
   likelyLive: classes.outline ?? '',
+  likelyLiveShort: classes.outline ?? '',
   replay: classes.drm ?? '',
 };
 
@@ -52,7 +54,7 @@ export function StatusBadge({ kind, label }: StatusBadgeProps) {
   return (
     <Badge unstyled={false} className={`${classes.root} ${TONE[kind]}`} variant="transparent" data-kind={kind}>
       <span className={classes.label}>
-        {(kind === 'live' || kind === 'rec' || kind === 'likelyLive') && <span className={classes.dot} aria-hidden />}
+        {(kind === 'live' || kind === 'rec' || kind === 'likelyLive' || kind === 'likelyLiveShort') && <span className={classes.dot} aria-hidden />}
         {kind === 'catchup' && <Icon icon={IconHistory} size={14} />}
         {kind === 'drm' && <Icon icon={IconLock} size={14} />}
         {kind === 'cert' ? label : t(LABEL[kind])}

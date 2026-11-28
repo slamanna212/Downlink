@@ -695,6 +695,8 @@ pub struct SportsLeagueDto {
     pub kind: String,
     /// Motorsport group key; null for team leagues.
     pub group: Option<String>,
+    /// `football` | `basketball` | `hockey` | `baseball` | `soccer` | `motorsport` | `other`.
+    pub sport: String,
     pub teams: Vec<SportsTeamDto>,
 }
 
