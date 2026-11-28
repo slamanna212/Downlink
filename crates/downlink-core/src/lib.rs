@@ -3,8 +3,10 @@
 pub mod auth;
 pub mod catalog;
 pub mod catchup;
+pub mod command;
 pub mod epg;
 pub mod error;
+pub mod feeds;
 pub mod hls;
 pub mod http;
 pub mod images;

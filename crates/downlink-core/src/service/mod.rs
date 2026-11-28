@@ -3,8 +3,10 @@
 //! command-level verbs of PLAN §2.5. Returns camelCase serde DTOs matching
 //! `apps/ui/src/api/types.ts`; events go out on a broadcast channel the app forwards.
 
+mod command;
 mod details;
 pub mod dto;
+mod feeds;
 mod logtail;
 mod media;
 mod mediaserver;
@@ -205,6 +207,8 @@ pub struct Service {
     sports_rebuild: Arc<tokio::sync::Mutex<()>>,
     /// Set when a background rebuild is asked for while one runs; the running one goes again.
     sports_dirty: Arc<std::sync::atomic::AtomicBool>,
+    /// News feed polling for watched feeds (docs/COMMAND_CENTER.md §6.2).
+    feeds: crate::feeds::FeedPoller,
 }
 
 impl Service {
@@ -264,6 +268,7 @@ impl Service {
             tmdb_api: std::sync::RwLock::new(crate::tmdb::TMDB_API.to_owned()),
             sports_rebuild: Arc::new(tokio::sync::Mutex::new(())),
             sports_dirty: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            feeds: crate::feeds::FeedPoller::new(),
         })
     }
 

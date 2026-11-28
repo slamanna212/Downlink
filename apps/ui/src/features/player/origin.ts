@@ -8,6 +8,7 @@ const ORIGINS: [string, MessageKey][] = [
   ['/movies', 'nav.movies'],
   ['/series', 'nav.series'],
   ['/recordings', 'nav.recordings'],
+  ['/command', 'nav.commandCenter'],
   ['/settings', 'nav.settings'],
 ];
 export function originLabel(path: string | null, hasHistory: boolean): string {

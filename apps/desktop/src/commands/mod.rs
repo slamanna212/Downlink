@@ -4,7 +4,9 @@
 
 pub mod app;
 pub mod catalog;
+pub mod command_center;
 pub mod diagnostics;
+pub mod feeds;
 pub mod media;
 pub mod mediaserver;
 pub mod metadata;

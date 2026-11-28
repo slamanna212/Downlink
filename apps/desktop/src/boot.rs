@@ -110,6 +110,10 @@ pub async fn run(handle: AppHandle, version: String, data_dir: PathBuf, log_dir:
             }
         });
     }
+    // News feeds: the poller idles until a command center watches feeds; stopped on quit.
+    if let Err(e) = service.start_feed_poller() {
+        tracing::warn!("feed polling unavailable: {}", e.message);
+    }
     // Crash recovery (rule 6), the reachability probe, then background refresh.
     {
         let s = service.clone();

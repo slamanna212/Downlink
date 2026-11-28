@@ -83,6 +83,8 @@ const FIXTURES: Fixture[] = [
   { league: 'nfl', teams: ['chi', 'buf'], start: 300, minutes: 180, title: 'NFL Greatest Games', subtitle: 'Bears vs Bills (classic)', channel: 56, live: false },
   { league: 'nfl', teams: ['chi', 'det'], start: 0, minutes: 0, title: '', channel: 74, live: true, eventChannel: 'NFL 03: Bears vs Lions 1:00 PM' },
   { league: 'epl', teams: ['ars', 'che'], start: -20, minutes: 115, title: 'Premier League', subtitle: 'Arsenal v Chelsea', channel: 92, live: true, liveInferred: true },
+  // A fifth game on now, so the command center has overflow at the default 4-tile cap.
+  { league: 'epl', teams: ['liv', 'cov'], start: -10, minutes: 115, title: 'Premier League', subtitle: 'Liverpool v Coventry City', channel: 100, live: true, liveInferred: true },
   { league: 'epl', teams: ['sun', 'hul'], start: 22 * 60, minutes: 115, title: 'Premier League', subtitle: 'Sunderland v Hull City', channel: 92, live: true },
   { league: 'nba', teams: ['bos', 'den'], start: 90, minutes: 150, title: 'NBA Basketball', subtitle: 'Celtics at Nuggets', channel: 110, live: true },
   { league: 'nhl', teams: ['lak', 'uta'], start: 330, minutes: 150, title: 'NHL Hockey', subtitle: 'Kings at Mammoth', channel: 128, live: true },

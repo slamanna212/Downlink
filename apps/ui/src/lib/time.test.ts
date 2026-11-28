@@ -153,3 +153,18 @@ describe('calendar dates', () => {
     expect(formatCalendarDate(null)).toBeNull();
   });
 });
+
+import { ageOf } from './time';
+
+describe('ageOf', () => {
+  const NOW = 1_800_000_000;
+  it('buckets into now, minutes, hours and days', () => {
+    expect(ageOf(NOW - 30, NOW)).toEqual({ unit: 'now', n: 0 });
+    expect(ageOf(NOW - 4 * 60 - 59, NOW)).toEqual({ unit: 'min', n: 4 });
+    expect(ageOf(NOW - 3 * 3600, NOW)).toEqual({ unit: 'hour', n: 3 });
+    expect(ageOf(NOW - 2 * 86400, NOW)).toEqual({ unit: 'day', n: 2 });
+  });
+  it('treats a future time as now', () => {
+    expect(ageOf(NOW + 120, NOW)).toEqual({ unit: 'now', n: 0 });
+  });
+});

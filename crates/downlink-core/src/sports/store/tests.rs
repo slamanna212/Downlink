@@ -156,6 +156,7 @@ fn follow() -> SportsFollowDto {
                 sessions: vec!["race".into(), "qualifying".into()],
             },
         )]),
+        priority: Vec::new(),
     }
 }
 
@@ -193,6 +194,30 @@ async fn follow_doc_keeps_unknown_keys() {
     let back = load_follow(&store).await.unwrap();
     assert!(back.leagues.contains_key("gone"));
     assert_eq!(back.series["f1"].sessions, ["race", "qualifying"]);
+}
+
+#[tokio::test]
+async fn follow_priority_round_trips_and_defaults_empty() {
+    let (store, _) = seeded().await;
+    // A document written before priority existed loads with an empty ranking.
+    store
+        .kv_set(
+            FOLLOW_KEY,
+            r#"{"version":1,"leagues":{"nfl":{"teams":["chi"]}},"series":{}}"#,
+            NOW,
+        )
+        .await
+        .unwrap();
+    assert!(load_follow(&store).await.unwrap().priority.is_empty());
+    let ranked = SportsFollowDto {
+        priority: vec!["f1".into(), "nfl:chi".into()],
+        ..follow()
+    };
+    save_follow(&store, &CAT, &ranked, NOW).await.unwrap();
+    assert_eq!(
+        load_follow(&store).await.unwrap().priority,
+        ["f1", "nfl:chi"]
+    );
 }
 
 #[tokio::test]

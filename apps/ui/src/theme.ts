@@ -35,7 +35,7 @@ const dlOther = {
     motion: { fast: 120, base: 160, route: 240, videoFade: 200, ease: 'cubic-bezier(0.2, 0, 0, 1)' },
     controlsIdleMs: 3000,
     previewDwellMs: 300,
-    layout: { railExpanded: 224, railCollapsed: 68, railTv: 96, groupSidebar: 220, settingsNav: 240, infoPanel: 380, titleBar: 36, windowButton: 46, macLights: 76, homeHero: 460, guideHero: 288 },
+    layout: { railExpanded: 224, railCollapsed: 68, railTv: 96, groupSidebar: 220, settingsNav: 240, infoPanel: 380, commandRail: 320, titleBar: 36, windowButton: 46, macLights: 76, homeHero: 460, guideHero: 288 },
     /** Channel-change overlay (player): fades this long after the last zap or digit. */
     zapOverlayMs: 3000,
     density: {

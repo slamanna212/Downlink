@@ -1,6 +1,6 @@
 // Pure helpers for the sports follow document and match lists (SPORTS §3, §6). No React, no IPC, so the
 // toggling rules, session defaults and home-row ordering are unit-tested on their own.
-import type { SportsCatalog, SportsFollow, SportsGroup, SportsLeague, SportsMatch, SportsSession } from '../../api/types';
+import type { SportsCatalog, SportsFollow, SportsGroup, SportsLeague, SportsMatch, SportsSession, SportsTeam } from '../../api/types';
 import { isLiveNow } from '../../lib/time';
 
 /** Race, qualifying and practice are on for a newly followed series; shows are off (SPORTS §2.3). */
@@ -10,7 +10,7 @@ export const SESSION_ORDER: readonly SportsSession[] = ['race', 'qualifying', 'p
 
 export const GROUP_ORDER: readonly SportsGroup[] = ['open_wheel', 'stock_car', 'sports_car', 'motorcycle', 'rally', 'drag_dirt'];
 
-export const emptyFollow = (): SportsFollow => ({ version: 1, includeReplays: false, leagues: {}, series: {} });
+export const emptyFollow = (): SportsFollow => ({ version: 1, includeReplays: false, leagues: {}, series: {}, priority: [] });
 
 export function setLeagueFollowed(f: SportsFollow, league: string, on: boolean): SportsFollow {
   const leagues = { ...f.leagues };
@@ -52,6 +52,54 @@ export function followsAnything(f: SportsFollow | undefined, catalog?: SportsCat
   if (!catalog) return keys.length > 0;
   const known = new Set(catalog.leagues.map((l) => l.key));
   return keys.some((k) => known.has(k));
+}
+
+/** One rankable thing the user follows: a team, a league's "all games", or a series. */
+export interface RankEntry {
+  key: string;
+  league: SportsLeague;
+  team: SportsTeam | null;
+}
+
+/** Everything followed that the catalog knows, as rank entries in catalog order. */
+function followedEntries(f: SportsFollow, catalog: SportsCatalog): RankEntry[] {
+  const out: RankEntry[] = [];
+  for (const league of catalog.leagues) {
+    if (league.kind === 'motorsport') {
+      if (f.series[league.key]) out.push({ key: league.key, league, team: null });
+      continue;
+    }
+    const picked = f.leagues[league.key];
+    if (!picked) continue;
+    const teams = league.teams.filter((x) => picked.teams.includes(x.key));
+    if (teams.length === 0) out.push({ key: league.key, league, team: null });
+    for (const team of teams) out.push({ key: `${league.key}:${team.key}`, league, team });
+  }
+  return out;
+}
+
+/**
+ * The command center order (COMMAND_CENTER §3): ranked entries first, in `priority` order, then the
+ * rest in catalog order. Stale keys (unfollowed, or gone from the catalog) are skipped.
+ */
+export function rankEntries(f: SportsFollow, catalog: SportsCatalog): RankEntry[] {
+  const all = followedEntries(f, catalog);
+  const priority = f.priority ?? [];
+  const index = (e: RankEntry) => {
+    const i = priority.indexOf(e.key);
+    return i < 0 ? priority.length : i;
+  };
+  return all.map((e, i) => ({ e, i })).sort((a, b) => index(a.e) - index(b.e) || a.i - b.i).map(({ e }) => e);
+}
+
+/** Moves one entry up (`-1`) or down (`+1`); the saved priority becomes the whole current order. */
+export function moveRank(f: SportsFollow, catalog: SportsCatalog, key: string, delta: -1 | 1): SportsFollow {
+  const keys = rankEntries(f, catalog).map((e) => e.key);
+  const i = keys.indexOf(key);
+  const j = i + delta;
+  if (i < 0 || j < 0 || j >= keys.length) return f;
+  [keys[i], keys[j]] = [keys[j] as string, keys[i] as string];
+  return { ...f, priority: keys };
 }
 
 /** Motorsport series grouped in SPORTS §2.2 order; unknown groups follow, in catalog order. */

@@ -241,6 +241,7 @@ pub struct TaskProgress {
 pub enum Event {
     CatalogUpdated(CatalogUpdated),
     TaskProgress(TaskProgress),
+    FeedsUpdated(FeedsUpdated),
 }
 
 impl Event {
@@ -249,8 +250,44 @@ impl Event {
         match self {
             Self::CatalogUpdated(_) => "catalog://updated",
             Self::TaskProgress(_) => "task://progress",
+            Self::FeedsUpdated(_) => "feeds://updated",
         }
     }
+}
+
+/// `feeds://updated`: these feeds gained or changed items (docs/COMMAND_CENTER.md §6.2).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedsUpdated {
+    pub feed_ids: Vec<i64>,
+}
+
+/// A user-added news feed. `url` is the address as entered, or with its credential masked when
+/// it carried one (the full address then lives in the keychain). `lastError` is redacted.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedDto {
+    pub id: i64,
+    pub url: String,
+    pub has_secret: bool,
+    pub title: Option<String>,
+    pub site_url: Option<String>,
+    pub last_fetch_utc: Option<i64>,
+    pub last_ok_utc: Option<i64>,
+    pub last_error: Option<String>,
+    pub item_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FeedItemDto {
+    pub feed_id: i64,
+    pub guid: String,
+    pub title: String,
+    pub link: Option<String>,
+    pub summary: Option<String>,
+    /// Publish time, or first-seen time when the feed gave none.
+    pub published_utc: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -682,6 +719,10 @@ pub struct SportsFollowDto {
     pub leagues: BTreeMap<String, SportsLeagueFollowDto>,
     #[serde(default)]
     pub series: BTreeMap<String, SportsSeriesFollowDto>,
+    /// Command center ranking, best first: `league:team` for a team, the league or series key for
+    /// "all games" / a series. Anything followed but not listed ranks after, in catalog order.
+    #[serde(default)]
+    pub priority: Vec<String>,
 }
 
 fn sports_follow_version() -> u32 {
@@ -727,4 +768,74 @@ pub struct SportsMatchDto {
     pub event_start_utc: Option<i64>,
     /// Other channels showing the same event, best first (docs/SPORTS.md §5.1).
     pub alternates: Vec<ChannelDto>,
+}
+
+// ---- saved command centers (docs/COMMAND_CENTER.md §6) -------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandCenterTileDto {
+    pub slot: i64,
+    pub channel: ChannelDto,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandCenterDto {
+    pub id: i64,
+    pub name: String,
+    /// `grid` | `featured`.
+    pub layout_style: String,
+    /// The slot that plays sound.
+    pub audible: i64,
+    /// Opaque JSON object owned by the UI (feed panels: `{ "feeds": [{ "id": … }] }`).
+    pub rail: Value,
+    /// Visible tiles in slot order; tiles whose channel is hidden or gone are left out.
+    pub tiles: Vec<CommandCenterTileDto>,
+    pub created_utc: i64,
+    pub updated_utc: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandCenterSummaryDto {
+    pub id: i64,
+    pub name: String,
+    /// Tiles whose channel is still visible.
+    pub tile_count: i64,
+    /// Up to four visible channel ids in slot order, for a preview.
+    pub channel_ids: Vec<i64>,
+    pub updated_utc: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandCenterTileSaveDto {
+    pub slot: i64,
+    pub channel_id: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandCenterSaveDto {
+    /// None creates a new center.
+    #[serde(default)]
+    pub id: Option<i64>,
+    pub name: String,
+    #[serde(default = "default_layout_style")]
+    pub layout_style: String,
+    #[serde(default)]
+    pub audible: i64,
+    #[serde(default = "empty_object")]
+    pub rail: Value,
+    #[serde(default)]
+    pub tiles: Vec<CommandCenterTileSaveDto>,
+}
+
+fn default_layout_style() -> String {
+    "grid".into()
+}
+
+fn empty_object() -> Value {
+    Value::Object(Default::default())
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Channel, Programme, SportsMatch } from '../../api/types';
+import type { Channel, Programme, SportsFollow, SportsMatch } from '../../api/types';
 import { MOCK_SPORTS_CATALOG } from '../../api/ipc.mock.sports';
 import {
   allGames,
@@ -10,7 +10,9 @@ import {
   followsAnything,
   homeSportsItems,
   motorsportGroups,
+  moveRank,
   onAirNow,
+  rankEntries,
   setIncludeReplays,
   setLeagueFollowed,
   setSeriesFollowed,
@@ -191,5 +193,29 @@ describe('event channels with a named start', () => {
     expect(sortMatches([later, timed, noTime], NOW).map((m) => m.channel.id)).toEqual([1, 4, 2]);
     // And drop out of the home row when they start past the horizon.
     expect(homeSportsItems([match(5, null, null, { eventStartUtc: NOW + 72 * H })], NOW, 48 * H)).toEqual([]);
+  });
+});
+
+describe('command center rank', () => {
+  const followed = (): SportsFollow => ({
+    version: 1, includeReplays: false,
+    leagues: { nfl: { teams: ['chi', 'gb'] }, epl: { teams: [] } },
+    series: { f1: { sessions: ['race'] } },
+  });
+
+  it('lists teams, all-games leagues and series in catalog order when nothing is ranked', () => {
+    expect(rankEntries(followed(), MOCK_SPORTS_CATALOG).map((e) => e.key)).toEqual(['nfl:chi', 'nfl:gb', 'epl', 'f1']);
+  });
+
+  it('puts ranked entries first and skips stale keys', () => {
+    const f = { ...followed(), priority: ['f1', 'gone', 'nfl:gb', 'nfl:det'] };
+    expect(rankEntries(f, MOCK_SPORTS_CATALOG).map((e) => e.key)).toEqual(['f1', 'nfl:gb', 'nfl:chi', 'epl']);
+  });
+
+  it('moves an entry and saves the whole order; ends do not move', () => {
+    const f = moveRank(followed(), MOCK_SPORTS_CATALOG, 'f1', -1);
+    expect(f.priority).toEqual(['nfl:chi', 'nfl:gb', 'f1', 'epl']);
+    expect(moveRank(f, MOCK_SPORTS_CATALOG, 'nfl:chi', -1)).toBe(f);
+    expect(moveRank(f, MOCK_SPORTS_CATALOG, 'epl', 1)).toBe(f);
   });
 });

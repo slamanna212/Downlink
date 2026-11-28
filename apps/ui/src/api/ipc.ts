@@ -52,6 +52,12 @@ import type {
   SportsCatalog,
   SportsFollow,
   SportsMatch,
+  CommandCenter,
+  CommandCenterSave,
+  CommandCenterSummary,
+  Feed,
+  FeedItem,
+  FeedsUpdated,
 } from './types';
 
 /** Command name -> args/result. Keep in sync with the Rust `#[tauri::command]` set (PLAN §2.5). */
@@ -163,6 +169,24 @@ export interface Commands {
   sports_follow_set: { args: { follow: SportsFollow }; result: null };
   /** Matches overlapping [startUtc, endUtc) (UTC seconds), live first, then start time. */
   sports_matches: { args: { startUtc: number; endUtc: number }; result: SportsMatch[] };
+  /** Saved command centers, most recently changed first (COMMAND_CENTER §6.1). */
+  command_centers_list: { args: Record<string, never>; result: CommandCenterSummary[] };
+  command_center_get: { args: { id: number }; result: CommandCenter };
+  /** Creates (`center.id` null) or replaces a center; returns its id. */
+  command_center_save: { args: { center: CommandCenterSave }; result: number };
+  command_center_delete: { args: { id: number }; result: null };
+  /** News feeds (COMMAND_CENTER §6.2), sorted by title. */
+  feeds_list: { args: Record<string, never>; result: Feed[] };
+  /** Validates, fetches once and saves; a failed first fetch rejects and saves nothing. */
+  feed_add: { args: { url: string }; result: Feed };
+  feed_remove: { args: { id: number }; result: null };
+  /** Newest first across `feedIds`; `limit` 1..500. */
+  feed_items: { args: { feedIds: number[]; limit: number }; result: FeedItem[] };
+  /** Manual refresh; emits `feeds://updated` when items changed. */
+  feed_refresh: { args: { id: number }; result: Feed };
+  /** Replace what view `key` watches (polled every few minutes while watched); `[]` stops. */
+  feeds_watch: { args: { key: string; feedIds: number[] }; result: null };
+  feeds_unwatch: { args: { key: string }; result: null };
 }
 export type CommandName = keyof Commands;
 
@@ -178,6 +202,8 @@ export interface Events {
   'multiview://state': MultiviewState;
   /** A tile's playback state changed (payload: slot); refetch `get_multiview`. */
   'multiview://tile': number;
+  /** Watched feeds gained or changed items; refetch `feed_items`. */
+  'feeds://updated': FeedsUpdated;
 }
 export type EventName = keyof Events;
 

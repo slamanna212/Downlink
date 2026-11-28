@@ -28,6 +28,7 @@ export function SportsRow() {
         <h3 className={classes.h3} id="home-sports">{t('home.sports')}</h3>
         <span className={classes.count}>{items.length}</span>
         <span className={classes.spacer} />
+        <button type="button" className={classes.link} onClick={() => void navigate('/multiview/sports')}>{t('command.sports.open')}</button>
         <button type="button" className={classes.link} onClick={() => void navigate('/settings/sports')}>{t('home.editSports')}</button>
       </div>
       <div className={`${sports.grid} ${sports.homeGrid}`} data-testid="home-sports">

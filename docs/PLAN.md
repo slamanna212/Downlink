@@ -589,6 +589,9 @@ A CI job runs each artefact on a clean VM/container with **no mpv or libmpv inst
 - **Sessions.** Rule 6 applies per tile: removing or replacing a tile, exiting multiview, sleep and
   quit stop that tile's stream and release any session it holds.
 - **Network discipline.** Adding a tile is a play; the picker browses SQLite only (rule 4).
+- **Command center.** The multiview screen also hosts command centers: the same wall plus a side rail,
+  with tiles filled by a rule (the sports command center: followed games on air, ranked by the user)
+  or a saved list. Overflow, pinning and auto-advance are specified in `docs/COMMAND_CENTER.md`.
 
 ---
 

@@ -799,6 +799,11 @@ export interface SportsFollow {
   /** Present = followed; empty `teams` = every game in the league. */
   leagues: Record<string, { teams: string[] }>;
   series: Record<string, { sessions: SportsSession[] }>;
+  /**
+   * Command center order, best first: `league:team`, or a league / series key for "all games" and
+   * series. Followed items not listed rank after, in catalog order. Absent in older documents.
+   */
+  priority?: string[];
 }
 
 export interface SportsMatch {
@@ -822,4 +827,92 @@ export interface SportsMatch {
   eventStartUtc: number | null;
   /** Other channels showing the same event, best first (SPORTS §5.1). The backend picks `channel`. */
   alternates: Channel[];
+}
+
+// ---- saved command centers (COMMAND_CENTER §6.1) -------------------------------------------------
+
+/**
+ * The rail document of a saved center: an opaque JSON object the UI owns (≤ 64 KiB). Phase 3 puts
+ * `feeds: [{ id }]` here for the Headlines section. Unknown keys must be kept on save.
+ */
+export interface CommandCenterRail {
+  feeds?: { id: number }[];
+  [key: string]: unknown;
+}
+
+export interface CommandCenterTile {
+  /** 0 = the main player .. 8. */
+  slot: number;
+  channel: Channel;
+}
+
+export interface CommandCenter {
+  id: number;
+  name: string;
+  layoutStyle: 'grid' | 'featured';
+  /** The slot that plays sound. */
+  audible: number;
+  rail: CommandCenterRail;
+  /** Visible tiles in slot order (hidden or removed channels are left out). */
+  tiles: CommandCenterTile[];
+  createdUtc: number;
+  updatedUtc: number;
+}
+
+export interface CommandCenterSummary {
+  id: number;
+  name: string;
+  tileCount: number;
+  /** Up to four channel ids in slot order, for the card preview. */
+  channelIds: number[];
+  updatedUtc: number;
+}
+
+export interface CommandCenterSave {
+  /** Null creates a new center. */
+  id: number | null;
+  /** Trimmed, 1–80 characters. */
+  name: string;
+  layoutStyle: 'grid' | 'featured';
+  audible: number;
+  rail: CommandCenterRail;
+  /** At most 9, unique slots 0..8. */
+  tiles: { slot: number; channelId: number }[];
+}
+
+// ---- news feeds (COMMAND_CENTER §6.2) -------------------------------------------------------------
+
+/**
+ * A user-added RSS/Atom feed. `url` is the address as entered, or with its credential masked
+ * (`token=***`, no userinfo) when `hasSecret` — the full address then lives in the OS keychain.
+ * `lastError` is redacted and URL-free.
+ */
+export interface Feed {
+  id: number;
+  url: string;
+  hasSecret: boolean;
+  title: string | null;
+  siteUrl: string | null;
+  lastFetchUtc: number | null;
+  lastOkUtc: number | null;
+  lastError: string | null;
+  itemCount: number;
+}
+
+/** One headline. Plain text only (HTML already stripped); `link` is http(s) or null. */
+export interface FeedItem {
+  feedId: number;
+  guid: string;
+  /** ≤ 300 characters. */
+  title: string;
+  link: string | null;
+  /** ≤ 400 characters. */
+  summary: string | null;
+  /** UTC seconds: publish time, or first-seen time when the feed gave none. */
+  publishedUtc: number;
+}
+
+/** `feeds://updated`: these feeds gained or changed items. */
+export interface FeedsUpdated {
+  feedIds: number[];
 }

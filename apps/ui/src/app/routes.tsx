@@ -18,6 +18,9 @@ const importers = {
   search: () => import('../features/search/SearchPage'),
   player: () => import('../features/player/PlayerPage'),
   multiview: () => import('../features/multiview/MultiviewPage'),
+  sportsCommand: () => import('../features/command/SportsCommandPage'),
+  savedCommand: () => import('../features/command/SavedCommandPage'),
+  commandCenters: () => import('../features/command/CommandCentersPage'),
 } as const;
 
 /** Warm the chunks the user is most likely to open next. Called once, after the first list is up. */
@@ -66,6 +69,11 @@ export const routes: RouteObject[] = [
       { path: 'search', ...page(importers.search, 'SearchPage') },
       { path: 'player', ...page(importers.player, 'PlayerPage') },
       { path: 'multiview', ...page(importers.multiview, 'MultiviewPage') },
+      // Under /multiview so the shell treats it as a video route (transparent window, title bar over it).
+      { path: 'multiview/sports', ...page(importers.sportsCommand, 'SportsCommandPage') },
+      { path: 'multiview/c/:id', ...page(importers.savedCommand, 'SavedCommandPage') },
+      // A regular page (nav rail, opaque background): the list of command centers.
+      { path: 'command', ...page(importers.commandCenters, 'CommandCentersPage') },
       { path: 'sources/add', element: <AddSourcePage /> },
       { path: '*', element: <NotFoundPage /> },
     ],

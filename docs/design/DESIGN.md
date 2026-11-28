@@ -185,7 +185,7 @@ Sizes: xs 28 · sm 32 · **md 36 (default)** · lg 44 (on video, empty states) �
 - **Programme art** (`programme_art`): the guide's own `<icon>` first, then the server's programme details,
   then TMDB (backdrop before poster). The pick is cached per title in core; images in the image cache.
 - **Rail** 224 expanded / 68 collapsed / 96 10-foot. Same size on every route for a given density; it collapses only when the user toggles it. Order:
-  Search ⌘K, Home, Guide, Channels, Movies, Series, Recordings · Settings · source status dot.
+  Search ⌘K, Home, Guide, Channels, Movies, Series, Recordings, Command center · Settings · source status dot.
   Hide Movies/Series/Recordings when no source has the cap. Recordings uses a custom Tabler-rules glyph
   (`IconRecordings`: screen on a stand + filled record dot); the dot turns `--dl-live` (120 ms, instant under
   reduced motion) while anything records, on every route, and the accessible name/tooltip becomes
@@ -269,6 +269,43 @@ In 1.0 (PLAN §1.5, §4.11, D17).
   one layout), audio-follows-focus switch, Exit (Esc).
 - Keys: 1–9 focus · A audio · Enter make main · F full screen · Del remove · N add channel · L cycle layout · Esc exit.
 - Entry: grid icon in the player control bar; "Add to multiview" in the channel context menu.
+
+### 9.1 Command center (docs/COMMAND_CENTER.md)
+- Multiview plus a right rail, `layout.commandRail` (320 px) on `--dl-surface-1` with a hairline left border.
+  The grid and the floating toolbar sit to its left. R or the toolbar button hides it.
+- Rail head: title (md, 650) and a subtle xs "Rank" button. Sections On screen / Also live / Up next with
+  12 px caps labels and a faint count.
+- Row: bare logo 48×24, title (sm, 600; the programme subtitle when there is one), meta line (xs, dim:
+  team or series · session · time), live / likely live / replay badge, a 2 px progress line while on air.
+  Row actions (sm icon buttons) appear on hover or keyboard focus over the badge. A pinned tile shows a 14 px
+  pin. The wall's focused tile is marked with a 2 px accent bar at the row's left (not a ring).
+- Empty sections show one dim sentence. Nothing followed: a sentence and a filled "Choose sports" button.
+- The built-in sports center is titled **My sports**. A saved center's rail head is its name plus a
+  dots menu (Rename, Delete in live text; delete asks in a modal, never a browser dialog). Sections
+  On screen (listen, remove) and Not on screen (swap, add), then Headlines.
+- **Headlines** (saved centers with news feeds): section head as the others plus a sm gear button
+  (Manage feeds). Rows: headline sm/550, two lines at most; meta xs dim "Source · 4 min ago"; hover
+  `--dl-row-focus`, focus ring; no link = disabled. Empty: one dim sentence and an xs default "Manage
+  feeds" button with an RSS icon.
+- **Ticker**: 36 px strip under the wall on `--dl-surface-1` with a hairline top border; a 12 px caps
+  "Headlines" label on `--dl-accent-tint`; items sm with an xs/650 dim source, separated by hairlines,
+  crawling right to left (paused on hover/focus; static under reduced motion). The toolbar sits above
+  it. Toolbar news button (subtle sm, pressed while shown) toggles it.
+- **Feed manager**: Mantine modal (lg). Help sentence, then Feed address + filled "Add feed"; lists
+  "In this command center" (refresh, detach) and "Your other feeds" (add, delete in danger) in hairline
+  boxes; a failing feed shows its last error in `--dl-warn`; a key icon marks an address with a secret.
+- Saving (multiview toolbar, before Exit): default sm "Save as command center" with a floppy icon on a
+  wall that was never saved; on a saved one, "Save changes" (only after a hand edit) and a subtle sm
+  "Save as new" icon button. The name dialog is a Mantine modal: Name field (80 characters), Cancel
+  (subtle) and Save (filled).
+- **Command center page** (`/command`, nav entry with `IconLayoutDashboard`; a regular page with the
+  nav rail): 28/650 title and one dim line, then a grid of cards (`minmax(15rem, 1fr)`, md gap). Card
+  (`CommandCenterCard`): surface-1, hairline-strong border, lg radius, min 9.5rem, hover surface-2,
+  pressed surface-3, focus ring; a 2.75rem preview row (up to four bare 48×24 logos, or a 24 px glyph on
+  a surface-3 square for built-ins), name (16/600), optional sm description (text-2), xs dim meta at
+  the bottom (tile count, games live). Saved cards carry the dots menu top-right, outside the card
+  button. My sports is always first. No saved centers: a "Saved" caps label and a dashed-border box
+  with a title, one sentence on saving from multiview and an "Open multiview" button.
 
 ## 10. Copy
 Sentence case; caps only in badges and 12 px labels. Errors: one sentence, cause if known, one action.

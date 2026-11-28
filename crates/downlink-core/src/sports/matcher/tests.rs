@@ -242,6 +242,7 @@ fn follow(leagues: &[(&str, &[&str])], series: &[(&str, &[&str])]) -> SportsFoll
                 )
             })
             .collect(),
+        priority: Vec::new(),
     }
 }
 

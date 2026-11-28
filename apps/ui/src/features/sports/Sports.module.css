@@ -113,3 +113,32 @@
 .sessions { display: flex; flex-wrap: wrap; gap: var(--mantine-spacing-lg); padding: var(--mantine-spacing-sm) 0 var(--mantine-spacing-lg); border-bottom: 1px solid var(--dl-hairline); }
 .muted { margin: var(--mantine-spacing-md) 0 0; font-size: var(--mantine-font-size-md); color: var(--dl-text-dim); }
 .previewHelp { margin: 0 0 var(--mantine-spacing-md); font-size: var(--mantine-font-size-md); color: var(--dl-text-dim); }
+
+/* ---------- command center order (settings) ---------- */
+.rankList {
+  margin: 0 0 var(--mantine-spacing-lg);
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--dl-hairline);
+  border-radius: var(--mantine-radius-md);
+}
+.rankItem {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+}
+.rankItem + .rankItem { border-top: 1px solid var(--dl-hairline); }
+.rankNumber {
+  width: 1.5rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--dl-text-dim);
+}
+.rankName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--mantine-font-size-sm);
+}

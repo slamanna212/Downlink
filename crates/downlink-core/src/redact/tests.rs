@@ -276,3 +276,37 @@ fn plex_token_shapes_redact() {
         assert!(!out.contains("abcd1234secret"), "{out}");
     }
 }
+
+#[test]
+fn news_feed_url_shapes_redact() {
+    // Feed URLs (docs/COMMAND_CENTER.md §6.2) may carry a token in the query or userinfo.
+    for s in [
+        "https://news.example/rss?token=feedsecret99",
+        "https://news.example/rss?section=world&key=feedsecret99",
+        "https://news.example/feed.xml?apikey=feedsecret99&lang=en",
+        "https://news.example/feed.xml?api-key=feedsecret99",
+        "https://news.example/feed.xml?api_key=feedsecret99",
+        "https://news.example/feed.xml?access_token=feedsecret99",
+        "https://news.example/feed.xml?auth_token=feedsecret99",
+        "https://news.example/feed.xml?private_token=feedsecret99",
+        "https://news.example/feed.xml?client_secret=feedsecret99",
+        "https://news.example/feed.xml?access_key=feedsecret99",
+        "https://news.example/tracker/rss?passkey=feedsecret99",
+        "https://news.example/atom?sig=feedsecret99&expires=1",
+        "https://reader:feedsecret99@news.example/private.atom",
+        "http://reader@news.example/private.atom?token=feedsecret99",
+        "feed fetch failed for https://news.example/rss?TOKEN=feedsecret99: timeout",
+    ] {
+        let out = clean(s);
+        assert!(!out.contains("feedsecret99"), "{s} -> {out}");
+    }
+    assert_eq!(
+        clean("https://news.example/rss?section=world&token=feedsecret99&lang=en"),
+        "https://news.example/rss?section=world&token=***&lang=en"
+    );
+    // Ordinary feed parameters survive.
+    assert_eq!(
+        clean("https://news.example/rss?section=world&format=atom"),
+        "https://news.example/rss?section=world&format=atom"
+    );
+}

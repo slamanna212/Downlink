@@ -6,6 +6,7 @@ import {
   IconSearch,
   IconSettings,
   IconDeviceTv,
+  IconLayoutDashboard,
 } from '@tabler/icons-react';
 import { IconRecordings } from '../components/Icon/IconRecordings';
 import type { Caps } from '../api/types';
@@ -31,6 +32,7 @@ export const PRIMARY_NAV: NavEntry[] = [
   { id: 'movies', to: '/movies', label: 'nav.movies', icon: IconMovie, requires: (c) => c.vod },
   { id: 'series', to: '/series', label: 'nav.series', icon: IconDeviceTv, requires: (c) => c.vod },
   { id: 'recordings', to: '/recordings', label: 'nav.recordings', icon: IconRecordings, requires: (c) => c.dvr },
+  { id: 'command', to: '/command', label: 'nav.commandCenter', icon: IconLayoutDashboard },
 ];
 
 export const SETTINGS_NAV: NavEntry = { id: 'settings', to: '/settings', label: 'nav.settings', icon: IconSettings };

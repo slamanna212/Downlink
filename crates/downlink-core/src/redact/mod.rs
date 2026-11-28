@@ -40,7 +40,7 @@ static USERINFO: LazyLock<Regex> =
 /// Credential-carrying query parameters.
 pub(crate) static QUERY_CRED: LazyLock<Regex> = LazyLock::new(|| {
     rx(
-        r#"(?i)([?&;])(username|password|user|pass|pwd|token|x-plex-token|api_key|apikey|access_token|refresh_token|auth|key|secret|sig|signature)=([^&;\s"'#<>]*)"#,
+        r#"(?i)([?&;])(username|password|user|pass|pwd|passkey|token|auth_token|x-plex-token|api_key|api-key|apikey|access_key|access_token|refresh_token|private_token|client_secret|auth|key|secret|sig|signature)=([^&;\s"'#<>]*)"#,
     )
 });
 

@@ -7,11 +7,11 @@ const ids = (bits: number) => visibleNav(decodeCaps(bits)).map((e) => e.id);
 
 describe('rail nav', () => {
   it('hides VOD and DVR entries without the caps', () => {
-    expect(ids(Cap.Live | Cap.Epg)).toEqual(['search', 'home', 'guide', 'channels']);
+    expect(ids(Cap.Live | Cap.Epg)).toEqual(['search', 'home', 'guide', 'channels', 'command']);
   });
   it('shows Movies/Series with vod and Recordings with dvr, in order', () => {
-    expect(ids(Cap.Vod)).toEqual(['search', 'home', 'guide', 'channels', 'movies', 'series']);
-    expect(ids(Cap.Vod | Cap.Dvr)).toEqual(['search', 'home', 'guide', 'channels', 'movies', 'series', 'recordings']);
+    expect(ids(Cap.Vod)).toEqual(['search', 'home', 'guide', 'channels', 'movies', 'series', 'command']);
+    expect(ids(Cap.Vod | Cap.Dvr)).toEqual(['search', 'home', 'guide', 'channels', 'movies', 'series', 'recordings', 'command']);
     expect(ids(Cap.Dvr)).toContain('recordings');
     expect(ids(Cap.Dvr)).not.toContain('movies');
   });

@@ -1488,3 +1488,77 @@ async fn visible_guide_refreshes_only_once_it_is_an_hour_old() {
     e.svc.refresh_visible_guides().await.unwrap();
     assert_eq!(grid_requests().await, after_sync + 1, "fresh again");
 }
+
+/// Saved command centers: DTO shapes, hidden channels dropped on load, validation, delete.
+#[tokio::test]
+async fn command_centers_save_list_get_and_delete() {
+    use downlink_core::service::CommandCenterSaveDto;
+    let (_server, e, _) = added().await;
+    let shown = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    e.svc.set_content_filters(true, true).await.unwrap();
+    let all = e
+        .svc
+        .list_channels(ListChannelsArgs::default())
+        .await
+        .unwrap();
+    e.svc.set_content_filters(false, false).await.unwrap();
+    let hidden = all
+        .iter()
+        .find(|c| !shown.iter().any(|s| s.id == c.id))
+        .unwrap();
+
+    let save: CommandCenterSaveDto = serde_json::from_value(json!({
+        "id": null, "name": " Newsroom ", "layoutStyle": "grid", "audible": 1,
+        "rail": { "feeds": [{ "id": 3 }] },
+        "tiles": [
+            { "slot": 0, "channelId": shown[0].id },
+            { "slot": 1, "channelId": shown[1].id },
+            { "slot": 2, "channelId": hidden.id }
+        ]
+    }))
+    .unwrap();
+    let id = e.svc.command_center_save(save.clone()).await.unwrap();
+
+    let list = serde_json::to_value(e.svc.command_centers_list().await.unwrap()).unwrap();
+    assert_eq!(list[0]["id"], json!(id));
+    assert_eq!(list[0]["name"], json!("Newsroom"));
+    assert_eq!(list[0]["tileCount"], json!(2), "hidden channel not counted");
+    assert_eq!(list[0]["channelIds"], json!([shown[0].id, shown[1].id]));
+    assert!(list[0]["updatedUtc"].is_i64());
+
+    let got = serde_json::to_value(e.svc.command_center_get(id).await.unwrap()).unwrap();
+    for k in [
+        "id",
+        "name",
+        "layoutStyle",
+        "audible",
+        "rail",
+        "tiles",
+        "createdUtc",
+        "updatedUtc",
+    ] {
+        assert!(got.get(k).is_some(), "{k}");
+    }
+    assert_eq!(got["rail"], json!({ "feeds": [{ "id": 3 }] }));
+    assert_eq!(got["tiles"].as_array().unwrap().len(), 2);
+    assert_eq!(got["tiles"][1]["slot"], json!(1));
+    assert_eq!(got["tiles"][1]["channel"]["name"], json!(shown[1].name));
+
+    let mut bad = save.clone();
+    bad.name = String::new();
+    assert!(e.svc.command_center_save(bad).await.is_err());
+
+    let mut renamed = save;
+    renamed.id = Some(id);
+    renamed.name = "Desk".into();
+    assert_eq!(e.svc.command_center_save(renamed).await.unwrap(), id);
+    assert_eq!(e.svc.command_center_get(id).await.unwrap().name, "Desk");
+
+    e.svc.command_center_delete(id).await.unwrap();
+    assert!(e.svc.command_centers_list().await.unwrap().is_empty());
+    assert!(e.svc.command_center_get(id).await.is_err());
+}

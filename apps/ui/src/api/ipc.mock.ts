@@ -1,8 +1,9 @@
 // Mock backend for browser dev and Storybook. SYNTHETIC data only (CLAUDE rule 16): no real provider
 // names, URLs or EPG. `?mock=empty` in the URL simulates a fresh install with no source;
-// `?mock=offline` simulates a source that is offline.
+// `?mock=offline` simulates a source that is offline; `?mock=centers` adds a sample saved command center.
 import * as vod from './ipc.mock.vod';
 import { MOCK_SPORTS_CATALOG, mockSportsFollow, sportsMatchesFor } from './ipc.mock.sports';
+import { createMockFeeds } from './ipc.mock.feeds';
 import type { Backend, CommandName, Commands, EventName, Events, Unlisten } from './ipc';
 import {
   Cap,
@@ -20,6 +21,7 @@ import {
   type MultiviewState,
   type MultiviewTile,
   type MediaDetails,
+  type CommandCenter,
 } from './types';
 
 const NAMES = [
@@ -224,6 +226,18 @@ export function createMockBackend(): Backend {
   let sportsFollow = mockSportsFollow(mode === 'sports');
   const sportsBase = Math.floor(nowSec() / 300) * 300;
   const sportsProgrammes = new Map<string, Programme>();
+  // Saved command centers (COMMAND_CENTER §6.1): none by default; `?mock=centers` or `?mock=sports`
+  // adds one invented sample.
+  type StoredCenter = Omit<CommandCenter, 'tiles'> & { tiles: { slot: number; channelId: number }[] };
+  const centers: StoredCenter[] = [];
+  let nextCenterId = 1;
+  if ((mode === 'centers' || mode === 'sports') && channels.length >= 6) {
+    const at = nowSec() - 3600;
+    centers.push({
+      id: nextCenterId++, name: 'Morning briefing', layoutStyle: 'grid', audible: 0, rail: { feeds: [{ id: 1 }, { id: 2 }] },
+      tiles: [0, 1, 2, 3, 4, 5].map((slot) => ({ slot, channelId: channels[slot * 3]!.id })), createdUtc: at, updatedUtc: at,
+    });
+  }
   let statsTimer: ReturnType<typeof setInterval> | null = null;
   let player = idleState();
   const streamInUse = new Map<number, number>();
@@ -279,6 +293,8 @@ export function createMockBackend(): Backend {
     emit('catalog://updated', { sourceId, channels: channels.length, groups: groups.length, programmes: channels.length * 24 });
   };
 
+  // News feeds (COMMAND_CENTER §6.2): three invented feeds unless `?mock=empty`.
+  const feedsMock = createMockFeeds(emit, mode !== 'empty');
   const impl: { [C in CommandName]: (a: Commands[C]['args']) => Commands[C]['result'] | Promise<Commands[C]['result']> } = {
     list_sources: () => sources.map((s) => ({ ...s })),
     list_groups: () => withCounts(),
@@ -735,6 +751,47 @@ export function createMockBackend(): Backend {
       for (const [id, p] of programmes) sportsProgrammes.set(id, p);
       return matches;
     },
+    command_centers_list: () =>
+      [...centers].sort((a, b) => b.updatedUtc - a.updatedUtc || b.id - a.id).map((c) => {
+        const ids = c.tiles.map((x) => x.channelId).filter((id) => channels.some((ch) => ch.id === id));
+        return { id: c.id, name: c.name, tileCount: ids.length, channelIds: ids.slice(0, 4), updatedUtc: c.updatedUtc };
+      }),
+    command_center_get: ({ id }) => {
+      const c = centers.find((x) => x.id === id);
+      if (!c) throw appError('local', 'That command center no longer exists.');
+      const tiles = c.tiles.flatMap(({ slot, channelId }) => {
+        const channel = channels.find((ch) => ch.id === channelId);
+        return channel ? [{ slot, channel }] : [];
+      });
+      return structuredClone({ ...c, tiles });
+    },
+    command_center_save: async ({ center }) => {
+      await wait(60);
+      const name = center.name.trim();
+      if (!name) throw appError('local', 'Give the command center a name.');
+      if ([...name].length > 80) throw appError('local', 'Command center names can be up to 80 characters.');
+      const slots = center.tiles.map((x) => x.slot);
+      if (center.tiles.length > 9 || new Set(slots).size !== slots.length || slots.some((x) => x < 0 || x > 8)) {
+        throw appError('local', 'A command center holds up to 9 tiles.');
+      }
+      const at = nowSec();
+      const tiles = [...center.tiles].sort((a, b) => a.slot - b.slot);
+      if (center.id != null) {
+        const c = centers.find((x) => x.id === center.id);
+        if (!c) throw appError('local', 'That command center no longer exists.');
+        Object.assign(c, { name, layoutStyle: center.layoutStyle, audible: center.audible, rail: structuredClone(center.rail), tiles, updatedUtc: at });
+        return c.id;
+      }
+      const id = nextCenterId++;
+      centers.push({ id, name, layoutStyle: center.layoutStyle, audible: center.audible, rail: structuredClone(center.rail), tiles, createdUtc: at, updatedUtc: at });
+      return id;
+    },
+    command_center_delete: ({ id }) => {
+      const i = centers.findIndex((x) => x.id === id);
+      if (i >= 0) centers.splice(i, 1);
+      return null;
+    },
+    ...feedsMock,
   };
 
   // `?mock=update`: a newer version is downloaded and waiting (rail dot, Settings → Updates card).

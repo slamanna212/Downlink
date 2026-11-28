@@ -18,9 +18,10 @@ import {
   IconStethoscope,
   IconLayoutSidebar,
   IconTrophy,
+  IconLayoutDashboard,
 } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
-import { useCaps, useSources } from '../../api/queries';
+import { useCaps, useCommandCenters, useSources } from '../../api/queries';
 import { dl } from '../../theme';
 import { Icon } from '../../components/Icon/Icon';
 import { useUiStore } from '../../store/ui';
@@ -38,6 +39,7 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const { caps } = useCaps();
   const sources = useSources();
+  const centers = useCommandCenters();
   const density = useUiStore((s) => s.density);
   const setDensity = useUiStore((s) => s.setDensity);
   const railPref = useUiStore((s) => s.railPref);
@@ -76,6 +78,9 @@ export function CommandPalette() {
       mk('go-guide', t('nav.guide'), go('/guide'), IconCalendarTime),
       ...(caps.vod ? [mk('go-movies', t('nav.movies'), go('/movies'), IconMovie), mk('go-series', t('nav.series'), go('/series'), IconDeviceTv)] : []),
       ...(caps.dvr ? [mk('go-rec', t('nav.recordings'), go('/recordings'), IconCircle)] : []),
+      mk('go-command', t('nav.commandCenter'), go('/command'), IconLayoutDashboard),
+      mk('go-sports-command', t('palette.sportsCommand'), go('/multiview/sports'), IconTrophy),
+      ...(centers.data ?? []).map((c) => mk(`go-center-${c.id}`, t('palette.commandCenter', { name: c.name }), go(`/multiview/c/${c.id}`), IconLayoutDashboard)),
     ].filter((a) => match(a.label ?? ''));
 
     const actionItems = [
@@ -103,7 +108,7 @@ export function CommandPalette() {
       { group: t('palette.group.settings'), actions: settingsItems },
     ];
     return groups.filter((g) => g.actions.length > 0);
-  }, [q, results.data, caps.vod, caps.dvr, navigate, sources.data, density, setDensity, railPref, setRailPref]);
+  }, [q, results.data, caps.vod, caps.dvr, navigate, sources.data, centers.data, density, setDensity, railPref, setRailPref]);
 
   return (
     <Spotlight

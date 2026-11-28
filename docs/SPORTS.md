@@ -235,7 +235,11 @@ one match, and later one alert:
 3. **Alerts:** notifications N minutes before a followed match starts (default 10) and when a
    followed match goes live. These fire only while the app is running, via the Tauri notification
    plugin.
-4. **Later:** college football, more leagues, optional outside schedule data to confirm start
+4. **Command center:** every followed live game on one multiview wall, ranked by the user, with a
+   rail of what else is live and what is next. See `docs/COMMAND_CENTER.md`. Adds `priority` (an
+   ordered list of `league:team` and league/series keys) to `sports.follow`; documents without it
+   load with an empty ranking.
+5. **Later:** college football, more leagues, optional outside schedule data to confirm start
    times, auto-record rules built on top of matches.
 
 ## 7. Out of scope

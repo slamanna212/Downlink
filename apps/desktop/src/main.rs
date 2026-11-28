@@ -194,6 +194,17 @@ macro_rules! handlers {
             commands::sports::sports_follow_get,
             commands::sports::sports_follow_set,
             commands::sports::sports_matches,
+            commands::feeds::feeds_list,
+            commands::feeds::feed_add,
+            commands::feeds::feed_remove,
+            commands::feeds::feed_items,
+            commands::feeds::feed_refresh,
+            commands::feeds::feeds_watch,
+            commands::feeds::feeds_unwatch,
+            commands::command_center::command_centers_list,
+            commands::command_center::command_center_get,
+            commands::command_center::command_center_save,
+            commands::command_center::command_center_delete,
             $($extra),*
         ]
     };
@@ -280,6 +291,9 @@ fn main() {
             {
                 if let Some(pb) = st.try_playback() {
                     tauri::async_runtime::block_on(pb.release_all());
+                }
+                if let Some(svc) = st.try_service() {
+                    svc.stop_feed_poller();
                 }
                 st.updater.install_on_quit();
             }

@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Checkbox, Switch, TextInput } from '@mantine/core';
-import { IconSearch } from '@tabler/icons-react';
+import { IconArrowDown, IconArrowUp, IconSearch } from '@tabler/icons-react';
 import { useSetSportsFollow, useSportsCatalog, useSportsFollow } from '../../api/queries';
-import type { SportsFollow, SportsLeague, SportsSession } from '../../api/types';
+import type { SportsCatalog, SportsFollow, SportsLeague, SportsSession } from '../../api/types';
 import { DLButton } from '../../components/DLButton/DLButton';
+import { DLIconButton } from '../../components/DLIconButton/DLIconButton';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { Icon } from '../../components/Icon/Icon';
 import { SettingRow } from '../../components/SettingRow/SettingRow';
@@ -14,6 +15,9 @@ import {
   filterTeams,
   GROUP_ORDER,
   motorsportGroups,
+  moveRank,
+  rankEntries,
+  type RankEntry,
   setIncludeReplays,
   setLeagueFollowed,
   setSeriesFollowed,
@@ -124,6 +128,37 @@ function SeriesRow({ series, sessions, follow, update }: { series: SportsLeague;
   );
 }
 
+const rankLabel = (e: RankEntry): string =>
+  e.team ? `${e.team.short} · ${e.league.name}` : e.league.kind === 'team' ? t('sports.rank.allGames', { league: e.league.name }) : e.league.name;
+
+/**
+ * Command center order (COMMAND_CENTER §3): when more games are live than there are tiles, the
+ * higher entry gets the tile. Shown once two or more things are followed.
+ */
+function RankList({ catalog, follow, update }: { catalog: SportsCatalog; follow: SportsFollow; update: Update }) {
+  const entries = rankEntries(follow, catalog);
+  if (entries.length < 2) return null;
+  return (
+    <>
+      <h3 className={sports.subhead}>{t('sports.rank')}</h3>
+      <p className={sports.previewHelp}>{t('sports.rank.help')}</p>
+      <ol className={sports.rankList} aria-label={t('sports.rank')}>
+        {entries.map((e, i) => {
+          const name = rankLabel(e);
+          return (
+            <li key={e.key} className={sports.rankItem}>
+              <span className={sports.rankNumber}>{i + 1}</span>
+              <span className={sports.rankName}>{name}</span>
+              <DLIconButton label={t('sports.rank.up', { name })} icon={IconArrowUp} size="sm" disabled={i === 0} onClick={() => update(moveRank(follow, catalog, e.key, -1))} />
+              <DLIconButton label={t('sports.rank.down', { name })} icon={IconArrowDown} size="sm" disabled={i === entries.length - 1} onClick={() => update(moveRank(follow, catalog, e.key, 1))} />
+            </li>
+          );
+        })}
+      </ol>
+    </>
+  );
+}
+
 const PREVIEW_HOURS = 24;
 const PREVIEW_FIRST = 24;
 
@@ -195,6 +230,8 @@ export function SportsSection() {
           {series.map((s) => <SeriesRow key={s.key} series={s} sessions={sessions} follow={f} update={update} />)}
         </div>
       ))}
+
+      <RankList catalog={catalog.data} follow={f} update={update} />
 
       <Preview />
     </Section>

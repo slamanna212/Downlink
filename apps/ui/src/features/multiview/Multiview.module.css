@@ -21,6 +21,8 @@
 .grid {
   position: absolute;
   inset: 0;
+  right: var(--mv-side); /* --mv-side: set inline by MultiviewScreen; a command center rail sits there */
+  bottom: var(--mv-bottom); /* --mv-bottom: set inline; the headline ticker sits there */
   display: grid;
   gap: 0.25rem; /* theme.other.multiview.tileGap (4 px) */
   padding: 0.25rem;
@@ -234,7 +236,7 @@
 
 .toolbar {
   position: absolute;
-  bottom: var(--mantine-spacing-lg);
+  bottom: calc(var(--mv-bottom) + var(--mantine-spacing-lg));
   left: 50%;
   display: flex;
   align-items: center;
@@ -243,6 +245,7 @@
   border-radius: var(--mantine-radius-xl);
   box-shadow: var(--mantine-shadow-lg);
   transform: translateX(-50%);
+  margin-left: calc(var(--mv-side) / -2); /* centred on the grid, not the whole view */
   transition: opacity 240ms ease;
 }
 

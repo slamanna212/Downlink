@@ -1,0 +1,298 @@
+/* Command center (docs/COMMAND_CENTER.md, DESIGN.md §9.1): the right-hand rail beside the multiview
+   wall. It sits on the opaque multiview canvas, so it never covers a video surface. Tokens only. */
+
+.rail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  width: 320px; /* theme.other.layout.commandRail */
+  border-left: 1px solid var(--dl-hairline);
+  background: var(--dl-surface-1);
+}
+
+.railHead {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  /* Clears the title bar this route runs under (theme.other.layout.titleBar). */
+  padding: calc(2.25rem + var(--mantine-spacing-xs)) var(--mantine-spacing-sm) var(--mantine-spacing-xs) var(--mantine-spacing-md);
+  border-bottom: 1px solid var(--dl-hairline);
+}
+
+.railTitle {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--mantine-font-size-md);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.railBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--mantine-spacing-xs) 0 var(--mantine-spacing-lg);
+}
+
+.section + .section { margin-top: var(--mantine-spacing-md); }
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-md);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--dl-text-dim);
+}
+
+.sectionCount {
+  font-variant-numeric: tabular-nums;
+  color: var(--dl-text-faint);
+}
+
+.sectionEmpty {
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-md);
+  font-size: var(--mantine-font-size-sm);
+  color: var(--dl-text-dim);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-lg) var(--mantine-spacing-md);
+  font-size: var(--mantine-font-size-sm);
+  color: var(--dl-text-dim);
+}
+
+/* ---------- row ---------- */
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 var(--mantine-spacing-xs);
+  border-radius: var(--mantine-radius-md);
+}
+
+.row:hover,
+.row:has(:focus-visible) { background: var(--dl-row-focus); }
+
+/* The wall's focused tile: an accent bar, not a ring (the ring means keyboard focus). */
+.row[data-active]::before {
+  content: '';
+  position: absolute;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  left: 0;
+  width: 2px;
+  border-radius: var(--mantine-radius-xs);
+  background: var(--dl-accent-bar);
+}
+
+.rowMain {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  min-width: 0;
+  padding: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
+  border-radius: var(--mantine-radius-md);
+  color: var(--dl-text);
+  text-align: left;
+}
+
+.rowMain:active:not(:disabled) { background: var(--dl-surface-3); }
+.rowMain:focus-visible,
+.rowMain[data-focused] { box-shadow: var(--dl-focus-ring); }
+.rowMain:disabled { cursor: default; color: var(--dl-text-disabled); }
+.rowMain:disabled .rowMeta { color: var(--dl-text-disabled); }
+
+.rowLogo {
+  display: flex;
+  flex: none;
+  width: 48px;
+  height: 24px;
+}
+
+.rowText {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.rowTitle,
+.rowMeta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rowTitle {
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 600;
+}
+
+.rowMeta {
+  font-size: var(--mantine-font-size-xs);
+  color: var(--dl-text-dim);
+}
+
+.rowBadge {
+  flex: none;
+  pointer-events: none;
+}
+
+.rowTrack {
+  position: absolute;
+  right: var(--mantine-spacing-sm);
+  bottom: 0.125rem;
+  left: calc(48px + 2 * var(--mantine-spacing-sm));
+  height: 2px;
+  background: var(--dl-hairline-strong);
+}
+
+.rowTrack > span {
+  display: block;
+  height: 100%;
+  background: var(--dl-accent-bar);
+}
+
+.rowPin {
+  display: flex;
+  flex: none;
+  color: var(--dl-text-dim);
+}
+
+/* Actions appear on hover or keyboard focus and sit over the badge, so titles keep the width. */
+.rowActions {
+  position: absolute;
+  top: 50%;
+  right: var(--mantine-spacing-xs);
+  display: flex;
+  gap: 0.125rem;
+  padding-left: var(--mantine-spacing-lg);
+  background: linear-gradient(to right, transparent, var(--dl-row-focus) var(--mantine-spacing-lg));
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms var(--dl-ease);
+}
+
+.row:hover .rowActions,
+.row:has(:focus-visible) .rowActions,
+.row:has([data-focused]) .rowActions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rowActions { transition: none; }
+}
+
+/* ---------- name modal ---------- */
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--mantine-spacing-sm);
+  margin-top: var(--mantine-spacing-lg);
+}
+
+/* ---------- Command center page (/command) ---------- */
+.page {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--mantine-spacing-xl) 2rem 2rem;
+}
+.pageHead { display: flex; flex-direction: column; gap: var(--mantine-spacing-xs); margin-bottom: var(--mantine-spacing-xl); }
+.h1 { margin: 0; font-size: var(--mantine-h1-font-size); line-height: var(--mantine-h1-line-height); font-weight: 650; letter-spacing: -0.015em; }
+.pageSub { margin: 0; font-size: var(--mantine-font-size-md); color: var(--dl-text-dim); }
+.label {
+  margin: var(--mantine-spacing-xl) 0 var(--mantine-spacing-sm);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dl-text-faint);
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: var(--mantine-spacing-md);
+}
+.pageEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--mantine-spacing-sm);
+  max-width: 32rem;
+  padding: var(--mantine-spacing-lg);
+  border: 1px dashed var(--dl-hairline-strong);
+  border-radius: var(--mantine-radius-lg);
+  color: var(--dl-text-dim);
+  font-size: var(--mantine-font-size-md);
+}
+.pageEmptyTitle { color: var(--dl-text); font-weight: 600; }
+
+/* ---------- card ---------- */
+.cardWrap { position: relative; display: flex; min-width: 0; }
+.cardWrap > .card { flex: 1; }
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+  min-height: 9.5rem;
+  padding: 0.875rem;
+  border-radius: var(--mantine-radius-lg);
+  border: 1px solid var(--dl-hairline-strong);
+  background: var(--dl-surface-1);
+  color: var(--dl-text);
+  text-align: left;
+  transition: background-color 120ms var(--dl-ease);
+}
+.card:hover { background: var(--dl-surface-2); }
+.card:active { background: var(--dl-surface-3); }
+.card:focus-visible, .card[data-focused] { box-shadow: var(--dl-focus-ring); }
+.card:disabled { cursor: default; background: var(--dl-surface-1); color: var(--dl-text-disabled); }
+.card:disabled .cardMeta, .card:disabled .cardDesc { color: var(--dl-text-disabled); }
+.cardPreview {
+  display: flex;
+  align-items: center;
+  gap: var(--mantine-spacing-sm);
+  height: 2.75rem;
+  margin-bottom: var(--mantine-spacing-xs);
+  /* Leaves room for the corner menu. */
+  padding-right: 2.5rem;
+}
+.cardLogo { display: flex; align-items: center; width: 3rem; height: 1.5rem; }
+.cardIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: var(--mantine-radius-md);
+  background: var(--dl-surface-3);
+  color: var(--dl-text-2);
+}
+.cardName { font-size: 1rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cardDesc { font-size: var(--mantine-font-size-sm); color: var(--dl-text-2); }
+.cardMeta { margin-top: auto; font-size: var(--mantine-font-size-xs); color: var(--dl-text-dim); }
+.cardCorner { position: absolute; top: var(--mantine-spacing-sm); right: var(--mantine-spacing-sm); display: flex; }
+.cardSkeleton { background: var(--dl-row-focus); border-color: transparent; }
+
+/* ---------- saved center rail ---------- */
+.railMissing { display: flex; flex-direction: column; align-items: flex-start; gap: var(--mantine-spacing-md); padding: var(--mantine-spacing-md); color: var(--dl-text-dim); font-size: var(--mantine-font-size-sm); }

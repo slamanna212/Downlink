@@ -119,6 +119,15 @@ export function formatUpdated(epoch: Epoch, now: Epoch = nowEpoch()): string {
   return startOfDay(epoch) === startOfDay(now) ? formatClock(epoch) : formatDateTime(epoch);
 }
 
+/** How long ago `epoch` was, for "4 min ago" labels: under a minute is `now`; past a day, `day`. */
+export function ageOf(epoch: Epoch, now: Epoch = nowEpoch()): { unit: 'now' | 'min' | 'hour' | 'day'; n: number } {
+  const s = Math.max(0, now - epoch);
+  if (s < 60) return { unit: 'now', n: 0 };
+  if (s < 3600) return { unit: 'min', n: Math.floor(s / 60) };
+  if (s < 86400) return { unit: 'hour', n: Math.floor(s / 3600) };
+  return { unit: 'day', n: Math.floor(s / 86400) };
+}
+
 /** 14:05:09 (for session logs) */
 export const formatClockSeconds = (epoch: Epoch): string => at(epoch).format('HH:mm:ss');
 

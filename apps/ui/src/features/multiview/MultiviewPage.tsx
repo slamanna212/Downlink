@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useIdle } from '@mantine/hooks';
@@ -35,6 +35,7 @@ import { dl } from '../../theme';
 import { playChannel } from '../player/actions';
 import { holdFullscreen, isFullscreenKey, releaseFullscreen, setFullscreen, toggleFullscreen } from '../player/fullscreen';
 import { holdSession, releaseSession } from '../player/session';
+import { SaveCenterControls } from '../command/SaveCenterControls';
 import { layoutFor, nextStyle, stylesFor, type GridArea, type LayoutStyle } from './layout';
 import classes from './Multiview.module.css';
 
@@ -43,7 +44,7 @@ const STYLE_ICON = { grid: IconLayoutGrid, featured: IconLayoutSidebarRight } as
 const EMPTY: MultiviewState = { tiles: [], audible: 0, maxTiles: 4, streamLimit: null };
 
 /** Multiview state from Rust: `multiview://state` pushes it, `multiview://tile` asks for a refetch. */
-function useMultiviewState() {
+export function useMultiviewState(): MultiviewState & { loaded: boolean } {
   const qc = useQueryClient();
   const q = useQuery({ queryKey: ['multiview'], queryFn: () => invoke('get_multiview', {}) });
   useEffect(() => {
@@ -57,11 +58,11 @@ function useMultiviewState() {
       offs.forEach((u) => u());
     };
   }, [qc]);
-  return q.data ?? EMPTY;
+  return { ...(q.data ?? EMPTY), loaded: q.data != null };
 }
 
 /** States in which a tile's mpv surface has a picture worth showing; otherwise the canvas covers it. */
-const SHOWS_VIDEO = new Set(['Buffering', 'Playing', 'Paused']);
+export const SHOWS_VIDEO = new Set(['Buffering', 'Playing', 'Paused']);
 
 /**
  * The window is transparent so the native video surfaces under the webview show through. Anything
@@ -312,7 +313,76 @@ function Tile(p: TileProps) {
   );
 }
 
+/** What a screen built on multiview (the command center) can read and do. */
+export interface MultiviewApi {
+  /** Tiles by slot; slot 0 mirrors the main player while it plays live. */
+  tiles: Map<number, MultiviewTile>;
+  focused: number;
+  audible: number;
+  maxTiles: number;
+  /** The multiview state has arrived (until then `maxTiles` is a placeholder). */
+  loaded: boolean;
+  /** `min(maxTiles, stream limit)`. */
+  budget: number;
+  /** Puts a channel in a slot (slot 0 zaps the main player). Reports nothing to `onManualSet`. */
+  assignTile: (slot: number, channelId: number) => Promise<boolean>;
+  /** Stops a tile (never slot 0). Reports nothing to `onManualRemove`. */
+  remove: (slot: number) => void;
+  listen: (slot: number) => void;
+  focus: (slot: number) => void;
+  /** The layout the user picked (it falls back to grid when the tile count has no such layout). */
+  style: LayoutStyle;
+  /** Sets the layout. Reports nothing to `onStyleChange`. */
+  setStyle: (style: LayoutStyle) => void;
+}
+
+export interface MultiviewScreenProps {
+  /** Rendered over the canvas, inside the view: the command center's rail and its auto-fill. */
+  children?: (api: MultiviewApi) => ReactNode;
+  /** Width kept clear on the right for a side rail (px); the grid and toolbar sit left of it. */
+  sideWidth?: number;
+  /** Height kept clear at the bottom (px) for a strip such as the headline ticker; the toolbar sits above it. */
+  bottomInset?: number;
+  /** Extra toolbar controls, before Exit (a function gets the screen's API, e.g. to save the wall). */
+  toolbarExtra?: ReactNode | ((api: MultiviewApi) => ReactNode);
+  /** Layout to start with (default grid). */
+  initialStyle?: LayoutStyle;
+  /** The user changed the layout (toolbar or L). */
+  onStyleChange?: (style: LayoutStyle) => void;
+  /** The user put a channel in a slot (picker, add). */
+  onManualSet?: (slot: number, channelId: number) => void;
+  /** The user took a tile off screen (remove action, Del, unchecking in the add picker). */
+  onManualRemove?: (slot: number, channelId: number) => void;
+}
+
+/** Plain multiview: the wall the user builds by hand, which they can save as a command center. */
 export function MultiviewPage() {
+  // Set once this wall has been saved, so the next save can update it (the URL stays put: moving to
+  // the saved center's route would stop and restart every tile).
+  const [saved, setSaved] = useState<{ id: number; name: string } | null>(null);
+  const [edited, setEdited] = useState(false);
+  const touch = useCallback(() => setEdited(true), []);
+  return (
+    <MultiviewScreen
+      onManualSet={touch}
+      onManualRemove={touch}
+      onStyleChange={touch}
+      toolbarExtra={(api) => (
+        <SaveCenterControls
+          api={api}
+          center={saved}
+          edited={edited}
+          onSaved={(c) => {
+            setSaved(c);
+            setEdited(false);
+          }}
+        />
+      )}
+    />
+  );
+}
+
+export function MultiviewScreen({ children, sideWidth = 0, bottomInset = 0, toolbarExtra, initialStyle = 'grid', onStyleChange, onManualSet, onManualRemove }: MultiviewScreenProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const player = usePlayerStore((s) => s.player);
@@ -335,7 +405,14 @@ export function MultiviewPage() {
   const order = useMemo(() => [...tiles.keys()].sort((a, b) => a - b), [tiles]);
   const shown = order.length ? order : [0];
   const styles = stylesFor(shown.length);
-  const [style, setStyle] = useState<LayoutStyle>('grid');
+  const [style, setStyle] = useState<LayoutStyle>(initialStyle);
+  const changeStyle = useCallback(
+    (next: LayoutStyle) => {
+      setStyle(next);
+      onStyleChange?.(next);
+    },
+    [onStyleChange, setStyle],
+  );
   const effectiveStyle = styles.includes(style) ? style : 'grid';
   const spec = layoutFor(shown.length, effectiveStyle);
 
@@ -404,9 +481,10 @@ export function MultiviewPage() {
   const setTile = useCallback(
     (slot: number, channelId: number) => {
       setPickerSlot(null);
+      onManualSet?.(slot, channelId);
       return assignTile(slot, channelId);
     },
-    [assignTile],
+    [assignTile, onManualSet],
   );
 
   useEffect(() => {
@@ -427,6 +505,14 @@ export function MultiviewPage() {
   );
   const makeMain = useCallback((slot: number) => void invoke('multiview_make_main', { slot }).catch(notifyError), []);
   const remove = useCallback((slot: number) => void invoke('multiview_remove_tile', { slot }), []);
+  const removeByUser = useCallback(
+    (slot: number) => {
+      const id = tiles.get(slot)?.channelId;
+      if (id != null) onManualRemove?.(slot, id);
+      remove(slot);
+    },
+    [tiles, onManualRemove, remove],
+  );
   const multi: PickerMulti = {
     checked: new Set([...onScreen.keys(), ...pending.keys()]),
     locked: new Set(mainChannel != null ? [mainChannel] : []),
@@ -434,11 +520,12 @@ export function MultiviewPage() {
     onToggle: (c, on) => {
       if (!on) {
         const slot = order.find((s) => tiles.get(s)?.channelId === c.id);
-        if (slot != null && slot !== 0) remove(slot);
+        if (slot != null && slot !== 0) removeByUser(slot);
         return;
       }
       if (freeSlot == null) return;
       const slot = freeSlot;
+      onManualSet?.(slot, c.id);
       setPending((m) => new Map(m).set(c.id, slot));
       void (async () => {
         if (!(await assignTile(slot, c.id))) setPending((m) => {
@@ -475,9 +562,9 @@ export function MultiviewPage() {
       } else if (e.key === 'a' || e.key === 'A') listen_(focused);
       else if (e.key === 'Enter' && focused !== 0) makeMain(focused);
       else if (e.key === 'f' || e.key === 'F') void fullScreen(focused);
-      else if ((e.key === 'Delete' || e.key === 'Backspace') && focused !== 0) remove(focused);
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && focused !== 0) removeByUser(focused);
       else if (e.key === 'n' || e.key === 'N') setAddOpen(true);
-      else if (e.key === 'l' || e.key === 'L') setStyle(nextStyle(effectiveStyle, styles));
+      else if (e.key === 'l' || e.key === 'L') changeStyle(nextStyle(effectiveStyle, styles));
       else if (e.key === 'Escape') {
         if (fullscreen) setFullscreen(false);
         else exit();
@@ -486,7 +573,7 @@ export function MultiviewPage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [order, focused, pickerSlot, addOpen, freeSlot, focus, listen_, makeMain, fullScreen, remove, exit, effectiveStyle, styles, fullscreen]);
+  }, [order, focused, pickerSlot, addOpen, freeSlot, focus, listen_, makeMain, fullScreen, removeByUser, exit, effectiveStyle, styles, fullscreen, changeStyle]);
 
   const pickerBudget = t('multiview.pickerBudget', { used: inUse, total: budget });
   const picker = (slot: number) => (
@@ -498,10 +585,17 @@ export function MultiviewPage() {
     const x = tiles.get(slot);
     return `${slot}:${x && x.failure == null && SHOWS_VIDEO.has(x.state) ? 1 : 0}`;
   })].join('|');
-  const canvas = useCanvasPath(rootRef, layoutKey);
+  const canvas = useCanvasPath(rootRef, `${layoutKey}|${sideWidth}|${bottomInset}`);
+  const api: MultiviewApi = { tiles, focused, audible: mv.audible, maxTiles: mv.maxTiles, loaded: mv.loaded, budget, assignTile, remove, listen: listen_, focus, style, setStyle };
 
   return (
-    <div ref={rootRef} className={classes.root} data-idle={chromeHidden || undefined}>
+    <div
+      ref={rootRef}
+      className={classes.root}
+      data-idle={chromeHidden || undefined}
+      data-side={sideWidth > 0 || undefined}
+      style={{ '--mv-side': `${sideWidth}px`, '--mv-bottom': `${bottomInset}px` } as React.CSSProperties}
+    >
       <svg className={classes.canvas} aria-hidden>
         <path d={canvas} fillRule="evenodd" />
       </svg>
@@ -529,7 +623,7 @@ export function MultiviewPage() {
               onListen={() => listen_(slot)}
               onMakeMain={() => makeMain(slot)}
               onFullScreen={() => void fullScreen(slot)}
-              onRemove={() => remove(slot)}
+              onRemove={() => removeByUser(slot)}
               now={now}
               programme={prog}
             />
@@ -552,7 +646,7 @@ export function MultiviewPage() {
           <SegmentedControl
             size="xs"
             value={effectiveStyle}
-            onChange={(v) => setStyle(v as LayoutStyle)}
+            onChange={(v) => changeStyle(v as LayoutStyle)}
             aria-label={t('multiview.layout')}
             data={styles.map((l) => ({
               value: l,
@@ -573,10 +667,12 @@ export function MultiviewPage() {
           size="sm"
           onClick={toggleFullscreen}
         />
+        {typeof toolbarExtra === 'function' ? toolbarExtra(api) : toolbarExtra}
         <DLButton variant="default" size="sm" keyHint="Esc" onClick={exit}>
           {t('multiview.exit')}
         </DLButton>
       </div>
+      {children?.(api)}
     </div>
   );
 }

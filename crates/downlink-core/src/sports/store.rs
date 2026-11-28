@@ -29,6 +29,7 @@ fn default_follow() -> SportsFollowDto {
         include_replays: false,
         leagues: Default::default(),
         series: Default::default(),
+        priority: Vec::new(),
     }
 }
 

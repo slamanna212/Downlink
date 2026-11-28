@@ -1,6 +1,7 @@
 import { QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { invoke, listen } from './ipc';
-import type { Caps, CatalogUpdated, MediaTarget, SportsFollow } from './types';
+import type { Caps, CatalogUpdated, CommandCenterSave, MediaTarget, SportsFollow } from './types';
 import { notifyError } from '../components/Notify/notify';
 import { unionCaps } from '../lib/caps';
 
@@ -21,7 +22,8 @@ const EVENT_DRIVEN = 5 * 60_000;
 
 // Sports matches are re-made from guide and channel data, so anything that changes those refreshes them too.
 const GUIDE_QUERIES = ['guideProgrammes', 'nowNext', 'programmes', 'home', 'search', 'palette', 'sportsMatches'];
-const CHANNEL_QUERIES = ['sources', 'channels', 'channel', 'groups', 'counts', ...GUIDE_QUERIES];
+// Saved command centers carry channel DTOs and drop hidden channels, so channel changes refresh them.
+const CHANNEL_QUERIES = ['sources', 'channels', 'channel', 'groups', 'counts', 'commandCenters', 'commandCenter', ...GUIDE_QUERIES];
 const FAVOURITE_QUERIES = ['channels', 'channel', 'counts', 'home', 'search', 'palette'];
 const RECORDING_QUERIES = ['recordings', 'recordingRules', ...GUIDE_QUERIES];
 
@@ -244,4 +246,121 @@ export function useSportsMatches(startUtc: number, endUtc: number, enabled = tru
     placeholderData: (prev) => prev,
     refetchInterval: 60_000,
   });
+}
+
+// ---- saved command centers (COMMAND_CENTER §6.1) -------------------------------------------------
+
+export const COMMAND_CENTERS_KEY = ['catalog', 'commandCenters'];
+
+/** Saved centers, most recently changed first. */
+export const useCommandCenters = () =>
+  useQuery({ queryKey: COMMAND_CENTERS_KEY, queryFn: () => invoke('command_centers_list', {}), staleTime: EVENT_DRIVEN });
+
+export const commandCenterQuery = (id: number | null) => ({
+  queryKey: ['catalog', 'commandCenter', id],
+  queryFn: () => invoke('command_center_get', { id: id! }),
+  enabled: id != null,
+  staleTime: EVENT_DRIVEN,
+  retry: false,
+});
+
+export const useCommandCenter = (id: number | null) => useQuery(commandCenterQuery(id));
+
+function invalidateCenters(qc: QueryClient) {
+  return invalidateCatalog(qc, ['commandCenters', 'commandCenter']);
+}
+
+/** Creates (`id` null) or replaces a center; resolves to its id. */
+export function useSaveCommandCenter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (center: CommandCenterSave) => invoke('command_center_save', { center }),
+    onSuccess: () => invalidateCenters(qc),
+  });
+}
+
+export function useDeleteCommandCenter() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => invoke('command_center_delete', { id }),
+    onSuccess: (_r, id) => {
+      qc.removeQueries({ queryKey: ['catalog', 'commandCenter', id] });
+      return invalidateCenters(qc);
+    },
+  });
+}
+
+// ---- news feeds (COMMAND_CENTER §6.2) ------------------------------------------------------------
+// Not under 'catalog': guide/channel syncs never touch feeds. `feeds://updated` and our own mutations
+// invalidate them.
+
+export const FEEDS_KEY = ['feeds'] as const;
+const FEED_LIST_KEY = ['feeds', 'list'] as const;
+
+/** All added feeds, sorted by title. */
+export const useFeeds = () =>
+  useQuery({ queryKey: FEED_LIST_KEY, queryFn: () => invoke('feeds_list', {}), staleTime: EVENT_DRIVEN });
+
+/** Headlines of `feedIds`, newest first (disabled while the list is empty). */
+export function useFeedItems(feedIds: readonly number[], limit = 100) {
+  const ids = [...new Set(feedIds)].sort((a, b) => a - b);
+  return useQuery({
+    queryKey: ['feeds', 'items', ids, limit],
+    queryFn: () => invoke('feed_items', { feedIds: ids, limit }),
+    enabled: ids.length > 0,
+    placeholderData: (prev) => prev,
+    staleTime: EVENT_DRIVEN,
+  });
+}
+
+const invalidateFeeds = (qc: QueryClient) => qc.invalidateQueries({ queryKey: FEEDS_KEY });
+
+/** Validates and fetches the feed once in Rust; rejects (nothing saved) when that fetch fails. */
+export function useAddFeed() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (url: string) => invoke('feed_add', { url }), onSuccess: () => invalidateFeeds(qc) });
+}
+
+export function useRemoveFeed() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: number) => invoke('feed_remove', { id }), onSuccess: () => invalidateFeeds(qc) });
+}
+
+/** Manual refresh. A failure still updates the feed's `lastError`, so the list is re-read either way. */
+export function useRefreshFeed() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: number) => invoke('feed_refresh', { id }), onSettled: () => invalidateFeeds(qc) });
+}
+
+let watchSeq = 0;
+
+/**
+ * Polls `feedIds` in Rust while the calling view is mounted (call it once per open command center):
+ * `feeds_watch` on mount and whenever the set changes, `feeds_unwatch` on unmount. Every effect run
+ * uses a fresh key, so a late unwatch from an earlier run never cancels a newer watch. Invalidates
+ * feed queries on `feeds://updated` for these feeds.
+ */
+export function useFeedsWatch(feedIds: readonly number[]): void {
+  const qc = useQueryClient();
+  const idsKey = [...new Set(feedIds)].sort((a, b) => a - b).join(',');
+
+  useEffect(() => {
+    const watched = idsKey ? idsKey.split(',').map(Number) : [];
+    if (watched.length === 0) return;
+    const key = `watch-${++watchSeq}-${Math.random().toString(36).slice(2, 8)}`;
+    void invoke('feeds_watch', { key, feedIds: watched }).catch(() => {});
+    let unlisten: (() => void) | null = null;
+    let live = true;
+    void listen('feeds://updated', ({ feedIds: changed }) => {
+      if (changed.some((id) => watched.includes(id))) void invalidateFeeds(qc);
+    }).then((u) => {
+      if (live) unlisten = u;
+      else u();
+    });
+    return () => {
+      live = false;
+      unlisten?.();
+      void invoke('feeds_unwatch', { key }).catch(() => {});
+    };
+  }, [idsKey, qc]);
 }
