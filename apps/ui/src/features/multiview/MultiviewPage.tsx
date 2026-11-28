@@ -34,7 +34,7 @@ import { useUiStore } from '../../store/ui';
 import { dl } from '../../theme';
 import { playChannel } from '../player/actions';
 import { holdFullscreen, isFullscreenKey, releaseFullscreen, setFullscreen, toggleFullscreen } from '../player/fullscreen';
-import { holdSession, releaseSession } from '../player/session';
+import { ACTIVE_PHASES, holdSession, releaseSession } from '../player/session';
 import { SaveCenterControls } from '../command/SaveCenterControls';
 import { layoutFor, nextStyle, stylesFor, type GridArea, type LayoutStyle } from './layout';
 import classes from './Multiview.module.css';
@@ -390,8 +390,11 @@ export function MultiviewScreen({ children, sideWidth = 0, bottomInset = 0, tool
   const fullscreen = useUiStore((s) => s.fullscreen);
   const now = useNowEpoch(15_000);
 
-  // Slot 0 mirrors the main player: its channel when playing live.
-  const mainChannel = player.mode === 'live' && player.channelId != null ? player.channelId : null;
+  // Slot 0 mirrors the main player: its channel while a live play is active (or failed, so the error
+  // shows). A stopped player keeps its last channel id; showing that would leave a dead, black tile
+  // (opening multiview from a page other than the player stops playback on the way).
+  const mainLive = ACTIVE_PHASES.has(player.state) || player.state === 'Failed';
+  const mainChannel = player.mode === 'live' && player.channelId != null && mainLive ? player.channelId : null;
   const tiles = useMemo(() => {
     const m = new Map<number, MultiviewTile>();
     mv.tiles.filter((x) => x.slot !== 0).forEach((x) => m.set(x.slot, x));

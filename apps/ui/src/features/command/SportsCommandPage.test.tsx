@@ -1,10 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../../app/App';
 import { createTestRouter } from '../../app/routes';
 import { createQueryClient } from '../../api/queries';
 import { invoke, setBackend, type Backend } from '../../api/ipc';
-import { createMockBackend } from '../../api/ipc.mock';
+import { createMockBackend, idleState } from '../../api/ipc.mock';
+import { usePlayerStore } from '../../store/player';
 import { mockSportsFollow } from '../../api/ipc.mock.sports';
 
 beforeEach(() => {
@@ -76,6 +77,19 @@ describe('sports command center', () => {
     renderAt('/multiview/sports');
     expect(await screen.findByRole('button', { name: 'Choose sports' })).toBeInTheDocument();
     expect(STREAMS.flatMap((c) => sent(backend, c))).toHaveLength(0);
+  });
+
+  it('shows no tile for a main player that was stopped on the way in', async () => {
+    // Opening the wall from Home or Command centers stops the player; the backend keeps its last
+    // live channel, which must not linger as a dead, black slot 0.
+    setBackend(recording());
+    renderAt('/multiview/sports');
+    expect(await screen.findByRole('button', { name: 'Choose sports' })).toBeInTheDocument();
+    act(() => usePlayerStore.getState().setPlayer({ ...idleState(), state: 'Stopped', mode: 'live', channelId: 1 }));
+    const slot = await screen.findByRole('group', { name: 'Slot 1: empty' });
+    // An empty slot offers the picker; a lingering stopped tile would not.
+    await waitFor(() => expect(slot).toHaveAttribute('data-empty'));
+    expect(within(slot).getByRole('button', { name: /Add channel/ })).toBeInTheDocument();
   });
 
   it('stops every tile when leaving', async () => {
