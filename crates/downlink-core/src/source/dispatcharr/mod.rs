@@ -37,6 +37,8 @@ pub const MIN_VERSION: (u32, u32, u32) = (0, 32, 0);
 /// Per-source request concurrency (PLAN §2.5).
 const MAX_CONCURRENT: usize = 2;
 const MAX_PAGES: u32 = 10_000;
+/// VOD categories whose title count is asked for at sync; any beyond show no count.
+const MAX_COUNTED_VOD_CATEGORIES: usize = 500;
 /// Bound on one guide-grid reply. Larger windows are fetched as several smaller slices.
 const GRID_MAX_BYTES: usize = 96 * 1024 * 1024;
 /// The grid is never split below this (a reply this short that is still too large fails).
@@ -909,7 +911,10 @@ impl DispatcharrClient {
                 {
                     let half = ((end - start) / 2).max(MIN_GRID_SLICE_SECS);
                     self.grid_slice_secs.store(half, Relaxed);
-                    tracing::info!(slice_secs = half, "guide window split into smaller requests");
+                    tracing::info!(
+                        slice_secs = half,
+                        "guide window split into smaller requests"
+                    );
                     if slice == 0 {
                         // Programmes from earlier slices are only de-duplicated from now on.
                         seen.extend(out.iter().map(|p| (p.channel_ref.clone(), p.start_utc)));
@@ -1521,7 +1526,13 @@ impl Source for DispatcharrClient {
         use futures_util::{StreamExt, stream};
 
         let mut cats = self.cached_vod_categories(kind).await?;
-        let names: Vec<_> = cats.iter().take(80).map(|c| c.name.clone()).collect();
+        // One small count request per category, during the catalog sync only (the result is
+        // cached). Bounded so a runaway category list cannot stall the sync.
+        let names: Vec<_> = cats
+            .iter()
+            .take(MAX_COUNTED_VOD_CATEGORIES)
+            .map(|c| c.name.clone())
+            .collect();
         let counts = stream::iter(names)
             .map(|name| async move { self.vod_category_count(kind, &name).await.ok() })
             .buffered(MAX_CONCURRENT)

@@ -875,6 +875,11 @@ async fn xtream_vod_through_the_service() {
         .await
         .unwrap();
     assert_eq!(paged[0].title, "Test Movie 2 (2022)");
+    // The global search finds titles in the stored catalogue.
+    let found = svc.search("movie 2", 20).await.unwrap();
+    assert_eq!(found.vod.len(), 1);
+    assert_eq!(found.vod[0].kind, "movie");
+    assert_eq!(found.vod[0].title, "Test Movie 2 (2022)");
 
     let p = svc
         .play_vod(PlayVodArgs {

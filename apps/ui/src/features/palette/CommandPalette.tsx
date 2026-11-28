@@ -66,6 +66,10 @@ export function CommandPalette() {
       mk(`p${p.id}`, p.title ?? '', () => activateProgramme(p, channel, navigate), IconCalendarTime, `${channel.name} · ${dayLabel(p.startUtc)} ${formatClock(p.startUtc)}`),
     );
 
+    const vodActions = (q ? results.data?.vod ?? [] : []).map((v) =>
+      mk(`v${v.kind}${v.id}`, v.title, go(`/${v.kind === 'movie' ? 'movies' : 'series'}/${v.id}`), v.kind === 'movie' ? IconMovie : IconDeviceTv, v.year ? String(v.year) : undefined),
+    );
+
     const goActions = [
       mk('go-home', t('nav.home'), go('/'), IconHome),
       mk('go-channels', t('nav.channels'), go('/channels'), IconListDetails),
@@ -93,6 +97,7 @@ export function CommandPalette() {
     const groups: SpotlightActionGroupData[] = [
       { group: t('palette.group.channels'), actions: channelActions },
       { group: t('palette.group.programmes'), actions: progActions },
+      { group: t('palette.group.vod'), actions: vodActions },
       { group: t('palette.group.go'), actions: goActions },
       { group: t('palette.group.actions'), actions: [...seeAll, ...actionItems] },
       { group: t('palette.group.settings'), actions: settingsItems },

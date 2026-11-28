@@ -507,6 +507,16 @@ export interface ProgrammeHit {
 export interface SearchResult {
   channels: Channel[];
   programmes: ProgrammeHit[];
+  /** Movies and series whose title matches. */
+  vod: VodHit[];
+}
+
+export interface VodHit {
+  id: number;
+  kind: 'movie' | 'series';
+  title: string;
+  year: number | null;
+  poster: string | null;
 }
 
 // ---- VOD ----

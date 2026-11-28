@@ -1,4 +1,6 @@
+import { useCallback, useRef } from 'react';
 import { UnstyledButton } from '@mantine/core';
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import { useLocalStorage } from '@mantine/hooks';
 import { DLButton } from '../../components/DLButton/DLButton';
 import { orderGroups, type GroupOrder } from './groupOrder';
@@ -12,10 +14,24 @@ export type GroupSelection = { kind: 'all' } | { kind: 'favourites' } | { kind: 
 
 export const selectionKey = (s: GroupSelection) => (s.kind === 'group' ? `g${s.id}` : s.kind);
 
-function GroupItem({ label, count, active, onSelect, focusKey }: { label: string; count: number; active: boolean; onSelect: () => void; focusKey: string }) {
+/** Fixed row height of a group entry (matches `.group` height). */
+const ROW_H = 38;
+
+interface GroupItemProps {
+  label: string;
+  count: number;
+  active: boolean;
+  onSelect: () => void;
+  focusKey: string;
+  onFocused?: () => void;
+  style?: React.CSSProperties;
+}
+
+function GroupItem({ label, count, active, onSelect, focusKey, onFocused, style }: GroupItemProps) {
   const { ref, focusProps } = useDLFocusable<object, HTMLButtonElement>({
     focusKey,
     onEnterPress: onSelect,
+    onFocus: onFocused,
     onArrowPress: (dir) => {
       if (dir === 'right') {
         setFocus('CHANNEL_LIST');
@@ -25,7 +41,7 @@ function GroupItem({ label, count, active, onSelect, focusKey }: { label: string
     },
   });
   return (
-    <UnstyledButton ref={ref} className={classes.group} data-active={active || undefined} aria-current={active ? 'true' : undefined} onClick={onSelect} {...focusProps}>
+    <UnstyledButton ref={ref} className={classes.group} style={style} data-active={active || undefined} aria-current={active ? 'true' : undefined} onClick={onSelect} {...focusProps}>
       <span>{label}</span>
       <span className={classes.groupCount}>{count}</span>
     </UnstyledButton>
@@ -49,6 +65,25 @@ export function GroupSidebar({ groups, total, favourites, selection, onSelect }:
     { key: 'all', label: t('channels.all'), count: total, sel: { kind: 'all' } },
     ...orderGroups(groups, order).map((g) => ({ key: `g${g.id}`, label: g.name, count: g.count, sel: { kind: 'group', id: g.id } as GroupSelection })),
   ];
+  // Sources with thousands of groups: only the entries in view are mounted. The selected one always
+  // is, so focus can move to it from the channel list (ArrowLeft) wherever the list is scrolled.
+  const activeIndex = entries.findIndex((e) => isActive(e.sel));
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const r = defaultRangeExtractor(range);
+      return activeIndex >= 0 && !r.includes(activeIndex) ? [...r, activeIndex].sort((a, b) => a - b) : r;
+    },
+    [activeIndex],
+  );
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const virtualizer = useVirtualizer({
+    count: entries.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_H,
+    overscan: 10,
+    rangeExtractor,
+  });
   return (
     <nav className={classes.sidebar} aria-label={t('channels.groups')}>
       <div className={classes.sidebarLabel}>{t('channels.groups')}</div>
@@ -56,9 +91,27 @@ export function GroupSidebar({ groups, total, favourites, selection, onSelect }:
         onClick={() => setOrder(providerOrder ? 'alphabetical' : 'provider')}>
         {t(providerOrder ? 'channels.groupOrder.provider' : 'channels.groupOrder.alpha')}
       </DLButton>
-      {entries.map((e) => (
-        <GroupItem key={e.key} focusKey={`GROUP_${e.key}`} label={e.label} count={e.count} active={isActive(e.sel)} onSelect={() => onSelect(e.sel)} />
-      ))}
+      <div ref={scrollRef} className={classes.groupList}>
+        <div className={classes.groupInner} style={{ height: virtualizer.getTotalSize() }}>
+          {virtualizer.getVirtualItems().map((v) => {
+            const e = entries[v.index];
+            if (!e) return null;
+            return (
+              <GroupItem
+                key={e.key}
+                focusKey={`GROUP_${e.key}`}
+                label={e.label}
+                count={e.count}
+                active={isActive(e.sel)}
+                onSelect={() => onSelect(e.sel)}
+                // Keep the neighbours of a keyboard-focused entry mounted.
+                onFocused={() => virtualizer.scrollToIndex(v.index)}
+                style={{ position: 'absolute', top: 0, left: 0, transform: `translateY(${v.start}px)` }}
+              />
+            );
+          })}
+        </div>
+      </div>
     </nav>
   );
 }

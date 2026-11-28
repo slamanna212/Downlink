@@ -165,6 +165,9 @@ pub struct ServiceConfig {
     pub app_version: String,
 }
 
+/// A per-key async lock (one long-running job at a time).
+type AsyncLock = Arc<tokio::sync::Mutex<()>>;
+
 pub struct Service {
     store: Store,
     secrets: Arc<dyn SecretStore>,
@@ -177,7 +180,7 @@ pub struct Service {
     /// One sync at a time per source: a manual sync during an auto refresh waits for it.
     sync_locks: Mutex<HashMap<i64, Arc<tokio::sync::Mutex<()>>>>,
     /// One download of a source's whole VOD catalogue (movies or series) at a time.
-    vod_catalog_locks: Mutex<HashMap<(i64, &'static str), Arc<tokio::sync::Mutex<()>>>>,
+    vod_catalog_locks: Mutex<HashMap<(i64, &'static str), AsyncLock>>,
     /// Auto refresh interval in seconds (0 = off), cached from settings for `status_of`.
     auto_refresh_secs: std::sync::atomic::AtomicI64,
     registered_logos: Mutex<HashSet<String>>,
@@ -1577,11 +1580,17 @@ impl Service {
             ..f.clone()
         };
         // Both legs are independent reads: run them concurrently on the pool.
-        let (rows, progs) = tokio::join!(
+        let (rows, progs, vod) = tokio::join!(
             catalog::list_channels(&self.store, &chan_filter, limit, 0),
             catalog::search_programmes(&self.store, &f, query, now_utc(), limit),
+            self.search_vod_titles(query, limit.min(media::VOD_SEARCH_LIMIT)),
         );
         let (rows, progs) = (rows?, progs?);
+        // VOD is a bonus leg: a slow or failing server never fails the search.
+        let vod = vod.unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "vod search failed");
+            Vec::new()
+        });
         // Each hit carries its full channel DTO (logo included) so the UI needs no second call.
         let ids: Vec<i64> = {
             let mut seen = HashSet::new();
@@ -1622,6 +1631,7 @@ impl Service {
         Ok(SearchDto {
             channels,
             programmes,
+            vod,
         })
     }
 

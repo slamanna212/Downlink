@@ -15,6 +15,11 @@ const VOD_CATS_ENTITY: &str = "vod_categories";
 /// again. A stale one keeps being served while the new copy downloads in the background.
 const VOD_CATALOG_TTL_SECS: i64 = 6 * 3600;
 
+/// Most movies and series in one global search.
+pub(super) const VOD_SEARCH_LIMIT: i64 = 12;
+/// How long the global search waits for a paged server's title search.
+const VOD_SEARCH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(1500);
+
 /// `sync_state` entity of a stored whole catalogue.
 fn catalog_entity(kind: VodKind) -> &'static str {
     match kind {
@@ -38,7 +43,11 @@ async fn refresh_vod_catalog(
             .sync_vod_catalog(source_id, kind, &items, now_utc())
             .await?;
         store.recount_vod_categories(source_id, kind).await?;
-        tracing::info!(titles = items.len(), kind = kind.as_str(), "vod catalogue stored");
+        tracing::info!(
+            titles = items.len(),
+            kind = kind.as_str(),
+            "vod catalogue stored"
+        );
         Ok::<(), AppError>(())
     }
     .await;
@@ -181,7 +190,8 @@ impl Service {
                     id,
                     name: c.name,
                     count: c.count.unwrap_or(0),
-                    count_pending: false,
+                    // The server could not say: shown without a number, never as 0.
+                    count_pending: c.count.is_none(),
                 });
             }
         }
@@ -299,6 +309,81 @@ impl Service {
             out.extend(rows);
         }
         Ok((out, grand_total))
+    }
+
+    /// Movies and series matching `query` for the global search: stored titles (whole
+    /// catalogues and what was browsed on paged servers) plus a short server search on paged
+    /// sources, bounded by [`VOD_SEARCH_TIMEOUT`] so a slow server never holds up the results.
+    pub(super) async fn search_vod_titles(
+        &self,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<VodHitDto>> {
+        let sources = self.caps_sources(Caps::VOD).await?;
+        if sources.is_empty() || query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: HashSet<i64> = sources.iter().map(|s| s.id).collect();
+        let mut rows: Vec<VodRow> = self
+            .store
+            .search_vod(query, limit * 2)
+            .await?
+            .into_iter()
+            .filter(|r| ids.contains(&r.source_id))
+            .collect();
+        for src in &sources {
+            let Ok(client) = self.client(src.id).await else {
+                continue;
+            };
+            if client.vod_whole_catalog() {
+                continue;
+            }
+            for kind in [VodKind::Movie, VodKind::Series] {
+                let q = VodListQuery {
+                    category_ext: None,
+                    search: Some(query.to_owned()),
+                    offset: 0,
+                    limit: limit.min(10),
+                };
+                let page = match tokio::time::timeout(VOD_SEARCH_TIMEOUT, client.vod_list(kind, &q))
+                    .await
+                {
+                    Ok(Ok(page)) => page,
+                    Ok(Err(e)) => {
+                        tracing::debug!(error = %e, "server vod search failed");
+                        continue;
+                    }
+                    Err(_) => continue,
+                };
+                rows.extend(
+                    self.store
+                        .upsert_vod_items(src.id, &page.items, now_utc())
+                        .await?,
+                );
+            }
+        }
+        let mut seen = HashSet::new();
+        rows.retain(|r| matches!(r.kind.as_str(), "movie" | "series") && seen.insert(r.id));
+        rows.truncate(usize::try_from(limit).unwrap_or(0));
+        let art = self.page_art(&rows, true).await;
+        Ok(rows
+            .iter()
+            .map(|r| VodHitDto {
+                id: r.id,
+                kind: if r.kind == "series" {
+                    "series"
+                } else {
+                    "movie"
+                },
+                title: r.name.clone(),
+                year: r.year,
+                poster: r
+                    .art_key
+                    .as_ref()
+                    .and_then(|u| art.get(&r.source_id)?.get(u))
+                    .cloned(),
+            })
+            .collect())
     }
 
     fn vod_catalog_lock(
@@ -504,7 +589,11 @@ impl Service {
     }
 
     /// A page of series and the total matching (when known), for the browse grid.
-    pub async fn series_page(&self, a: VodListArgs, compact: bool) -> Result<VodPageDto<SeriesDto>> {
+    pub async fn series_page(
+        &self,
+        a: VodListArgs,
+        compact: bool,
+    ) -> Result<VodPageDto<SeriesDto>> {
         let (rows, total) = self.vod_rows(VodKind::Series, &a).await?;
         Ok(VodPageDto {
             items: self.series_dtos(&rows, compact).await?,

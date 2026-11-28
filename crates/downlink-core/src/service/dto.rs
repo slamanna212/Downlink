@@ -330,6 +330,20 @@ pub struct ProgrammeHitDto {
 pub struct SearchDto {
     pub channels: Vec<ChannelDto>,
     pub programmes: Vec<ProgrammeHitDto>,
+    /// Movies and series whose title matches.
+    pub vod: Vec<VodHitDto>,
+}
+
+/// A movie or series in the global search.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VodHitDto {
+    pub id: i64,
+    /// `movie` or `series`.
+    pub kind: &'static str,
+    pub title: String,
+    pub year: Option<i64>,
+    pub poster: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

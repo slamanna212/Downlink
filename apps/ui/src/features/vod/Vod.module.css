@@ -32,6 +32,8 @@
   display: flex; flex-direction: column; gap: var(--mantine-spacing-sm); min-width: 0; text-align: left;
   border-radius: var(--mantine-radius-md); cursor: pointer; color: var(--dl-text);
 }
+/* A tile whose page has not loaded yet (windowed paging). */
+.tileSkeleton { aspect-ratio: 2 / 3; width: 100%; align-self: start; }
 .tile[data-active] .posterRing { box-shadow: var(--dl-focus-ring); }
 .posterRing { border-radius: var(--mantine-radius-md); }
 .tile:hover .posterRing { box-shadow: 0 0 0 1px var(--dl-border); }

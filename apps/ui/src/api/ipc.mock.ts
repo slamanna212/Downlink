@@ -357,7 +357,7 @@ export function createMockBackend(): Backend {
     },
     search: ({ query, limit }) => {
       const q = query.trim().toLowerCase();
-      if (!q) return { channels: [], programmes: [] };
+      if (!q) return { channels: [], programmes: [], vod: [] };
       const hits = channels.filter((c) => c.name.toLowerCase().includes(q) || String(c.number ?? '').startsWith(q));
       // Programme index built once (now/next of the first 300 channels): keeps the mock off the render path.
       searchIndex ??= channels.slice(0, 300).flatMap((c) => {
@@ -365,7 +365,7 @@ export function createMockBackend(): Backend {
         return [nn.now, nn.next].filter((p): p is Programme => !!p).map((p) => ({ programme: p, channel: c, hay: (p.title ?? '').toLowerCase() }));
       });
       const progs = searchIndex.filter((x) => x.hay.includes(q)).slice(0, limit).map(({ programme, channel }) => ({ programme, channel }));
-      return { channels: hits.slice(0, limit), programmes: progs };
+      return { channels: hits.slice(0, limit), programmes: progs, vod: vod.searchVod(q, Math.min(limit, 12)) };
     },
     get_channel_by_uuid: ({ uuid }) => channels.find((c) => c.uuid === uuid) ?? null,
     export_diagnostics: () => '/home/user/Downloads/downlink-diagnostics.zip',

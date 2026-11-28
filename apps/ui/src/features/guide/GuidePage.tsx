@@ -100,6 +100,10 @@ const GuideControls = memo(function GuideControls({ span, onSpan, groupId, group
         leftSection={<IconFilter size={14} stroke={dl.iconStroke} />}
         classNames={{ input: classes.filterInput }}
         value={groupId == null ? 'all' : String(groupId)}
+        // Sources can have thousands of groups: type to filter, and render a bounded list.
+        searchable
+        limit={200}
+        maxDropdownHeight={360}
         data={[{ value: 'all', label: t('guide.allGroups') }, ...groups.map((g) => ({ value: String(g.id), label: g.name }))]}
         onChange={(v) => onGroup(v && v !== 'all' ? Number(v) : null)}
       />

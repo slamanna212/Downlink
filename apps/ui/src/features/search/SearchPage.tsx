@@ -5,7 +5,8 @@ import { TextInput } from '@mantine/core';
 import { IconSearch } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
 import { useCaps } from '../../api/queries';
-import type { Channel, ProgrammeHit } from '../../api/types';
+import type { Channel, ProgrammeHit, VodHit } from '../../api/types';
+import { Poster } from '../../components/Poster/Poster';
 import { ChannelLogo } from '../../components/ChannelLogo/ChannelLogo';
 import { ErrorState } from '../../components/ErrorState/ErrorState';
 import { Icon } from '../../components/Icon/Icon';
@@ -23,7 +24,7 @@ import classes from './Search.module.css';
 
 const LIMIT = 20;
 
-type Item = { kind: 'channel'; channel: Channel } | { kind: 'programme'; hit: ProgrammeHit };
+type Item = { kind: 'channel'; channel: Channel } | { kind: 'programme'; hit: ProgrammeHit } | { kind: 'vod'; vod: VodHit };
 
 export function SearchPage() {
   const navigate = useNavigate();
@@ -44,6 +45,7 @@ export function SearchPage() {
     () => [
       ...(results.data?.channels ?? []).map((channel): Item => ({ kind: 'channel', channel })),
       ...(results.data?.programmes ?? []).map((hit): Item => ({ kind: 'programme', hit })),
+      ...(results.data?.vod ?? []).map((vod): Item => ({ kind: 'vod', vod })),
     ],
     [results.data],
   );
@@ -56,11 +58,13 @@ export function SearchPage() {
   const activate = (it: Item | undefined) => {
     if (!it) return;
     if (it.kind === 'channel') void playChannel(it.channel.id).then((err) => (err ? undefined : navigate('/player')));
+    else if (it.kind === 'vod') void navigate(vodPath(it.vod));
     else activateProgramme(it.hit.programme, it.hit.channel, navigate);
   };
 
   if (loaded && !hasSource) return <EmptySource />;
   const channelCount = results.data?.channels.length ?? 0;
+  const vodStart = channelCount + (results.data?.programmes.length ?? 0);
   const now = nowEpoch();
 
   return (
@@ -115,10 +119,10 @@ export function SearchPage() {
             )}
           </div>
         )}
-        {items.length > channelCount && (
+        {vodStart > channelCount && (
           <div role="group" aria-label={t('search.programmes')} className={classes.group}>
             <div className={classes.groupLabel} aria-hidden>{t('search.programmes')}</div>
-            {items.slice(channelCount).map((it, k) => {
+            {items.slice(channelCount, vodStart).map((it, k) => {
               if (it.kind !== 'programme') return null;
               const i = channelCount + k;
               const p = it.hit.programme;
@@ -140,7 +144,27 @@ export function SearchPage() {
             })}
           </div>
         )}
+        {items.length > vodStart && (
+          <div role="group" aria-label={t('search.vod')} className={classes.group}>
+            <div className={classes.groupLabel} aria-hidden>{t('search.vod')}</div>
+            {items.slice(vodStart).map((it, k) => {
+              if (it.kind !== 'vod') return null;
+              const i = vodStart + k;
+              return (
+                <div key={`v${it.vod.kind}${it.vod.id}`} id={`sr-${i}`} role="option" aria-selected={i === active} data-active={i === active || undefined} className={classes.item} onClick={() => activate(it)} onMouseMove={() => i !== active && setActive(i)}>
+                  <span className={classes.vodPoster}><Poster src={it.vod.poster} title={it.vod.title} /></span>
+                  <span className={classes.main}>
+                    <span className={classes.name}>{it.vod.title}</span>
+                    <span className={classes.sub}>{[it.vod.kind === 'movie' ? t('search.vod.movie') : t('search.vod.series'), it.vod.year].filter(Boolean).join(' · ')}</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+const vodPath = (v: VodHit) => `/${v.kind === 'movie' ? 'movies' : 'series'}/${v.id}`;

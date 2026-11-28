@@ -417,7 +417,11 @@ async fn whole_vod_catalogue_sync_keeps_ids_and_details_and_drops_removed_titles
         .sync_vod_catalog(src.id, VodKind::Movie, &first, 10)
         .await
         .unwrap();
-    let alpha = store.vod_by_ext(src.id, "movie", "1").await.unwrap().unwrap();
+    let alpha = store
+        .vod_by_ext(src.id, "movie", "1")
+        .await
+        .unwrap()
+        .unwrap();
     // A detail fetched on demand is not erased by the next list refresh.
     let mut detail = movie("1", "Alpha Test", "a");
     detail.plot = Some("Fetched on demand.".into());
@@ -433,11 +437,17 @@ async fn whole_vod_catalogue_sync_keeps_ids_and_details_and_drops_removed_titles
         .await
         .unwrap();
     assert_eq!(total, 2, "Beta is gone");
-    assert_eq!(rows[0].name, "Gamma Test", "provider order follows the new list");
+    assert_eq!(
+        rows[0].name, "Gamma Test",
+        "provider order follows the new list"
+    );
     assert_eq!(rows[1].id, alpha.id, "row ids are stable");
     assert_eq!(rows[1].description.as_deref(), Some("Fetched on demand."));
     assert_eq!(
-        store.vod_catalog_counts(src.id, VodKind::Movie).await.unwrap()["a"],
+        store
+            .vod_catalog_counts(src.id, VodKind::Movie)
+            .await
+            .unwrap()["a"],
         2
     );
     // Phrase search: the words in order, the last one a prefix.
@@ -451,7 +461,11 @@ async fn whole_vod_catalogue_sync_keeps_ids_and_details_and_drops_removed_titles
         .await
         .unwrap();
     assert!(hits.is_empty());
-    assert_eq!(store.search_vod("beta", 10).await.unwrap().len(), 0, "removed from search");
+    assert_eq!(
+        store.search_vod("beta", 10).await.unwrap().len(),
+        0,
+        "removed from search"
+    );
     assert_eq!(store.search_vod("alpha", 10).await.unwrap().len(), 1);
 }
 

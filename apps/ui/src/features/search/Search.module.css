@@ -17,3 +17,9 @@
 .ep { font-size: var(--mantine-font-size-sm); font-weight: 600; color: var(--dl-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sub { font-size: var(--mantine-font-size-sm); color: var(--dl-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty { color: var(--dl-text-dim); margin-top: var(--mantine-spacing-xl); }
+
+/* Small 2:3 poster in a movie / series result. */
+.vodPoster {
+  flex: none;
+  width: 28px;
+}

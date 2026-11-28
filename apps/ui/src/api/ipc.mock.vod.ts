@@ -1,5 +1,5 @@
 // Synthetic VOD + DVR data for the mock backend (CLAUDE rule 16: no real titles or providers).
-import type { Episode, Movie, Recording, RecordingRule, RecordingsData, Season, Series, SeriesDetail, VodCategory, VodListArgs } from './types';
+import type { Episode, Movie, VodHit, Recording, RecordingRule, RecordingsData, Season, Series, SeriesDetail, VodCategory, VodListArgs } from './types';
 
 const WORDS_A = ['Silent', 'Golden', 'Northern', 'Hidden', 'Paper', 'Electric', 'Midnight', 'Crimson', 'Distant', 'Hollow', 'Velvet', 'Iron', 'Last', 'Winter', 'Glass', 'Wild'];
 const WORDS_B = ['Harbour', 'Garden', 'Signal', 'Orchard', 'Lantern', 'Station', 'River', 'Compass', 'Engine', 'Archive', 'Meadow', 'Tower', 'Voyage', 'Season', 'Echo', 'Frontier'];
@@ -55,6 +55,11 @@ const withResume = (m: Movie): Movie => {
 
 export const countMovies = (a: VodListArgs) => page(allMovies(), { ...a, offset: 0, limit: Infinity }).length;
 export const countSeries = (a: VodListArgs) => page(allSeries(), { ...a, offset: 0, limit: Infinity }).length;
+/** Global search: movies, then series, whose title contains `q` (already lower-cased). */
+export const searchVod = (q: string, limit: number): VodHit[] => [
+  ...allMovies().filter((m) => m.title.toLowerCase().includes(q)).map((m): VodHit => ({ id: m.id, kind: 'movie', title: m.title, year: m.year, poster: m.poster })),
+  ...allSeries().filter((s) => s.title.toLowerCase().includes(q)).map((s): VodHit => ({ id: s.id, kind: 'series', title: s.title, year: s.year, poster: s.poster })),
+].slice(0, limit);
 export const listMovies = (a: VodListArgs) => page(allMovies(), a).map(withResume);
 export const getMovie = (id: number): Movie | undefined => {
   const m = allMovies().find((x) => x.id === id);

@@ -377,7 +377,10 @@ async fn grid_splits_slow_windows_and_remembers_the_slice() {
     let mut starts: Vec<i64> = p.iter().map(|p| p.start_utc).collect();
     starts.sort_unstable();
     let expected: Vec<i64> = (0..9).map(|i| 1_735_725_600 + i * 3600).collect();
-    assert_eq!(starts, expected, "every hour once, boundaries de-duplicated");
+    assert_eq!(
+        starts, expected,
+        "every hour once, boundaries de-duplicated"
+    );
 
     // The next window goes straight to the learned slice: no slow full-window request.
     let before = server.received_requests().await.unwrap().len();

@@ -1,8 +1,8 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { TextInput, UnstyledButton } from '@mantine/core';
+import { Skeleton, TextInput, UnstyledButton } from '@mantine/core';
 import { IconSearch } from '@tabler/icons-react';
 import { invoke } from '../../api/ipc';
 import { useCaps } from '../../api/queries';
@@ -13,6 +13,7 @@ import { PosterTile, type Tile } from '../../components/Poster/PosterTile';
 import { SkeletonList } from '../../components/Skeleton/SkeletonRow';
 import { EmptySource } from '../../pages/EmptySource';
 import { useUiStore } from '../../store/ui';
+import { useSparseList } from '../../lib/useSparseList';
 import { t } from '../../lib/i18n';
 import { gridColumns, progressOf, seasonsLabel } from './vod';
 import classes from './Vod.module.css';
@@ -46,34 +47,29 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
     queryKey: ['catalog', 'vodCats', kind],
     queryFn: () => invoke('list_vod_categories', { kind, withCounts: false }),
   });
-  const needsCounts = cats.data?.some((c) => c.countPending) ?? false;
-  const counts = useQuery({
-    queryKey: ['catalog', 'vodCatCounts', kind, cats.data?.map((c) => c.id)],
-    queryFn: () => invoke('list_vod_categories', { kind, withCounts: true }),
-    enabled: needsCounts,
-  });
-  const categories = counts.data ?? cats.data ?? [];
-  // Keep a category selected while its delayed count resolves, even if it turns out to be empty.
-  const selectedCategory = cats.data?.find((c) => c.id === categoryId);
-  const shownCategories = selectedCategory && !categories.some((c) => c.id === categoryId)
-    ? [...categories, selectedCategory]
-    : categories;
-  const list = useInfiniteQuery({
+  // Counts come from the catalog sync's cache; `countPending` marks one the server could not give.
+  const categories = cats.data ?? [];
+  const shownCategories = categories;
+  // Visible tile range, fed back from the virtualizer: only the pages covering it are requested.
+  const [range, setRange] = useState<[number, number]>([0, 0]);
+  // The grid is laid out at the total the first page reports, so the heading and scrollbar are
+  // right from the first response.
+  const list = useSparseList<Tile>({
     queryKey: ['catalog', 'vod', kind, categoryId, deferred],
-    initialPageParam: 0,
-    queryFn: async ({ pageParam }): Promise<Tile[]> => {
-      const args = { categoryId, query: deferred || null, offset: pageParam, limit: PAGE, compact: true };
-      return kind === 'movie' ? (await invoke('list_movies', args)).items.map(movieTile) : (await invoke('list_series', args)).items.map(seriesTile);
+    pageSize: PAGE,
+    fetchPage: async (offset, limit) => {
+      const args = { categoryId, query: deferred || null, offset, limit, compact: true };
+      if (kind === 'movie') {
+        const r = await invoke('list_movies', args);
+        return { items: r.items.map(movieTile), total: r.total };
+      }
+      const r = await invoke('list_series', args);
+      return { items: r.items.map(seriesTile), total: r.total };
     },
-    getNextPageParam: (last, pages) => (last.length < PAGE ? undefined : pages.length * PAGE),
-    placeholderData: (prev) => prev,
+    start: range[0],
+    end: range[1],
   });
-  const tiles = useMemo(() => {
-    // Pages can overlap when the library changes between requests: keep the first copy of an id.
-    const seen = new Set<number>();
-    return (list.data?.pages ?? []).flat().filter((x) => !seen.has(x.id) && (seen.add(x.id), true));
-  }, [list.data]);
-  const { hasNextPage, isFetchingNextPage, fetchNextPage } = list;
+  const count = list.count;
 
   useEffect(() => {
     if (!innerEl) return;
@@ -87,29 +83,33 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
   const cols = gridColumns(inner, MIN_TILE * tvScale, GAP);
   const tileW = cols > 0 ? (inner - GAP * (cols - 1)) / cols : MIN_TILE;
   const rowH = Math.round(tileW * 1.5 + TEXT_H * tvScale + GAP);
-  const rows = Math.ceil(tiles.length / cols);
+  const rows = cols > 0 ? Math.ceil(count / cols) : 0;
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({ count: rows, getScrollElement: () => scrollerRef.current, estimateSize: () => rowH, overscan: 3 });
   useEffect(() => virtualizer.measure(), [rowH, virtualizer]);
-  // Load the next page when the last rendered row (or the keyboard cursor) is within a few rows of the end.
-  const lastRow = virtualizer.getVirtualItems().at(-1)?.index ?? 0;
+  // Request the pages around the rendered rows and the keyboard cursor (a few rows ahead).
+  const virtualRows = virtualizer.getVirtualItems();
+  const firstRow = virtualRows[0]?.index ?? 0;
+  const lastRow = virtualRows.at(-1)?.index ?? 0;
   const activeRow = cols > 0 ? Math.floor(active / cols) : 0;
+  const wantStart = Math.min(firstRow, activeRow) * Math.max(cols, 1);
+  const wantEnd = (Math.max(lastRow, activeRow) + 4) * Math.max(cols, 1);
   useEffect(() => {
-    if (hasNextPage && !isFetchingNextPage && rows > 0 && Math.max(lastRow, activeRow) >= rows - 4) void fetchNextPage();
-  }, [lastRow, activeRow, rows, hasNextPage, isFetchingNextPage, fetchNextPage]);
+    setRange((r) => (r[0] === wantStart && r[1] === wantEnd ? r : [wantStart, wantEnd]));
+  }, [wantStart, wantEnd]);
   useEffect(() => setActive(0), [categoryId, deferred, kind]);
 
   const open = (i: number) => {
-    const tile = tiles[i];
+    const tile = list.get(i);
     if (tile) void navigate(`/${kind === 'movie' ? 'movies' : 'series'}/${tile.id}`);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (!tiles.length) return;
+    if (!count) return;
     const move = (to: number) => {
       e.preventDefault();
-      const n = Math.max(0, Math.min(tiles.length - 1, to));
+      const n = Math.max(0, Math.min(count - 1, to));
       setActive(n);
       virtualizer.scrollToIndex(Math.floor(n / cols), { align: 'auto' });
     };
@@ -124,7 +124,7 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
     else if (e.key === 'PageDown') move(active + cols * 3);
     else if (e.key === 'PageUp') move(active - cols * 3);
     else if (e.key === 'Home') move(0);
-    else if (e.key === 'End') move(tiles.length - 1);
+    else if (e.key === 'End') move(count - 1);
     else if (e.key === 'Enter') {
       e.preventDefault();
       open(active);
@@ -133,10 +133,8 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
 
   if (loaded && !hasSource) return <EmptySource />;
   const label = kind === 'movie' ? t('vod.grid.movies') : t('vod.grid.series');
-  const total = needsCounts && !counts.data ? null : categories.reduce((n, c) => n + c.count, 0);
-  // While pages remain, the heading shows the category's server count (exact unless searching).
-  const known = deferred ? null : categoryId == null ? total : categories.find((c) => c.id === categoryId)?.count;
-  const shown = !hasNextPage ? String(tiles.length) : known ? String(known) : `${tiles.length}+`;
+  const total = categories.some((c) => c.countPending) ? null : categories.reduce((n, c) => n + c.count, 0);
+  const shown = list.exact ? String(count) : `${count}+`;
 
   return (
     <div className={classes.page}>
@@ -166,7 +164,7 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
         <header className={classes.header}>
           <h1 className={classes.h1}>
             {label}
-            {list.data && <span className={classes.count}>{shown}</span>}
+            {!list.isLoading && <span className={classes.count}>{shown}</span>}
           </h1>
           <TextInput
             className={classes.search}
@@ -176,7 +174,7 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}
             onKeyDown={(e) => {
-              if (e.key === 'ArrowDown' && tiles.length) {
+              if (e.key === 'ArrowDown' && count) {
                 e.preventDefault();
                 e.stopPropagation();
                 scrollerRef.current?.focus();
@@ -188,7 +186,7 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
           <SkeletonList rows={6} label={t('loading.generic')} />
         ) : list.isError ? (
           <ErrorState message={t('vod.error')} onRetry={() => void list.refetch()} />
-        ) : tiles.length === 0 ? (
+        ) : count === 0 ? (
           <p className={classes.msg} style={{ paddingInline: 'var(--mantine-spacing-xl)' }}>{deferred || categoryId != null ? t('vod.empty') : t('vod.emptyLibrary')}</p>
         ) : (
           <div
@@ -204,13 +202,15 @@ export function VodBrowse({ kind }: { kind: VodKind }) {
           >
             <div className={classes.pad}>
             <div ref={setInnerEl} className={classes.inner} style={{ height: virtualizer.getTotalSize() }}>
-              {virtualizer.getVirtualItems().map((v) => (
+              {virtualRows.map((v) => (
                 <div key={v.key} role="row" aria-rowindex={v.index + 1} className={classes.row} style={{ height: rowH - GAP, transform: `translateY(${v.start}px)`, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: GAP }}>
-                  {tiles.slice(v.index * cols, v.index * cols + cols).map((tile, k) => {
+                  {Array.from({ length: Math.max(0, Math.min(cols, count - v.index * cols)) }, (_, k) => {
                     const i = v.index * cols + k;
+                    const tile = list.get(i);
+                    if (!tile) return <Skeleton key={i} className={classes.tileSkeleton} radius="md" />;
                     return (
                       <PosterTile
-                        key={tile.id}
+                        key={i}
                         id={`vt-${i}`}
                         tile={tile}
                         active={i === active}
