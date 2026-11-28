@@ -346,6 +346,7 @@ fn score_all(
         }
     }
     demote_repeats(programmes, &mut out);
+    demote_team_reairs(cat, &mut out);
     for ch in channels {
         let ms = matcher::match_channel(cat, follow, &ch.name, group_of(ch));
         if ms.is_empty() {
@@ -409,6 +410,50 @@ fn demote_repeats(programmes: &[ProgrammeRow], out: &mut [MatchRow]) {
         if !seen.insert((r.channel_id, r.m.league.clone(), t.clone())) {
             r.m.live = false;
             r.m.replay = true;
+        }
+    }
+}
+
+/// A later airing of a team game counts as a re-air when it starts this long after the first one.
+const TEAM_REAIR_WINDOW: i64 = 18 * 3600;
+
+/// Guides mark the odd re-air of a game live (a midnight repeat of the afternoon match). Two
+/// teams meet once a day, so a "live" airing of the same matchup that starts after every copy of
+/// the first airing has ended, within 18 hours, is a replay. Baseball is left alone:
+/// doubleheaders are two live games between the same teams on one day.
+fn demote_team_reairs(cat: &Catalog, out: &mut [MatchRow]) {
+    let mut games: HashMap<(String, Vec<String>), Vec<usize>> = HashMap::new();
+    for (i, r) in out.iter().enumerate() {
+        let team_league = cat
+            .league(&r.m.league)
+            .is_some_and(|l| l.kind == Kind::Team && l.sport != "baseball");
+        if !team_league || !r.m.live || r.m.teams.len() < 2 || r.source != "programme" {
+            continue;
+        }
+        let mut teams = r.m.teams.clone();
+        teams.sort();
+        games
+            .entry((r.m.league.clone(), teams))
+            .or_default()
+            .push(i);
+    }
+    for idx in games.into_values() {
+        let mut airings: Vec<(i64, i64, usize)> = idx
+            .into_iter()
+            .filter_map(|i| Some((out[i].start_utc?, out[i].end_utc?, i)))
+            .collect();
+        airings.sort_unstable();
+        let Some(&(first_start, mut first_end, _)) = airings.first() else {
+            continue;
+        };
+        for (start, end, i) in airings {
+            if start < first_end {
+                // Another copy of the first airing (overlapping): it can run longer.
+                first_end = first_end.max(end);
+            } else if start - first_start < TEAM_REAIR_WINDOW {
+                out[i].m.live = false;
+                out[i].m.replay = true;
+            }
         }
     }
 }

@@ -27,7 +27,8 @@ The header comment in `catalog.toml` is the format reference. In short:
   football | basketball | hockey | baseball | soccer; missing = other; motorsport leagues are always
   `motorsport`; it only drives the settings picker tabs), `tokens` (strong),
   `context` (risky tokens that need league context), `events` (marquee aliases, strong),
-  `exclude` (veto phrases, also used to hand off to a more specific series).
+  `exclude` (veto phrases, also used to hand off to a more specific series), `games` (team
+  leagues: generic game titles that are a game without a team in the title, §5).
 - **Team:** `key`, `name` (strong), `short`, `abbr` (versus patterns only), `city` (weak),
   `aliases` (strong), `weak`.
 - **`[sessions]`:** the session term lists. **`[words]`:** the replay, talk, sports-group and
@@ -205,9 +206,21 @@ to spaces. Tokens match on word boundaries only ("F1" must not match "F150").
 | Talk or magazine words (Live from, Tonight, Countdown, Postgame, Pregame, Insider, Report, Draft) | −30 |
 
 - **Threshold:** 50. Below that the candidate is dropped.
+- **Team aliases:** an alias inside a longer alias of another team doesn't name its own team
+  ("Los Angeles" in "Los Angeles Rams" isn't the Chargers; "City" in "Manchester City" isn't
+  Coventry). An alias two teams share at the same level ("LA", "United") names neither.
+- **League not named:** with no league token, event or context anywhere, one team is not enough
+  (nicknames are shared with other sports: "Mariners", "Capitals"). It takes a versus pattern or
+  two strong teams in the title or subtitle.
+- **Team leagues, guide listings:** the title or subtitle must name a team, or carry one of the
+  league's generic game titles (`games` in the catalog: "NFL Football", "Super Bowl", "Premier
+  League Soccer"). League shows that only name teams in the description don't count. A title with
+  talk words or an episode marker ("Episode 12", "Ep 14") counts only with a versus pattern.
 - **Team leagues:** a match counts when the league score passes and, if teams are picked, at least
   one followed team matched. A league-only match ("NFL Football", teams unknown) counts only when
   the user follows "All games".
+- **Motorsport:** a series title with no session term is the race only when the guide marks it
+  live, and never when it has talk words or an episode marker.
 - **Live:** the `LIVE` flag sets live. A guide that never sets flags (detected per source: no
   `LIVE` flag anywhere in the window) falls back to "live unless it has replay words". Those
   matches show "likely live" instead of "live". A source that *does* set flags is trusted: no
@@ -237,6 +250,9 @@ one match, and later one alert:
   marks live, starting within 12 hours of an earlier live airing of that session, is a
   broadcaster's delay and folds away. Once the original ends and leaves the list, the delayed
   airing shows on its own. Sessions a day apart (sprint vs. main qualifying) stay separate.
+- **Re-airs (team games):** at rebuild, a "live" airing of the same two teams that starts after
+  every copy of the first airing has ended, within 18 hours of it, is a replay (a midnight repeat
+  a guide still marks live). Baseball is exempt because of doubleheaders.
 - **Which channel leads:** favorite, then quality (4K > FHD > HD > unknown > SD), then guide data
   over a name-only match, then score, then the lowest channel number.
 - The rest go in `alternates` (best first). The card shows "+N"; its menu ("Also on") plays any

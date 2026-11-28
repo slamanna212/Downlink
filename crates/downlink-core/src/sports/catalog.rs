@@ -85,6 +85,8 @@ struct RawLeague {
     events: Vec<String>,
     #[serde(default)]
     exclude: Vec<String>,
+    #[serde(default)]
+    games: Vec<String>,
     #[serde(default, rename = "team")]
     teams: Vec<RawTeam>,
 }
@@ -160,6 +162,10 @@ pub struct League {
     pub context: Vec<Phrase>,
     pub events: Vec<Phrase>,
     pub exclude: Vec<Phrase>,
+    /// Team leagues: generic game titles ("NFL Football", "Super Bowl") that are a game even
+    /// when the title names no team. Without one of these, a team-league listing must name a
+    /// team itself.
+    pub games: Vec<Phrase>,
     pub teams: Vec<Team>,
 }
 
@@ -247,6 +253,9 @@ pub fn parse(text: &str) -> std::result::Result<Catalog, String> {
         if l.kind == "motorsport" && !l.teams.is_empty() {
             return Err(format!("motorsport league `{}` has teams", l.key));
         }
+        if l.kind == "motorsport" && !l.games.is_empty() {
+            return Err(format!("motorsport league `{}` has games", l.key));
+        }
         let mut team_keys = HashSet::new();
         for t in &l.teams {
             if t.key.trim().is_empty() || normalize(&t.name).is_empty() {
@@ -313,6 +322,7 @@ pub fn parse(text: &str) -> std::result::Result<Catalog, String> {
             context: phrases(&l.context),
             events: phrases(&l.events),
             exclude: phrases(&l.exclude),
+            games: phrases(&l.games),
             teams: l
                 .teams
                 .iter()
@@ -635,6 +645,92 @@ replay = ["Classic"]
             )[0]
             .league,
             "f2"
+        );
+    }
+
+    /// Shapes from a full-guide audit (invented titles): shared cities and club words, other
+    /// sports' nicknames, league shows, and series named by other events.
+    #[test]
+    fn embedded_catalog_audit_shapes() {
+        use crate::sports::matcher::{Candidate, Match, score_programme};
+        let c = catalog().unwrap();
+        let on = |title: &str, description: Option<&str>| -> Vec<Match> {
+            let cand = Candidate {
+                title,
+                description,
+                channel_name: "Channel 5",
+                group_name: Some("Sports"),
+                ..Default::default()
+            };
+            score_programme(c, &cand, false)
+        };
+        let teams = |title: &str| -> Vec<String> {
+            on(title, None)
+                .first()
+                .map(|m| m.teams.clone())
+                .unwrap_or_default()
+        };
+
+        // Cities and club words name only the team whose full name holds them.
+        assert_eq!(
+            teams("NFL Football : Green Bay Packers at Los Angeles Rams ᴸᶦᵛᵉ"),
+            ["gb", "lar"]
+        );
+        assert_eq!(
+            teams("NFL Football : New York Jets at Miami Dolphins ᴸᶦᵛᵉ"),
+            ["mia", "nyj"]
+        );
+        assert_eq!(
+            teams("NHL Hockey : Winnipeg Jets at New York Islanders ᴸᶦᵛᵉ"),
+            ["nyi", "wpg"]
+        );
+        assert_eq!(
+            teams("New Orleans Pelicans @ LA Clippers ᴸᶦᵛᵉ"),
+            ["lac", "nop"]
+        );
+        assert_eq!(
+            teams("Premier League Soccer : Leeds United vs. Coventry City ᴸᶦᵛᵉ"),
+            ["cov", "lee"]
+        );
+        assert_eq!(
+            teams("Premier League Soccer : Arsenal vs. Manchester City ᴸᶦᵛᵉ"),
+            ["ars", "mci"]
+        );
+
+        // Other sports' clubs with a big-league nickname.
+        assert!(on("Coastal League : Harbor Mariners v Bay FC ᴸᶦᵛᵉ", None).is_empty());
+        assert!(on("Desert T20 : Gulf Giants v Desert Capitals ᴸᶦᵛᵉ", None).is_empty());
+        assert!(on("Raptors Game Day ᴸᶦᵛᵉ", None).is_empty());
+
+        // League shows, features and placeholders.
+        let blurb = Some("Chelsea, Arsenal and Liverpool all in action in the Premier League.");
+        for t in [
+            "Premier League Weekend : Episode 12 ᴸᶦᵛᵉ",
+            "Premier League Live ᴸᶦᵛᵉ",
+            "Premier League Legends : A Striker",
+            "Premier League Preview : Episode 12",
+            "NFL Holiday Pregame ᴸᶦᵛᵉ",
+            "Upcoming - MLB Network Strike Zone",
+            "Big League Wiffle Ball : 2026 World Series: Dallas Pandas vs. New York Green Apples",
+            "MotoMini World Series Final : 160cc Super Final Race ᴸᶦᵛᵉ",
+        ] {
+            assert!(on(t, blurb).is_empty(), "{t}");
+        }
+        assert!(on("Lakeside Raptors in 30 : Nets vs. Raptors", None)[0].replay);
+
+        // Motorsport: other series' events, shows and features.
+        assert!(on("GT Cup Europe : World Finals: Highlights", None).is_empty());
+        assert!(on("NASCAR Canada Series Highlights", None).is_empty());
+        assert!(on("MotoGP: Factory Floor : Lakeside ᴸᶦᵛᵉ", None).is_empty());
+        assert!(on("Live MotoGP : 2026 Awards ᴸᶦᵛᵉ", None).is_empty());
+        let s = |t: &str| on(t, None).first().map(|m| (m.league.clone(), m.session));
+        assert_eq!(
+            s("Ted's Notebook : Lakeside Grand Prix: Race ᴸᶦᵛᵉ"),
+            Some(("f1".into(), Some("shows")))
+        );
+        assert_eq!(
+            s("The F1 Show : Lakeside ᴸᶦᵛᵉ"),
+            Some(("f1".into(), Some("shows")))
         );
     }
 

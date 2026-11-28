@@ -18,7 +18,7 @@ pub const THRESHOLD: i64 = 50;
 
 /// Bump on any change to scoring or session rules here: stored matches are rebuilt at startup
 /// when this (or the catalog text) changes. See `catalog::fingerprint`.
-pub const MATCHER_VERSION: u32 = 3;
+pub const MATCHER_VERSION: u32 = 4;
 
 const TOKEN_TITLE: i64 = 40;
 const TOKEN_OTHER: i64 = 25;
@@ -172,9 +172,17 @@ struct Facts {
     /// "from 19xx/20xx" in the title or subtitle.
     from_year: bool,
     talk: bool,
+    /// "Episode 12" / "Ep 14" in the title or subtitle: a series episode, never a live event.
+    episodic: bool,
     session: Option<&'static str>,
     sports_group: bool,
     category: bool,
+}
+
+fn episodic(words: &[String]) -> bool {
+    words.windows(2).any(|w| {
+        matches!(w[0].as_str(), "episode" | "ep") && w[1].chars().all(|c| c.is_ascii_digit())
+    })
 }
 
 fn from_year(words: &[String]) -> bool {
@@ -251,6 +259,7 @@ fn facts(cat: &Catalog, h: &Hay) -> Facts {
     Facts {
         from_year: from_year(&h.title) || from_year(&h.subtitle),
         talk: any(&h.title, &w.talk),
+        episodic: episodic(&h.title) || episodic(&h.subtitle),
         session: classify_session(cat, &h.title, &h.subtitle),
         sports_group: any(&h.group, &w.sports_groups),
         category: h
@@ -267,11 +276,31 @@ enum Level {
     Strong,
 }
 
+#[derive(Clone, Copy)]
 struct Occ {
     start: usize,
     end: usize,
     team: usize,
     level: Level,
+}
+
+/// Team alias occurrences in `field`, with the ones that do not really name that team removed:
+/// - inside a longer alias of another team ("Los Angeles" inside "Los Angeles Rams", "City"
+///   inside "Manchester City", "Jets" inside "Winnipeg Jets");
+/// - the same words as another team's alias at the same or a stronger level ("LA" for both
+///   Los Angeles teams, "United" for three clubs): ambiguous, so it names neither.
+fn resolved(league: &League, field: &[String]) -> Vec<Occ> {
+    let occ = occurrences(league, field);
+    occ.iter()
+        .filter(|o| {
+            !occ.iter().any(|p| {
+                p.team != o.team
+                    && ((p.start <= o.start && o.end <= p.end && p.end - p.start > o.end - o.start)
+                        || (p.start == o.start && p.end == o.end && p.level >= o.level))
+            })
+        })
+        .copied()
+        .collect()
 }
 
 fn occurrences(league: &League, field: &[String]) -> Vec<Occ> {
@@ -300,7 +329,7 @@ fn occurrences(league: &League, field: &[String]) -> Vec<Occ> {
 /// A versus pattern (`A at B`, `A vs B`, `A v B`, `A @ B`) between two different teams whose
 /// aliases are allowed to count.
 fn versus(league: &League, field: &[String], with_context: bool) -> Option<(usize, usize)> {
-    let occ = occurrences(league, field);
+    let occ = resolved(league, field);
     let ok = |o: &Occ| o.level == Level::Strong || with_context;
     for a in occ.iter().filter(|o| ok(o)) {
         let Some(conn) = field.get(a.end) else {
@@ -321,19 +350,20 @@ fn versus(league: &League, field: &[String], with_context: bool) -> Option<(usiz
 
 /// Best alias level per team in the given fields (abbreviations never count here).
 fn team_levels(league: &League, fields: &[&[String]]) -> Vec<Option<Level>> {
-    league
-        .teams
-        .iter()
-        .map(|t| {
-            if t.strong.iter().any(|p| fields.iter().any(|f| has(f, p))) {
-                Some(Level::Strong)
-            } else if t.weak.iter().any(|p| fields.iter().any(|f| has(f, p))) {
-                Some(Level::Weak)
-            } else {
-                None
+    let mut levels: Vec<Option<Level>> = vec![None; league.teams.len()];
+    for f in fields {
+        for o in resolved(league, f) {
+            if o.level == Level::Abbr {
+                continue;
             }
-        })
-        .collect()
+            if let Some(slot) = levels.get_mut(o.team)
+                && slot.is_none_or(|l| l < o.level)
+            {
+                *slot = Some(o.level);
+            }
+        }
+    }
+    levels
 }
 
 struct LeagueScore {
@@ -344,6 +374,12 @@ struct LeagueScore {
     /// That evidence is in the title or subtitle itself (league token, event or team), not only
     /// the channel name or description.
     own: bool,
+    /// Team leagues: a team (or a versus pattern) in the title or subtitle.
+    own_team: bool,
+    /// Team leagues: a versus pattern between two of this league's teams.
+    versus: bool,
+    /// Team leagues: a generic game title ("NFL Football") in the title or subtitle.
+    game_title: bool,
     event: bool,
     replay: bool,
 }
@@ -387,6 +423,7 @@ fn score_league(
     let mut teams = Vec::new();
     let mut team_evidence = false;
     let mut own_team = false;
+    let mut versus_found = false;
     if league.kind == Kind::Team && !league.teams.is_empty() {
         let with_context = league_score >= CONTEXT;
         // Title and subtitle first; the description only when those name no team.
@@ -405,6 +442,19 @@ fn score_league(
                 }
             }
         }
+        // A team named in the title/subtitle (not just the description or channel name).
+        let own_levels = team_levels(league, &own_text);
+        // Without the league named anywhere, one team is not enough: a nickname is shared with
+        // clubs in other sports ("Mariners", "Capitals"), and a team's own show ("Raptors Game
+        // Day") is not a game. It takes a versus pattern or two strong teams in the listing.
+        let own_strong = own_levels
+            .iter()
+            .filter(|l| **l == Some(Level::Strong))
+            .count();
+        let unnamed_single = league_score == 0 && vs.is_none() && own_strong < 2;
+        if unnamed_single {
+            levels.iter_mut().for_each(|l| *l = None);
+        }
         let strong: Vec<usize> = (0..levels.len())
             .filter(|&i| levels[i] == Some(Level::Strong))
             .collect();
@@ -422,14 +472,14 @@ fn score_league(
             score += VERSUS;
         }
         team_evidence = !strong.is_empty() || !weak.is_empty();
-        // A team named in the title/subtitle (not just the description or channel name).
-        let own_levels = team_levels(league, &own_text);
+        versus_found = vs.is_some();
         own_team = vs.is_some()
-            || own_levels.iter().enumerate().any(|(i, l)| match l {
-                Some(Level::Strong) => true,
-                Some(Level::Weak | Level::Abbr) => with_context && weak.contains(&i),
-                None => false,
-            });
+            || (!unnamed_single
+                && own_levels.iter().enumerate().any(|(i, l)| match l {
+                    Some(Level::Strong) => true,
+                    Some(Level::Weak | Level::Abbr) => with_context && weak.contains(&i),
+                    None => false,
+                }));
         let matched: HashSet<usize> = strong.into_iter().chain(weak).collect();
         teams = league
             .teams
@@ -473,6 +523,9 @@ fn score_league(
         teams,
         evidence: league_score > 0 || team_evidence,
         own: own_league || own_team,
+        own_team,
+        versus: versus_found,
+        game_title: own_text.iter().any(|o| any(o, &league.games)),
         event,
         replay,
     }
@@ -520,6 +573,17 @@ fn score_all(
                 if origin == Origin::Channel && s.teams.is_empty() {
                     continue;
                 }
+                // A guide listing is a game when it names a team itself, or carries a generic
+                // game title ("NFL Football"). Studio shows, features and magazines that only
+                // name the league ("Premier League Weekend", teams in the blurb) are not.
+                if origin == Origin::Programme && !s.own_team && !s.game_title {
+                    continue;
+                }
+                // Talk and episode listings ("NFL Thanksgiving Day: Pregame", "Raptors Game Day",
+                // "… : Episode 12") are a game only with a versus pattern in the title.
+                if (f.talk || f.episodic) && !s.versus {
+                    continue;
+                }
                 None
             }
             Kind::Motorsport => match f.session {
@@ -527,7 +591,8 @@ fn score_all(
                 None if origin == Origin::Channel && !s.event => continue,
                 // A series match with no session term is the race only when the guide itself
                 // marks it live; an inferred "likely live" bare title is not enough.
-                None if live && !live_inferred => Some("race"),
+                // Never for a show, feature or episode ("Awards", "Ep 14 …").
+                None if live && !live_inferred && !f.talk && !f.episodic => Some("race"),
                 None => continue,
             },
         };

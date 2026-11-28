@@ -26,7 +26,24 @@ key = "nfl"
 name = "NFL"
 kind = "team"
 tokens = ["NFL", "NFL Football", "National Football League"]
+games = ["NFL Football"]
 exclude = ["NFL Live", "Inside the NFL", "NFL Total Access", "Good Morning Football"]
+
+  [[league.team]]
+  key = "lar"
+  name = "Los Angeles Rams"
+  short = "Rams"
+  abbr = "LAR"
+  city = "Los Angeles"
+  weak = ["LA"]
+
+  [[league.team]]
+  key = "lac"
+  name = "Los Angeles Chargers"
+  short = "Chargers"
+  abbr = "LAC"
+  city = "Los Angeles"
+  weak = ["LA"]
 
   [[league.team]]
   key = "chi"
@@ -68,6 +85,7 @@ exclude = ["NFL Live", "Inside the NFL", "NFL Total Access", "Good Morning Footb
 key = "mlb"
 name = "MLB"
 kind = "team"
+sport = "baseball"
 tokens = ["MLB", "MLB Baseball", "Major League Baseball"]
 exclude = ["MLB Tonight"]
 
@@ -104,6 +122,7 @@ key = "nhl"
 name = "NHL"
 kind = "team"
 tokens = ["NHL", "NHL Hockey"]
+games = ["NHL Hockey"]
 events = ["Winter Classic"]
 
   [[league.team]]
@@ -125,6 +144,7 @@ key = "nba"
 name = "NBA"
 kind = "team"
 tokens = ["NBA", "NBA Basketball"]
+games = ["NBA Basketball"]
 
   [[league.team]]
   key = "sac"
@@ -201,6 +221,29 @@ tokens = ["Premier League"]
   short = "Chelsea"
   abbr = "CHE"
   city = "London"
+
+  [[league.team]]
+  key = "eve"
+  name = "Everton"
+  short = "Everton"
+  abbr = "EVE"
+  city = "Liverpool"
+
+  [[league.team]]
+  key = "mci"
+  name = "Manchester City"
+  short = "Man City"
+  abbr = "MCI"
+  city = "Manchester"
+  weak = ["City"]
+
+  [[league.team]]
+  key = "cov"
+  name = "Coventry City"
+  short = "Coventry"
+  abbr = "COV"
+  city = "Coventry"
+  weak = ["City"]
 
 [[league]]
 key = "moto2"
@@ -751,4 +794,94 @@ fn generic_cup_titles_are_not_nascar() {
         ..prog("Cup: Race at the Speedway")
     };
     assert_eq!(leagues(&score_programme(cat(), &c, true)), ["nascar_cup"]);
+}
+
+#[test]
+fn a_city_inside_another_teams_name_is_not_that_team() {
+    // "Los Angeles" is the Chargers' city too, but here it is part of "Los Angeles Rams".
+    let m = one(
+        "NFL Football: Green Bay Packers at Los Angeles Rams",
+        LIVE,
+        true,
+    )
+    .unwrap();
+    assert_eq!(m.teams, ["lar", "gb"]);
+    // "City" belongs to two clubs and sits inside both full names.
+    let m = one(
+        "Premier League: Coventry City vs. Manchester City",
+        LIVE,
+        true,
+    )
+    .unwrap();
+    assert_eq!(m.teams, ["mci", "cov"]);
+    // "Liverpool" is Everton's city and Liverpool's name: the name wins.
+    let m = one("Premier League: Everton v Liverpool", LIVE, true).unwrap();
+    assert_eq!(m.teams, ["liv", "eve"]);
+}
+
+#[test]
+fn an_alias_shared_by_two_teams_names_neither() {
+    // "LA" is weak for both Los Angeles teams: only the strong nickname counts.
+    let m = one("NFL Football: Bears @ LA Chargers", LIVE, true).unwrap();
+    assert_eq!(m.teams, ["lac", "chi"]);
+    let m = one("NFL Football: LA at Chicago Bears", LIVE, true).unwrap();
+    assert_eq!(m.teams, ["chi"]);
+}
+
+#[test]
+fn one_team_without_the_league_named_is_not_a_game() {
+    // A nickname shared with a club in another sport, or a team's own show.
+    assert!(one("Coastal League: Harbor Mariners v Bay FC", LIVE, true).is_none());
+    assert!(one("Celtics Game Day", LIVE, true).is_none());
+    assert!(one("Packers Tonight", LIVE, true).is_none());
+    // Two strong teams, with or without a connector, still are.
+    assert_eq!(
+        one("Bears - Packers", LIVE, true).unwrap().teams,
+        ["chi", "gb"]
+    );
+    assert_eq!(
+        one("Bears at Packers", LIVE, true).unwrap().teams,
+        ["chi", "gb"]
+    );
+}
+
+#[test]
+fn league_shows_without_a_team_in_the_title_are_not_games() {
+    let with_blurb = |title: &'static str| Candidate {
+        description: Some("Chicago Bears and Green Bay Packers news ahead of the NFL weekend."),
+        flags: LIVE,
+        ..prog(title)
+    };
+    for t in [
+        "NFL Weekend : Episode 12",
+        "NFL Legends : A Running Back",
+        "NFL Holiday: Pregame",
+        "NFL Overtime",
+    ] {
+        let v = score_programme(cat(), &with_blurb(t), true);
+        assert!(v.is_empty(), "{t}: {v:?}");
+    }
+    // A generic game title is a game even with the teams only in the blurb.
+    let v = score_programme(cat(), &with_blurb("NFL Football"), true);
+    assert_eq!(v[0].teams, ["chi", "gb"]);
+}
+
+#[test]
+fn talk_and_episode_titles_need_a_versus_pattern() {
+    assert!(one("NFL Football: Chicago Bears Pregame", LIVE, true).is_none());
+    assert!(one("NFL Football: Episode 4", LIVE, true).is_none());
+    let m = one(
+        "NFL Football Live from Chicago: Bears vs. Packers",
+        LIVE,
+        true,
+    )
+    .unwrap();
+    assert_eq!(m.teams, ["chi", "gb"]);
+}
+
+#[test]
+fn a_bare_series_show_or_episode_is_not_the_race() {
+    assert!(one("MotoGP Tonight", LIVE, true).is_none());
+    assert!(one("MotoGP: Garage Life : Ep 14 Lakeside", LIVE, true).is_none());
+    assert_eq!(one("MotoGP", LIVE, true).unwrap().session, Some("race"));
 }

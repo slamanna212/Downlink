@@ -8,6 +8,8 @@
 #   context   risky tokens that only count when the league already has context (§2.2)
 #   events    motorsport only: marquee event aliases, strong
 #   exclude   phrases that veto a match for this league (talk shows, more specific series)
+#   games     team only: generic game titles that are a game even when no team is in the title
+#             ("NFL Football"); otherwise a team-league listing must name a team itself
 #
 # Team fields:
 #   key, name (full, strong), short (nickname), abbr, city (always weak)
@@ -57,7 +59,7 @@ filler = [
   "No Game Today", "No Game Scheduled", "No Games Scheduled", "No Game", "No Games", "No Event",
   "No Events", "No Event Scheduled", "No Programming", "Off Air", "Offseason", "Off Season",
   "Programming Resumes", "Next Game", "Coming Up", "Coming Soon", "Stay Tuned", "To Be Announced",
-  "Event Not Started", "Event Ended", "Off The Air",
+  "Event Not Started", "Event Ended", "Off The Air", "Upcoming",
 ]
 feeds = [
   "On-Board", "Onboard", "On Board", "On-Board Camera", "Onboard Camera", "Driver Tracker",
@@ -67,7 +69,7 @@ feeds = [
 replay = [
   "Classic", "Classics", "Instant Classic", "Replay", "Encore", "Rewind", "Greatest Games",
   "Re-air", "Reair", "Rerun", "Re-run", "Rebroadcast", "Condensed", "Condensed Game", "Vault",
-  "Archive", "Memorable Games", "Best of", "The Best of", "Flashback", "Retro",
+  "Archive", "Memorable Games", "Best of", "The Best of", "Flashback", "Retro", "in 30", "in 60",
 ]
 talk = [
   "Postgame", "Post-game", "Pregame", "Pre-game", "Live from", "Tonight", "Countdown", "Insider",
@@ -104,6 +106,10 @@ tokens = [
   "NFL", "NFL Football", "National Football League", "Sunday Night Football",
   "Monday Night Football", "Thursday Night Football", "Super Bowl", "Pro Bowl Games",
   "AFC Championship", "NFC Championship", "NFL Wild Card", "NFL Playoffs",
+]
+games = [
+  "NFL Football", "Sunday Night Football", "Monday Night Football", "Thursday Night Football",
+  "Super Bowl", "AFC Championship", "NFC Championship", "NFL Wild Card",
 ]
 exclude = [
   "NFL Live", "Inside the NFL", "NFL Total Access", "Good Morning Football", "NFL GameDay",
@@ -367,8 +373,14 @@ kind = "team"
 sport = "baseball"
 tokens = [
   "MLB", "MLB Baseball", "Major League Baseball", "Sunday Night Baseball", "Friday Night Baseball",
-  "World Series", "ALCS", "NLCS", "ALDS", "NLDS", "American League Championship Series",
+  "ALCS", "NLCS", "ALDS", "NLDS", "American League Championship Series",
   "National League Championship Series", "MLB Wild Card", "MLB All-Star Game", "MLB Postseason",
+]
+# Other sports have world series too (wiffle ball, poker, minibikes, college baseball).
+context = ["World Series"]
+games = [
+  "MLB Baseball", "Sunday Night Baseball", "Friday Night Baseball", "World Series", "ALCS", "NLCS",
+  "ALDS", "NLDS", "MLB Wild Card", "MLB All-Star Game",
 ]
 exclude = [
   "MLB Tonight", "MLB Central", "MLB Now", "Quick Pitch", "Intentional Talk", "Baseball Tonight",
@@ -625,6 +637,7 @@ tokens = [
   "NBA", "NBA Basketball", "National Basketball Association", "NBA Finals", "NBA Playoffs",
   "NBA Cup", "NBA Conference Finals", "NBA Play-In", "NBA All-Star Game",
 ]
+games = ["NBA Basketball", "NBA Finals", "NBA Cup", "NBA Play-In", "NBA All-Star Game"]
 exclude = [
   "Inside the NBA", "NBA Today", "NBA GameTime", "NBA Countdown", "NBA Tip-Off", "NBA Action",
   "NBA 2K", "NBA Draft", "NBA Inside Stuff", "NBA Rooks", "NBA Summer League", "G League", "WNBA",
@@ -874,6 +887,10 @@ sport = "hockey"
 tokens = [
   "NHL", "NHL Hockey", "National Hockey League", "Hockey Night in Canada", "Stanley Cup Final",
   "Stanley Cup Playoffs", "Winter Classic", "Stadium Series", "Heritage Classic",
+]
+games = [
+  "NHL Hockey", "Hockey Night in Canada", "Stanley Cup Final", "Winter Classic", "Stadium Series",
+  "Heritage Classic",
 ]
 exclude = [
   "NHL Tonight", "NHL on the Fly", "NHL Now", "In the Crease", "Hockey Central", "Hockey Tonight",
@@ -1141,6 +1158,7 @@ tokens = [
   "MLS", "MLS Soccer", "Major League Soccer", "MLS Cup", "MLS Cup Playoffs", "MLS Season Pass",
   "MLS All-Star Game", "Leagues Cup",
 ]
+games = ["MLS Soccer", "MLS Cup", "MLS All-Star Game"]
 exclude = [
   "MLS 360", "MLS Wrap-Up", "MLS Countdown", "Extratime", "MLS NEXT", "MLS NEXT Pro", "NWSL",
   "USL",
@@ -1405,6 +1423,7 @@ name = "Premier League"
 kind = "team"
 sport = "soccer"
 tokens = ["Premier League", "English Premier League", "EPL", "Barclays Premier League"]
+games = ["Premier League Soccer", "Premier League Football"]
 exclude = [
   "Indian Premier League", "IPL", "Caribbean Premier League", "Bangladesh Premier League",
   "Lanka Premier League", "Women's Premier League", "Premier League Darts",
@@ -1599,7 +1618,10 @@ key = "f1"
 name = "Formula 1"
 kind = "motorsport"
 group = "open_wheel"
-tokens = ["Formula 1", "Formula One", "F1", "FIA Formula One World Championship", "F1 Grand Prix"]
+tokens = [
+  "Formula 1", "Formula One", "F1", "FIA Formula One World Championship", "F1 Grand Prix",
+  "Ted's Notebook",
+]
 events = [
   "Monaco Grand Prix", "Monaco GP", "Las Vegas Grand Prix", "Las Vegas GP", "Bahrain Grand Prix",
   "Saudi Arabian Grand Prix", "Chinese Grand Prix", "Miami Grand Prix",
@@ -1609,7 +1631,7 @@ events = [
   "Mexican Grand Prix", "São Paulo Grand Prix", "Abu Dhabi Grand Prix",
 ]
 exclude = [
-  "F1 Academy", "F1 TV", "F1 The Movie", "Drive to Survive", "The F1 Show", "F1 Esports",
+  "F1 Academy", "F1 TV", "F1 The Movie", "Drive to Survive", "F1 Esports",
   "F1 Sim Racing", "Formula 2", "Formula 3", "Grand Prix of Long Beach", "Long Beach Grand Prix",
   "Grand Prix of St. Petersburg", "Detroit Grand Prix",
 ]
@@ -1701,6 +1723,7 @@ events = [
 exclude = [
   "Xfinity", "O'Reilly", "Busch Series", "Nationwide Series", "Truck", "Trucks", "Craftsman",
   "ARCA", "Whelen Modified", "Euro Series", "Pinty's", "NASCAR Mexico", "eNASCAR", "iRacing",
+  "Canada Series", "NASCAR Canada",
 ]
 
 [[league]]
@@ -1837,7 +1860,10 @@ events = [
   "Catalan Grand Prix", "French Grand Prix", "German Grand Prix", "Czech Grand Prix",
   "Thai Grand Prix", "Indonesian Grand Prix", "Malaysian Grand Prix", "Portuguese Grand Prix",
 ]
-exclude = ["Moto2", "Moto3", "MotoE", "Moto E", "Red Bull Rookies Cup", "Rookies Cup", "JuniorGP"]
+exclude = [
+  "Moto2", "Moto3", "MotoE", "Moto E", "Red Bull Rookies Cup", "Rookies Cup", "JuniorGP",
+  "Factory Floor",
+]
 
 [[league]]
 key = "moto2"
@@ -1961,8 +1987,9 @@ tokens = [
   "World of Outlaws", "World of Outlaws Sprint Cars", "World of Outlaws Late Models",
   "World of Outlaws Sprint Car Series", "World of Outlaws Late Model Series",
 ]
-context = ["WoO", "Outlaws", "DIRTcar", "Sprint Cars", "Late Models"]
-events = ["Knoxville Nationals", "Kings Royal", "Dirt Late Model Dream", "World Finals"]
+# "World Finals" is also Ferrari Challenge, Lamborghini Super Trofeo and more.
+context = ["WoO", "Outlaws", "DIRTcar", "Sprint Cars", "Late Models", "World Finals"]
+events = ["Knoxville Nationals", "Kings Royal", "Dirt Late Model Dream"]
 exclude = ["High Limit", "Street Outlaws"]
 
 [[league]]

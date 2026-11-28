@@ -329,3 +329,42 @@ fn fts_phrases_are_quoted_and_safe() {
     assert_eq!(fts_phrase("NOT OR AND").as_deref(), Some("\"NOT OR AND\""));
     assert_eq!(fts_phrase("&&"), None);
 }
+
+fn game(channel_id: i64, start: i64, hours: i64, league: &str, teams: &[&str]) -> MatchRow {
+    MatchRow {
+        channel_id,
+        start_utc: Some(start),
+        end_utc: Some(start + hours * 3600),
+        m: Match {
+            league: league.into(),
+            teams: teams.iter().map(|t| (*t).to_owned()).collect(),
+            session: None,
+            live: true,
+            live_inferred: false,
+            replay: false,
+            score: 100,
+        },
+        source: "programme",
+    }
+}
+
+#[test]
+fn a_later_live_airing_of_the_same_game_is_a_reair() {
+    let h = 3600;
+    let mut rows = vec![
+        // The match on two channels, one opening early with its own build-up.
+        game(1, NOW, 4, "epl", &["eve", "liv"]),
+        game(2, NOW + h + h / 2, 2, "epl", &["liv", "eve"]),
+        // The guide marks a late-night repeat live.
+        game(3, NOW + 13 * h, 2, "epl", &["eve", "liv"]),
+        // Next day's fixture between the same clubs is its own game.
+        game(3, NOW + 30 * h, 2, "epl", &["eve", "liv"]),
+        // A baseball doubleheader: two live games the same day.
+        game(4, NOW, 3, "mlb", &["sf", "stl"]),
+        game(4, NOW + 4 * h, 3, "mlb", &["sf", "stl"]),
+    ];
+    demote_team_reairs(&CAT, &mut rows);
+    let live: Vec<bool> = rows.iter().map(|r| r.m.live).collect();
+    assert_eq!(live, [true, true, false, true, true, true]);
+    assert!(rows[2].m.replay);
+}
